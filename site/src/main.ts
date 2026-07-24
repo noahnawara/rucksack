@@ -79,17 +79,17 @@ const selectPrompt = (elements: CopyElements): void => {
 };
 
 const showCopySuccess = (elements: CopyElements): void => {
-  elements.buttonText.textContent = "agent prompt copied";
+  elements.buttonText.textContent = "setup prompt copied";
   elements.button.classList.add("is-copied");
   elements.status.dataset.state = "success";
-  elements.status.textContent = "agent prompt copied.";
+  elements.status.textContent = "setup prompt copied.";
 };
 
 const showCopyFailure = (elements: CopyElements): void => {
-  elements.buttonText.textContent = "select the agent prompt";
+  elements.buttonText.textContent = "select the setup prompt";
   elements.status.dataset.state = "error";
   elements.status.textContent =
-    "rucksack stopped copying the agent prompt.\n\n" +
+    "rucksack stopped copying the setup prompt.\n\n" +
     "your browser blocked clipboard access.\n\n" +
     "you — select the prompt and copy it.";
   selectPrompt(elements);
@@ -98,7 +98,7 @@ const showCopyFailure = (elements: CopyElements): void => {
 const copyPrompt = async (elements: CopyElements): Promise<void> => {
   const prompt = elements.prompt.textContent;
   if (prompt === null) {
-    throw new Error("The canonical install prompt has no text content");
+    throw new Error("The canonical setup prompt has no text content");
   }
 
   if (navigator.clipboard === undefined) {
@@ -110,7 +110,7 @@ const copyPrompt = async (elements: CopyElements): Promise<void> => {
     await navigator.clipboard.writeText(prompt);
     showCopySuccess(elements);
   } catch (error: unknown) {
-    console.warn("copy_agent_prompt_failed", {
+    console.warn("copy_setup_prompt_failed", {
       error,
       promptLength: prompt.length,
     });

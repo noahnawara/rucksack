@@ -42,14 +42,21 @@ test("shows one promise, one distilled commute pass, one action, and the live st
     }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "copy agent prompt" }),
+    page.getByRole("button", { name: "copy setup prompt" }),
   ).toBeVisible();
-  await expect(page.getByText("packed", { exact: true })).toBeVisible();
+  await expect(page.locator(".pixel-backpack")).toHaveCount(3);
+  await expect(page.locator(".pass-state")).toHaveText("packed");
   await expect(
-    page.getByRole("img", { name: "wifi to hotspot" }),
+    page.getByRole("img", { name: "office wifi to phone hotspot" }),
   ).toBeVisible();
   await expect(
-    page.getByText("agent keeps running", { exact: true }),
+    page.getByText("seamless commute", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "close the lid. keep steering from your phone.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", {
@@ -58,6 +65,16 @@ test("shows one promise, one distilled commute pass, one action, and the live st
     }),
   ).toBeVisible();
   await expect(page.getByText("pack → connect hotspot → go")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      level: 2,
+      name: "packed means you can leave.",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("phone hotspot has internet")).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "project" }),
+  ).toContainText("security");
   await expect(
     page.getByRole("link", {
       name: "rucksack on GitHub; 1,234 stars",
@@ -75,17 +92,15 @@ test("renders and copies the canonical prompt byte for byte", async ({
   const canonicalPrompt = await readCanonicalPrompt();
 
   await expect(page.locator("#install-prompt")).toHaveText(canonicalPrompt);
-  await page.getByRole("button", { name: "copy agent prompt" }).click();
+  await page.getByRole("button", { name: "copy setup prompt" }).click();
 
   const clipboardText = await page.evaluate(
     async (): Promise<string> => navigator.clipboard.readText(),
   );
   expect(clipboardText).toBe(canonicalPrompt);
-  await expect(
-    page.getByRole("button", { name: "agent prompt copied" }),
-  ).toBeVisible();
+  await expect(page.locator(".copy-text")).toHaveText("setup prompt copied");
   await expect(page.locator("#copy-status")).toHaveText(
-    "agent prompt copied.",
+    "setup prompt copied.",
   );
   await expect(page.locator("#manual-copy")).not.toBeVisible();
 });
@@ -109,11 +124,11 @@ test("gives a direct manual-copy handoff when clipboard access fails", async ({
   });
   await page.goto("/");
 
-  await page.getByRole("button", { name: "copy agent prompt" }).click();
+  await page.getByRole("button", { name: "copy setup prompt" }).click();
 
   const status = page.locator("#copy-status");
   await expect(status).toContainText(
-    "rucksack stopped copying the agent prompt.",
+    "rucksack stopped copying the setup prompt.",
   );
   await expect(status).toContainText(
     "your browser blocked clipboard access.",
@@ -201,7 +216,6 @@ test("keeps every pass phrase on one line at 320 pixels", async ({
     ".pass-state",
     ".route-point",
     ".route-result",
-    ".copy-text",
   ] as const;
 
   const phraseLineCounts = await page.evaluate(
@@ -331,9 +345,9 @@ test("shows the final pass state without motion when reduced motion is requested
   await page.goto("/");
 
   await expect(page.locator("#pass-stage")).not.toHaveClass(/is-running/);
-  await expect(page.getByText("packed", { exact: true })).toBeVisible();
+  await expect(page.locator(".pass-state")).toHaveText("packed");
   await expect(
-    page.getByText("agent keeps running", { exact: true }),
+    page.getByText("seamless commute", { exact: true }),
   ).toBeVisible();
 
   const runningAnimations = await page.evaluate(
@@ -361,10 +375,10 @@ test("keeps the page and prompt readable without JavaScript", async ({
   ).toBeVisible();
   await expect(page.locator("#install-prompt")).not.toBeEmpty();
   await expect(
-    page.getByText("open the prompt below and copy it into your agent."),
+    page.getByText("open the setup prompt below and copy it into your agent."),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "copy agent prompt" }),
+    page.getByRole("button", { name: "copy setup prompt" }),
   ).toHaveCount(0);
 
   await context.close();
