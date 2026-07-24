@@ -377,6 +377,54 @@ test("shows the final pass state without motion when reduced motion is requested
   expect(runningAnimations).toBe(0);
 });
 
+test("scans the complete pass down and back up", async ({
+  page,
+}): Promise<void> => {
+  await page.goto("/");
+  await expect(page.locator("#pass-stage")).toHaveClass(/is-running/);
+
+  const scan = await page.locator(".pass-body").evaluate(
+    (element: HTMLElement): {
+      readonly duration: number;
+      readonly transforms: readonly string[];
+    } => {
+      const animation = element
+        .getAnimations({ subtree: true })
+        .find(
+          (candidate: Animation): boolean =>
+            candidate instanceof CSSAnimation &&
+            candidate.animationName === "verify-handoff",
+        );
+      if (!(animation?.effect instanceof KeyframeEffect)) {
+        throw new Error("The commute-pass scan animation is missing");
+      }
+
+      const timing = animation.effect.getComputedTiming();
+      if (typeof timing.duration !== "number") {
+        throw new TypeError("The commute-pass scan duration is not numeric");
+      }
+
+      return {
+        duration: timing.duration,
+        transforms: animation.effect
+          .getKeyframes()
+          .flatMap((keyframe: ComputedKeyframe): readonly string[] =>
+            typeof keyframe.transform === "string"
+              ? [keyframe.transform]
+              : [],
+          ),
+      };
+    },
+  );
+
+  expect(scan.duration).toBe(1450);
+  expect(scan.transforms).toEqual([
+    "translateY(-2px)",
+    "translateY(216px)",
+    "translateY(-2px)",
+  ]);
+});
+
 test("keeps the page and prompt readable without JavaScript", async ({
   browser,
 }): Promise<void> => {
