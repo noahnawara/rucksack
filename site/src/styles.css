@@ -60,8 +60,11 @@ a {
 }
 
 h1,
+h2,
 p,
 figure,
+dl,
+dd,
 pre {
   margin: 0;
 }
@@ -201,7 +204,12 @@ h1 {
   color: #d5d8cc;
   font-size: 0.98rem;
   line-height: 1.42;
-  text-wrap: pretty;
+}
+
+.lead span {
+  display: block;
+  width: fit-content;
+  white-space: nowrap;
 }
 
 .pass-stage {
@@ -286,7 +294,7 @@ h1 {
 .pass-body {
   position: relative;
   overflow: hidden;
-  padding: 1.4rem 1rem 1.3rem;
+  padding: 1.25rem 1rem 1.2rem;
 }
 
 .scan-line {
@@ -306,21 +314,17 @@ h1 {
   animation: scan-pass 1.25s 520ms cubic-bezier(0.65, 0, 0.35, 1) both;
 }
 
-.route {
+.route-story {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.35rem;
+}
+
+.route {
+  display: flex;
+  width: fit-content;
+  margin-block-start: 0.65rem;
   align-items: center;
-  gap: 1.1rem;
-}
-
-.stop:last-child {
-  text-align: right;
-}
-
-.stop-action,
-.session-label,
-.return-owner {
-  display: block;
+  gap: 0.55rem;
   color: var(--muted);
   font-family:
     "Doto Variable",
@@ -330,22 +334,45 @@ h1 {
   font-weight: 700;
   letter-spacing: 0.045em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.stop-name {
+.pass-owner {
   display: block;
-  margin-block-start: 0.3rem;
-  color: var(--ink);
-  font-size: clamp(1.6rem, 7.4vw, 1.85rem);
+  color: var(--muted);
+  font-family:
+    "Doto Variable",
+    "SFMono-Regular",
+    monospace;
+  font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+}
+
+.pass-action,
+.route-result {
+  display: block;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -0.03em;
   line-height: 1;
+  white-space: nowrap;
+}
+
+.pass-action {
+  font-size: 1.125rem;
+}
+
+.route-result {
+  margin-block-start: 0.25rem;
+  font-size: 1.35rem;
 }
 
 .route-transfer {
   display: grid;
-  width: 2.3rem;
-  height: 2.3rem;
+  width: 1.5rem;
+  height: 1.5rem;
   place-items: center;
   background: var(--acid);
   color: var(--acid-ink);
@@ -354,8 +381,8 @@ h1 {
 
 .route-transfer svg,
 .copy-icon svg {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 0.9rem;
+  height: 0.9rem;
   fill: none;
   stroke: currentColor;
   stroke-linecap: square;
@@ -365,33 +392,20 @@ h1 {
 
 .validation-row {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1.5rem;
-  margin-block-start: 1.75rem;
+  align-items: center;
+  justify-content: flex-end;
+  margin-block-start: 1.15rem;
 }
 
-.session-state {
-  min-width: 0;
-}
-
-.pass-stage.is-running .session-state {
+.pass-stage.is-running .route-result {
   animation: confirm-session 280ms 1.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.session-result {
-  display: block;
-  margin-block-start: 0.28rem;
-  color: var(--ink);
-  font-size: 1rem;
-  font-weight: 700;
 }
 
 .validation-stamp {
   z-index: 6;
-  display: grid;
-  width: 4.8rem;
-  height: 2.4rem;
+  display: inline-grid;
+  width: 4.45rem;
+  height: 2.25rem;
   flex: 0 0 auto;
   border: 2px solid var(--acid);
   place-items: center;
@@ -400,7 +414,7 @@ h1 {
     "Doto Variable",
     "SFMono-Regular",
     monospace;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-align: center;
@@ -415,20 +429,17 @@ h1 {
   display: flex;
   min-height: 3.8rem;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
   border-top: 1px solid var(--line);
   padding: 0.95rem 1rem;
 }
 
 .return-result {
   display: block;
-  max-width: 11.5rem;
   color: var(--ink);
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   font-weight: 700;
   line-height: 1.25;
-  text-align: right;
+  white-space: nowrap;
 }
 
 .copy-button {
@@ -557,6 +568,89 @@ h1 {
   white-space: pre-wrap;
 }
 
+.setup-contrast {
+  display: grid;
+  gap: 2.4rem;
+  padding-block: 5.5rem 7rem;
+}
+
+.setup-copy {
+  max-width: 31rem;
+}
+
+.setup-copy h2 {
+  max-width: 13ch;
+  font-size: clamp(1.65rem, 7vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  text-wrap: balance;
+}
+
+.setup-copy p {
+  max-width: 28rem;
+  margin-block-start: 0.9rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.setup-paths {
+  display: grid;
+  max-width: 36rem;
+  gap: 1.45rem;
+}
+
+.setup-path {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.setup-path dt {
+  color: var(--muted);
+  font-family:
+    "Doto Variable",
+    "SFMono-Regular",
+    monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.setup-path dd {
+  color: #c0c5b8;
+}
+
+.setup-flow,
+.setup-note {
+  display: block;
+}
+
+.setup-flow {
+  font-size: clamp(0.9rem, 4vw, 1.15rem);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+.setup-note {
+  margin-block-start: 0.28rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.setup-path--rucksack dt,
+.setup-path--rucksack .setup-flow {
+  color: var(--acid);
+}
+
+.setup-path--rucksack dt {
+  text-transform: lowercase;
+}
+
 @keyframes issue-pass {
   from {
     opacity: 0.2;
@@ -656,7 +750,7 @@ h1 {
   }
 
   .pass-stage {
-    width: min(100%, 26rem);
+    width: min(100%, 23rem);
     grid-column: 2;
     grid-row: 1;
     justify-self: end;
@@ -678,30 +772,46 @@ h1 {
     font-size: 1.05rem;
   }
 
+  .lead span {
+    display: inline;
+  }
+
+  .lead span + span {
+    margin-inline-start: 0.2em;
+  }
+
   .pass-title {
     font-size: 0.9rem;
   }
 
   .validation-row {
-    margin-block-start: 1.85rem;
+    margin-block-start: 1.5rem;
   }
 
   .copy-button {
     font-size: 0.92rem;
   }
+
+  .setup-contrast {
+    grid-template-columns: minmax(18rem, 0.8fr) minmax(26rem, 1fr);
+    align-items: end;
+    gap: clamp(3.5rem, 8vw, 8rem);
+    padding-block: 9rem 11rem;
+  }
+
+  .setup-copy h2 {
+    font-size: 2.25rem;
+  }
+
+  .setup-paths {
+    justify-self: end;
+    width: min(100%, 36rem);
+  }
 }
 
 @media (max-width: 23rem) {
-  .route {
-    gap: 0.75rem;
-  }
-
   .validation-stamp {
-    width: 4.4rem;
-  }
-
-  .return-result {
-    max-width: 10.5rem;
+    width: 4.15rem;
   }
 }
 

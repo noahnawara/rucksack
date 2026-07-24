@@ -6,20 +6,20 @@
     <meta name="theme-color" content="#080a07" />
     <meta
       name="description"
-      content="Keep your coding agent running on your commute with rucksack."
+      content="Switch your Mac to your hotspot without interrupting your coding agent."
     />
     <meta property="og:type" content="website" />
     <meta
       property="og:title"
-      content="rucksack — keep your agent running on your commute"
+      content="rucksack — switch to hotspot without interrupting your agent"
     />
     <meta
       property="og:description"
-      content="rucksack is packing the Mac. Keep steering the same session from your phone."
+      content="Pack your Mac. Keep working from your phone."
     />
     <meta name="twitter:card" content="summary" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>rucksack — keep your agent running on your commute</title>
+    <title>rucksack — switch to hotspot without interrupting your agent</title>
   </head>
   <body id="top">
     <a class="skip-link" href="#main">skip to content</a>
@@ -49,9 +49,12 @@
 
     <main id="main" class="hero page-shell">
       <section class="intro" aria-labelledby="headline">
-        <h1 id="headline">keep your agent running on your commute</h1>
+        <h1 id="headline">
+          switch to your hotspot. keep your agent running.
+        </h1>
         <p class="lead">
-          rucksack is packing the Mac. keep steering from your phone.
+          <span>pack your Mac.</span>
+          <span>keep working from your phone.</span>
         </p>
       </section>
 
@@ -62,12 +65,12 @@
         aria-describedby="pass-summary"
       >
         <figcaption class="visually-hidden" id="pass-caption">
-          rucksack digital commute pass
+          example rucksack commute pass
         </figcaption>
         <p class="visually-hidden" id="pass-summary">
-          rucksack is packing the Mac. Keep steering the same live session from
-          your phone. rucksack is unpacking automatically when regular wifi
-          returns.
+          rucksack is keeping your Mac awake while its connection moves from
+          wifi to your hotspot. The agent keeps running. rucksack is unpacking
+          automatically when regular wifi returns.
         </p>
 
         <article class="pass">
@@ -81,45 +84,39 @@
               </span>
               <span class="pass-title">commute pass</span>
             </span>
-            <span class="pass-code">preview</span>
+            <span class="pass-code">example</span>
           </header>
 
           <div class="pass-body">
             <span class="scan-line" aria-hidden="true"></span>
 
-            <div class="route">
-              <span class="stop">
-                <span class="stop-action">rucksack is packing</span>
-                <strong class="stop-name">Mac</strong>
-              </span>
+            <div class="route-story">
+              <span class="pass-owner">rucksack is</span>
+              <strong class="pass-action">keeping your Mac awake</strong>
 
-              <span class="route-transfer" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path d="M4 12h15" />
-                  <path d="m14 7 5 5-5 5" />
-                </svg>
-              </span>
+              <div class="route" aria-label="wifi to hotspot">
+                <span class="route-point">wifi</span>
 
-              <span class="stop">
-                <span class="stop-action">you continue</span>
-                <strong class="stop-name">phone</strong>
-              </span>
+                <span class="route-transfer" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 12h15" />
+                    <path d="m14 7 5 5-5 5" />
+                  </svg>
+                </span>
+
+                <span class="route-point">hotspot</span>
+              </div>
+
+              <strong class="route-result">agent keeps running</strong>
             </div>
 
             <div class="validation-row">
-              <p class="session-state">
-                <span class="session-label">same session</span>
-                <strong class="session-result">still live</strong>
-              </p>
               <span class="validation-stamp">PACKED</span>
             </div>
           </div>
 
           <div class="return-watch">
-            <span class="return-owner">regular wifi</span>
-            <span class="return-result">
-              rucksack is unpacking automatically
-            </span>
+            <span class="return-result">wifi back → rucksack is unpacking</span>
           </div>
 
           <button
@@ -155,6 +152,33 @@
         </div>
       </figure>
     </main>
+
+    <section class="setup-contrast page-shell" aria-labelledby="setup-title">
+      <div class="setup-copy">
+        <h2 id="setup-title">don’t move the project. move yourself.</h2>
+        <p>
+          cloud agents need another setup. rucksack uses the Mac you already
+          set up.
+        </p>
+      </div>
+
+      <dl class="setup-paths">
+        <div class="setup-path">
+          <dt>cloud</dt>
+          <dd>
+            <span class="setup-flow">clone → configure → add secrets</span>
+            <span class="setup-note">another environment to maintain</span>
+          </dd>
+        </div>
+        <div class="setup-path setup-path--rucksack">
+          <dt>rucksack</dt>
+          <dd>
+            <span class="setup-flow">pack → connect hotspot → go</span>
+            <span class="setup-note">same agent. same setup.</span>
+          </dd>
+        </div>
+      </dl>
+    </section>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

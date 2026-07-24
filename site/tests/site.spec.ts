@@ -33,18 +33,25 @@ test("shows one promise, one commute pass, one action, and the live star count",
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "keep your agent running on your commute",
+      name: "switch to your hotspot. keep your agent running.",
     }),
   ).toBeVisible();
   await expect(
     page.getByRole("figure", {
-      name: "rucksack digital commute pass",
+      name: "example rucksack commute pass",
     }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "copy agent prompt" }),
   ).toBeVisible();
-  await expect(page.getByText("preview", { exact: true })).toBeVisible();
+  await expect(page.getByText("example", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      level: 2,
+      name: "don’t move the project. move yourself.",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("pack → connect hotspot → go")).toBeVisible();
   await expect(
     page.getByRole("link", {
       name: "rucksack on GitHub; 1,234 stars",
@@ -177,6 +184,43 @@ test("keeps the mobile action large while the pass stays subordinate", async ({
   expect(passBounds.width).toBeLessThan(headlineBounds.width);
 });
 
+test("keeps every pass phrase on one line at 320 pixels", async ({
+  page,
+}): Promise<void> => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto("/");
+
+  const phraseSelectors = [
+    ".pass-title",
+    ".pass-code",
+    ".pass-owner",
+    ".pass-action",
+    ".route-point",
+    ".route-result",
+    ".return-result",
+    ".copy-text",
+  ] as const;
+
+  const phraseLineCounts = await page.evaluate(
+    (selectors: readonly string[]): readonly number[] =>
+      selectors.flatMap((selector: string): readonly number[] =>
+        Array.from(document.querySelectorAll<HTMLElement>(selector)).map(
+          (element: HTMLElement): number => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            return range.getClientRects().length;
+          },
+        ),
+      ),
+    phraseSelectors,
+  );
+
+  expect(phraseLineCounts.length).toBeGreaterThan(0);
+  expect(phraseLineCounts.every((lineCount: number): boolean => lineCount === 1)).toBe(
+    true,
+  );
+});
+
 test("keeps the desktop pass smaller and to the right of the headline", async ({
   page,
 }): Promise<void> => {
@@ -193,7 +237,7 @@ test("keeps the desktop pass smaller and to the right of the headline", async ({
     } => {
       const headline = document.querySelector<HTMLElement>("#headline");
       const pass = document.querySelector<HTMLElement>("#pass-stage");
-      const routeName = document.querySelector<HTMLElement>(".stop-name");
+      const routeName = document.querySelector<HTMLElement>(".route");
       if (headline === null || pass === null || routeName === null) {
         throw new Error("Desktop hierarchy elements are missing");
       }
@@ -228,7 +272,9 @@ test("shows the final pass state without motion when reduced motion is requested
   await expect(page.locator("#pass-stage")).not.toHaveClass(/is-running/);
   await expect(page.locator(".scan-line")).toBeHidden();
   await expect(page.getByText("PACKED", { exact: true })).toBeVisible();
-  await expect(page.getByText("still live", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("agent keeps running", { exact: true }),
+  ).toBeVisible();
 
   const runningAnimations = await page.evaluate(
     (): number =>
@@ -250,7 +296,7 @@ test("keeps the page and prompt readable without JavaScript", async ({
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "keep your agent running on your commute",
+      name: "switch to your hotspot. keep your agent running.",
     }),
   ).toBeVisible();
   await expect(page.locator("#install-prompt")).not.toBeEmpty();
