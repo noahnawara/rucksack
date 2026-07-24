@@ -17,6 +17,9 @@ use std::process::Command;
 
 const CURSOR_RULE_RELATIVE: &str = ".cursor/rules/rucksack-commute.mdc";
 const CURSOR_COMMAND_RELATIVE: &str = ".cursor/commands/commute-mode.md";
+const CURSOR_COMMAND_TEMPLATE: &str =
+    include_str!("../../../../assets/adapters/cursor/commute-mode.md");
+const CURSOR_POLICY_PLACEHOLDER: &str = "{{RUCKSACK_ACTIVE_POLICY}}";
 const EXCLUDE_BEGIN: &str = "# rucksack-managed:begin";
 const EXCLUDE_END: &str = "# rucksack-managed:end";
 
@@ -102,23 +105,23 @@ alwaysApply: true
         marker = MANAGED_MARKER,
         policy = policy.policy
     );
-    let command_text = format!(
-        r#"<!-- {marker} -->
-# Commute Mode
-
-Apply the following temporary operating policy for this conversation. Acknowledge it briefly,
-then continue the current task under its existing instructions and active Cursor configuration.
-
-{policy}
-"#,
-        marker = MANAGED_MARKER,
-        policy = policy.policy
-    );
+    let command_text = render_cursor_command(&policy.policy)?;
 
     atomic_write(&rule, rule_text.as_bytes(), 0o600)?;
     atomic_write(&command, command_text.as_bytes(), 0o600)?;
     install_git_excludes(project)?;
     Ok(vec![rule, command])
+}
+
+fn render_cursor_command(policy: &str) -> Result<String> {
+    if CURSOR_COMMAND_TEMPLATE
+        .matches(CURSOR_POLICY_PLACEHOLDER)
+        .count()
+        != 1
+    {
+        anyhow::bail!("Cursor command template must contain exactly one policy placeholder");
+    }
+    Ok(CURSOR_COMMAND_TEMPLATE.replace(CURSOR_POLICY_PLACEHOLDER, policy))
 }
 
 pub fn deactivate_cursor_rule(project: &Path) -> Result<Vec<PathBuf>> {
@@ -333,6 +336,8 @@ mod tests {
         assert!(cursor_command_path(project).exists());
         let installed_command = fs::read_to_string(cursor_command_path(project)).unwrap();
         assert!(installed_command.contains("under its existing instructions"));
+        assert!(installed_command.contains(&policy.policy));
+        assert!(!installed_command.contains(CURSOR_POLICY_PLACEHOLDER));
         assert!(!installed_command.contains("bounded task"));
         assert!(!installed_command.contains("without widening scope"));
         let installed_exclude = fs::read_to_string(&exclude).unwrap();

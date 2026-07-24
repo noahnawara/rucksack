@@ -91,7 +91,12 @@ Primary sources:
 
 Codex hooks include `SessionStart`, `UserPromptSubmit`, `PermissionRequest`, and `Stop`.
 User hooks live in `~/.codex/hooks.json`. `SessionStart` and `UserPromptSubmit` can add
-context. User skills live in `$HOME/.agents/skills/<name>/SKILL.md`.
+exact developer context through `hookSpecificOutput.additionalContext`. The latter runs
+before every submitted prompt, which lets a stable hook read the current atomic Rucksack
+policy without rewriting the trusted hook definition for each commute. Non-managed hooks
+must be reviewed and trusted in `/hooks`. User skills live in
+`$HOME/.agents/skills/<name>/SKILL.md` and provide the explicit `$commute-mode` path for an
+already-open conversation.
 
 Primary sources:
 
@@ -133,12 +138,16 @@ Primary source:
 
 User hooks are stored in `~/.claude/settings.json`. Relevant events include
 `SessionStart`, `UserPromptSubmit`, `Notification`, `PermissionRequest`, and `Stop`.
+`SessionStart` and `UserPromptSubmit` accept
+`hookSpecificOutput.additionalContext`, so the hook can inject the exact active policy.
+Claude Code reloads user settings for a running session after its file-stability delay.
 Skills live under `~/.claude/skills/<name>/SKILL.md`.
 
 Primary sources:
 
 - Anthropic, *Hooks guide*: `https://code.claude.com/docs/en/hooks-guide`
 - Anthropic, *Hooks reference*: `https://code.claude.com/docs/en/hooks`
+- Anthropic, *Debug configuration*: `https://code.claude.com/docs/en/debug-your-config`
 - Anthropic, *Skills*: `https://code.claude.com/docs/en/skills`
 
 Claude’s `Stop` hook means a response/turn stopped; it does not prove that the user’s
@@ -168,14 +177,18 @@ Commute Mode is transient host state, not repository policy.
 
 Primary source:
 
-- Cursor documentation, *Rules*.
+- Cursor documentation, *Rules*: `https://cursor.com/docs/rules`
+- Cursor documentation, *Commands*: `https://docs.cursor.com/en/agent/chat/commands`
 
 ### Hooks
 
 Cursor’s hook surface includes session, prompt, shell, file-edit, response, stop, and
 subagent events. The surface has changed rapidly across desktop, CLI, queued messages, and
 background agents. Rucksack therefore treats Cursor hooks as telemetry, not as the host
-safety boundary.
+safety boundary or per-prompt policy transport. `beforeSubmitPrompt` can continue or block
+but cannot add equivalent prompt context. `sessionStart` context applies only at creation
+of a new composer conversation. The always-applied project rule is therefore the
+authoritative temporary policy path.
 
 Primary sources:
 
@@ -196,3 +209,22 @@ Before a release, automated compatibility checks should verify:
 
 A changelog entry is not enough proof that the installed provider version behaves as
 expected.
+
+Exact product copy is outside provider compatibility testing. Codex, Claude Code, and
+Cursor receive behavior policy, but Rucksack itself renders all `rucksack is`, `your turn`,
+waiting, and measured-result sentences. Model output is never used as a safety instruction
+or completion signal.
+
+## Copy architecture reference
+
+A public, third-party archive that attributes a prompt to Poke describes a useful
+architectural split: an execution engine returns structured facts to a separate
+user-conversation layer and does not improvise the user-facing framing. The archive is not
+an official Poke source and is not a runtime dependency, so Rucksack uses the pattern only
+as design input. Rucksack makes the boundary stronger by replacing the presentation model
+with a deterministic Rust renderer.
+
+Research source:
+
+- public Poke prompt archive:
+  `https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/blob/main/Poke/Poke%20agent.txt`

@@ -373,7 +373,7 @@ fn mobile_data_estimate(session: &SessionState) -> MobileDataEstimate {
             reason: session
                 .mobile_data_error
                 .clone()
-                .unwrap_or_else(|| "No interface-counter baseline was recorded".to_owned()),
+                .unwrap_or_else(|| "no interface-counter baseline was recorded".to_owned()),
         };
     };
     let Some(end) = session.mobile_data_end.as_ref() else {

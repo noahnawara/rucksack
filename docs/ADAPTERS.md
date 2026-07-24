@@ -23,6 +23,10 @@ Adapters never:
 - edit repository-owned instructions without explicit opt-in;
 - claim a UI-only remote is machine-verified.
 
+Adapters carry agent behavior policy. They never generate the user-facing packing story.
+Rucksack renders that copy deterministically from typed events so ownership and safety
+instructions cannot drift between models.
+
 ## Shared policy
 
 The same behavioral intent is rendered into each native system:
@@ -64,7 +68,9 @@ Rucksack merges marked handlers for:
 - `SessionStart`;
 - `UserPromptSubmit`;
 - `PermissionRequest`;
+- `PostToolUse`;
 - `Stop`.
+- `SessionEnd`.
 
 The hook command is the absolute Rucksack binary:
 
@@ -91,7 +97,9 @@ normal Codex prompt.
 ### Existing session
 
 The explicit `$commute-mode` skill is the reliable way to apply the policy immediately to
-a thread that predates activation. New turns also receive the hook context.
+a thread that predates activation. Rucksack asks the user to invoke it and confirm the
+acknowledgement during pack. A trusted `UserPromptSubmit` hook also injects the exact active
+policy before each later prompt.
 
 Rucksack attempts `codex remote-control start`. If the installed CLI lacks that standalone
 command or startup fails, Rucksack continues only when a Codex conversation is already
@@ -120,12 +128,19 @@ session. Rucksack therefore asks the user to run `/remote-control` in that sessi
 does not send synthetic keys, launch a separate server, or assume another process
 preserves history.
 
+Before showing those instructions, Rucksack runs `claude remote-control --help`. A
+non-zero result stops the handoff and preserves the provider's exact update guidance.
+This capability probe is authoritative; Rucksack does not rely on a hard-coded version
+comparison.
+
 ### Installed hooks
 
 - `SessionStart` and `UserPromptSubmit`: inject the temporary policy.
 - `Notification`: update waiting-for-input/permission state.
 - `PermissionRequest`: update waiting-for-approval state, never decide.
+- `PostToolUse`: update active-work state.
 - `Stop`: record a completed turn, not “the entire job is finished.”
+- `SessionEnd`: record session completion.
 
 Claude’s Remote Control process exits after an extended network outage of roughly ten
 minutes. Rucksack probes the link and releases after its configured network grace period.
@@ -177,12 +192,18 @@ An unmarked file at either reserved path is never overwritten or removed.
 Rucksack merges best-effort telemetry handlers for:
 
 - `sessionStart`;
+- `beforeSubmitPrompt`;
 - `beforeShellExecution`;
+- `afterShellExecution`;
 - `afterFileEdit`;
 - `stop`.
+- `sessionEnd`.
 
 Cursor’s hook surface has changed quickly and has had gaps between desktop, CLI, queued
 messages, and background agents. Host safety must never depend on a Cursor hook firing.
+Cursor hooks are not treated as per-prompt policy injection. The always-applied project
+rule is authoritative for new model context, and `/commute-mode` is the explicit path for
+an already-open conversation.
 
 ### Security
 

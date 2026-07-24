@@ -1,4 +1,4 @@
-use crate::output::Output;
+use crate::output::{HumanEvent, Output};
 use anyhow::Result;
 use chrono::Local;
 use rucksack_core::network::{read_interface_counters, InterfaceCounters};
@@ -20,8 +20,8 @@ pub fn read_mobile_data_baseline(interface: &str, output: &Output) -> MobileData
         },
         Err(error) => {
             let message =
-                format!("Could not start mobile-data accounting on {interface}: {error:#}");
-            output.warn(&message);
+                format!("mobile data accounting could not start on {interface} because {error:#}");
+            output.story(HumanEvent::Warning(message.clone()));
             MobileDataBaseline {
                 counters: None,
                 error: Some(message),
@@ -35,7 +35,7 @@ pub fn sample_mobile_data(session: &mut SessionState, final_sample: bool) {
         session.mobile_data_finalized = false;
         if session.mobile_data_error.is_none() {
             session.mobile_data_error =
-                Some("No interface-counter baseline was recorded".to_owned());
+                Some("no interface-counter baseline was recorded".to_owned());
         }
         return;
     };
@@ -83,7 +83,7 @@ pub fn run(output: &Output, paths: &AppPaths) -> Result<()> {
 
 pub fn show(output: &Output, report: &SessionReport) -> Result<()> {
     if !output.json() {
-        output.title("Last session report");
+        output.story(HumanEvent::Chapter("trip report".to_owned()));
     }
     show_body(output, report)
 }
@@ -93,39 +93,52 @@ pub fn show_body(output: &Output, report: &SessionReport) -> Result<()> {
         return output.emit_json(report);
     }
 
-    output.pass(format!(
-        "{} · {}",
-        report.agent.display_name(),
+    output.story(HumanEvent::Fact(format!(
+        "{} worked in {}",
+        report.agent,
         report.project_dir.display()
-    ));
-    output.plain(format!(
-        "Duration {} · ended {}",
-        format_duration(report.duration_seconds),
-        report
-            .released_at
-            .with_timezone(&Local)
-            .format("%Y-%m-%d %H:%M")
-    ));
-    output.plain(format!(
-        "Ended by {}: {}",
+    )));
+    output.story(HumanEvent::Fact(format!(
+        "the rucksack was packed for {}",
+        format_duration(report.duration_seconds)
+    )));
+    let released_at = report
+        .released_at
+        .with_timezone(&Local)
+        .format("%d %B %Y at %H.%M")
+        .to_string()
+        .to_ascii_lowercase();
+    output.story(HumanEvent::Fact(format!(
+        "the session ended at {released_at}"
+    )));
+    output.story(HumanEvent::Fact(format!(
+        "the session ended by {} because {}",
         end_kind_name(report.end_kind),
         report.release_reason
-    ));
+    )));
     match (report.start_battery_percent, report.end_battery_percent) {
-        (Some(start), Some(end)) => output.plain(format!("Battery {start}% → {end}%")),
-        (_, Some(end)) => output.plain(format!("Battery at end {end}%")),
-        _ => output.warn("Battery usage unavailable"),
+        (Some(start), Some(end)) => output.story(HumanEvent::Fact(format!(
+            "battery moved from {start} percent to {end} percent"
+        ))),
+        (_, Some(end)) => output.story(HumanEvent::Fact(format!("battery ended at {end} percent"))),
+        _ => output.story(HumanEvent::Warning(
+            "battery usage could not be measured".to_owned(),
+        )),
     }
     if let Some(ssid) = report.expected_hotspot_ssid.as_deref() {
-        output.plain(format!("Hotspot {ssid}"));
+        output.story(HumanEvent::Fact(format!(
+            "the configured hotspot was {ssid}"
+        )));
     }
     if let Some(interface) = report.route_interface.as_deref() {
         let gateway = report
             .route_gateway
             .as_deref()
-            .map(|value| format!(" via {value}"))
+            .map(|value| format!(" through gateway {value}"))
             .unwrap_or_default();
-        output.plain(format!("Commute route {interface}{gateway}"));
+        output.story(HumanEvent::Fact(format!(
+            "the commute route used {interface}{gateway}"
+        )));
     }
     render_mobile_data(output, &report.mobile_data);
     Ok(())
@@ -134,33 +147,45 @@ pub fn show_body(output: &Output, report: &SessionReport) -> Result<()> {
 fn render_mobile_data(output: &Output, estimate: &MobileDataEstimate) {
     match estimate {
         MobileDataEstimate::Available { usage } => {
-            output.plain(format_mobile_data(usage));
-            output.plain(format!(
-                "Aggregate traffic on {}; not agent-only usage or carrier billing.",
-                usage.interface
-            ));
+            render_mobile_data_usage(output, usage);
         }
         MobileDataEstimate::Partial { usage, reason } => {
-            output.plain(format_mobile_data(usage));
-            output.warn(format!("Mobile-data estimate is partial: {reason}"));
-            output.plain(format!(
-                "Aggregate traffic on {}; not agent-only usage or carrier billing.",
-                usage.interface
-            ));
+            render_mobile_data_usage(output, usage);
+            output.story(HumanEvent::Warning(format!(
+                "the mobile data estimate is partial because {reason}"
+            )));
         }
         MobileDataEstimate::Unavailable { reason } => {
-            output.warn(format!("Estimated mobile data unavailable: {reason}"));
+            output.story(HumanEvent::Warning(format!(
+                "mobile data could not be measured because {reason}"
+            )));
+            output.story(HumanEvent::Fact(
+                "no mobile data estimate was invented".to_owned(),
+            ));
         }
     }
 }
 
-fn format_mobile_data(usage: &MobileDataUsage) -> String {
-    format!(
-        "Estimated mobile data {} total · {} downloaded · {} uploaded",
-        format_bytes(usage.total_bytes),
-        format_bytes(usage.received_bytes),
+fn render_mobile_data_usage(output: &Output, usage: &MobileDataUsage) {
+    output.story(HumanEvent::Fact(format!(
+        "estimated mobile data was {}",
+        format_bytes(usage.total_bytes)
+    )));
+    output.story(HumanEvent::Fact(format!(
+        "{} was downloaded",
+        format_bytes(usage.received_bytes)
+    )));
+    output.story(HumanEvent::Fact(format!(
+        "{} was uploaded",
         format_bytes(usage.sent_bytes)
-    )
+    )));
+    output.story(HumanEvent::Fact(format!(
+        "this counts all traffic on {}",
+        usage.interface
+    )));
+    output.story(HumanEvent::Fact(
+        "this is not agent only usage or carrier billing".to_owned(),
+    ));
 }
 
 fn end_kind_name(kind: SessionEndKind) -> &'static str {

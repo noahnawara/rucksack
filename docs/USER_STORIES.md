@@ -14,7 +14,7 @@ Acceptance criteria:
 - one agent is selected automatically when unambiguous;
 - ambiguity is shown as a short choice, not a configuration error;
 - no root prompt appears after the one-time helper setup;
-- “Ready” is impossible before post-unplug verification succeeds.
+- “Packed” is impossible before post-unplug verification succeeds.
 
 ### A2. Connect the hotspot at the right moment
 
@@ -190,7 +190,7 @@ The flow stays at Connection and explains that Wi-Fi exists but real internet do
 
 ### Unplug kills the route
 
-The flow attempts a short bounded recheck and does not say “Ready.”
+The flow attempts a short bounded recheck and does not say “Packed.”
 
 ### Commute route is replaced
 

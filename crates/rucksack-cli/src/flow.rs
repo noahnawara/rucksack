@@ -1,14 +1,14 @@
 use crate::cli::{PackArgs, RecoverArgs, StatusArgs, UnpackArgs};
 use crate::daemon::cleanup_policy;
 use crate::helper_client::HelperClient;
-use crate::output::Output;
+use crate::output::{HumanEvent, Output};
 use crate::report;
 use anyhow::{anyhow, Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
 use rucksack_core::agent::{
-    activate_cursor_rule, claude_remote_user_instruction, codex_remote_start, codex_remote_stop,
-    detect, detect_all, install_adapters, verify_adapter, AdapterFileStatus, AgentAdapterEvidence,
-    AgentDetection, AgentKind, ProjectMatch,
+    activate_cursor_rule, claude_remote_preflight, claude_remote_user_instruction,
+    codex_remote_start, codex_remote_stop, detect, detect_all, install_adapters, verify_adapter,
+    AdapterFileStatus, AgentAdapterEvidence, AgentDetection, AgentKind, ProjectMatch,
 };
 use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
 use rucksack_core::network::{
@@ -24,7 +24,7 @@ use rucksack_core::power::{
 use rucksack_core::state::{
     ActivePolicy, SessionEndKind, SessionPhase, SessionReport, SessionState,
 };
-use rucksack_core::system::current_uid;
+use rucksack_core::system::{current_uid, processes, ProcessInfo};
 use rucksack_core::{AppPaths, Config};
 use serde::Serialize;
 use std::fs::{self, OpenOptions};
@@ -71,9 +71,13 @@ fn pack_transaction(
             Ok(())
         }
         Err(error) => {
+            let had_safety_lease = cleanup.lease_id.is_some();
             let rollback_errors = cleanup.rollback();
             cleanup.committed = true;
             if rollback_errors.is_empty() {
+                if had_safety_lease {
+                    output.story(HumanEvent::Fact("normal sleep is restored".to_owned()));
+                }
                 Err(error)
             } else {
                 Err(anyhow!(
@@ -149,22 +153,37 @@ fn pack_inner(
         .unwrap_or(std::env::current_dir()?);
     let agent = select_agent(args.agent.or(config.default_agent), &project_dir, output)?;
 
-    output.title("Preparing this Mac for the walk home");
-    output.section("Agent");
+    output.story(HumanEvent::Chapter("packing up".to_owned()));
+    output.story(HumanEvent::RucksackAction(
+        "checking the active agent".to_owned(),
+    ));
     let detection = detect(agent, Some(&project_dir))?;
     if detection.installed {
-        output.pass(format!("{} is installed", agent.display_name()));
+        output.story(HumanEvent::Fact(format!("{agent} is installed")));
     } else {
         anyhow::bail!("{} was not found on this Mac", agent.display_name());
     }
     match detection.project_match {
-        ProjectMatch::Matched => output.pass(&detection.detail),
-        ProjectMatch::Different | ProjectMatch::Unknown | ProjectMatch::NotRunning => {
-            output.warn(&detection.detail)
+        ProjectMatch::Matched => output.story(HumanEvent::Fact(format!(
+            "{agent} is active in this project"
+        ))),
+        ProjectMatch::Different => output.story(HumanEvent::Warning(format!(
+            "{agent} is running in a different project"
+        ))),
+        ProjectMatch::Unknown => output.story(HumanEvent::Warning(format!(
+            "rucksack found {agent} but could not verify its project"
+        ))),
+        ProjectMatch::NotRunning => output.story(HumanEvent::Warning(format!(
+            "rucksack did not find a running {agent} conversation"
+        ))),
+        ProjectMatch::NotRequested if detection.running => {
+            output.story(HumanEvent::Fact(format!("{agent} is running")))
         }
-        ProjectMatch::NotRequested if detection.running => output.pass(&detection.detail),
-        ProjectMatch::NotRequested => output.warn(&detection.detail),
+        ProjectMatch::NotRequested => output.story(HumanEvent::Warning(format!(
+            "rucksack did not find a running {agent} conversation"
+        ))),
     }
+    output.detail(&detection.detail);
 
     ensure_adapter(paths, agent, args.yes, output)?;
 
@@ -185,21 +204,28 @@ fn pack_inner(
             project_name: project_name(&project_dir),
         }),
     };
+    output.story(HumanEvent::RucksackAction(format!(
+        "arming commute mode for {agent}"
+    )));
     policy.save(paths)?;
     cleanup.policy_active = true;
     if agent == AgentKind::Cursor {
         activate_cursor_rule(&project_dir, &policy)?;
         cleanup.cursor_project = Some(project_dir.clone());
     }
-    output.pass(format!("Commute policy loaded · {}", config.session.focus));
+    output.story(HumanEvent::Fact(format!(
+        "commute mode is armed for {agent} with {} focus",
+        config.session.focus
+    )));
 
     let remote = prepare_remote(agent, &detection, args, output)?;
     cleanup.remote_agent = Some(agent);
     cleanup.remote_owned = remote.owned;
     cleanup.remote_pid = remote.pid;
 
-    output.blank();
-    output.section("Connection");
+    output.story(HumanEvent::RucksackAction(
+        "checking the commute connection".to_owned(),
+    ));
     let expected_ssid = config.hotspot.ssid.as_deref();
     let (verified_wifi, route) = if require_verified_wifi {
         let expected_ssid =
@@ -213,7 +239,9 @@ fn pack_inner(
     } else if require_iphone_usb {
         (None, wait_for_iphone_usb_route(output)?)
     } else {
-        output.pass("Explicit default-route mode · Wi-Fi or USB tether supported");
+        output.story(HumanEvent::Fact(
+            "wifi or usb tethering may provide the default route".to_owned(),
+        ));
         match read_wifi_status() {
             Ok(wifi) => {
                 output.detail(wifi.detail.clone());
@@ -233,7 +261,9 @@ fn pack_inner(
         .interface
         .clone()
         .ok_or_else(|| anyhow!("The Mac has no default network interface"))?;
-    output.pass(format!("Default route through {route_interface}"));
+    output.story(HumanEvent::Fact(format!(
+        "the default route uses {route_interface}"
+    )));
     output.detail(&route.detail);
 
     let internet = require_probe(
@@ -247,14 +277,18 @@ fn pack_inner(
         internet.url, internet.status, internet.elapsed_ms
     ));
 
+    output.story(HumanEvent::RucksackAction(format!(
+        "checking the {agent} endpoint"
+    )));
     let provider = probe_provider_with_retries(agent, config.hotspot.probe_timeout_seconds, output);
     if provider.reachable {
-        output.pass(format!("{} endpoint reachable", agent.display_name()));
+        output.story(HumanEvent::Fact(format!(
+            "the {agent} endpoint is reachable"
+        )));
     } else if args.allow_unverified_remote {
-        output.warn(format!(
-            "{} endpoint could not be reached; continuing because --allow-unverified-remote was set",
-            agent.display_name()
-        ));
+        output.story(HumanEvent::Warning(format!(
+            "rucksack could not reach {agent} and is continuing because allow unverified remote was set"
+        )));
     } else {
         anyhow::bail!(
             "{} endpoint is unreachable: {}",
@@ -263,8 +297,9 @@ fn pack_inner(
         );
     }
 
-    output.blank();
-    output.section("Power");
+    output.story(HumanEvent::RucksackAction(
+        "checking battery and thermal safety".to_owned(),
+    ));
     let before = read_power_status().context("Could not read the battery preflight sensor")?;
     let before_percent = before
         .percent
@@ -278,6 +313,9 @@ fn pack_inner(
     require_known_safe_thermal()?;
 
     let lease_id = Uuid::new_v4();
+    output.story(HumanEvent::RucksackAction(
+        "securing the closed lid safety lease".to_owned(),
+    ));
     let helper_status = helper.acquire(
         lease_id,
         config.session.helper_ttl_seconds,
@@ -297,13 +335,23 @@ fn pack_inner(
     if helper_status.hard_expires_at != Some(expires_at) {
         anyhow::bail!("The helper did not persist the requested non-renewable session deadline");
     }
-    output.pass("Closed-lid lease acquired");
+    output.story(HumanEvent::Fact(
+        "the closed lid safety lease is active".to_owned(),
+    ));
 
     let on_battery = if before.source == PowerSource::Battery {
-        output.pass("Already running on battery");
+        output.story(HumanEvent::Fact(
+            "this mac is already running on battery".to_owned(),
+        ));
         before
     } else {
-        output.action("Unplug this Mac while the lid is still open");
+        output.story(HumanEvent::UserAction(vec![
+            "unplug this mac while the lid is open".to_owned(),
+        ]));
+        output.story(HumanEvent::Waiting {
+            condition: "battery power".to_owned(),
+            continuation: "packing will continue automatically".to_owned(),
+        });
         wait_for_battery(Duration::from_secs(90), || {
             helper
                 .renew(lease_id, config.session.helper_ttl_seconds)
@@ -313,14 +361,24 @@ fn pack_inner(
     let battery_percent = on_battery
         .percent
         .context("Battery percentage became unavailable after unplugging")?;
-    output.pass(format!("Running on battery · {battery_percent}%"));
+    output.story(HumanEvent::Fact(format!(
+        "this mac is running on battery at {battery_percent} percent"
+    )));
 
+    output.story(HumanEvent::RucksackAction(
+        "rearming the safety lease after unplugging".to_owned(),
+    ));
     let reasserted = helper.reassert(lease_id)?;
     if reasserted.sleep_disabled != Some(1) {
         anyhow::bail!("Closed-lid lease did not survive the power-source transition");
     }
-    output.pass("Closed-lid lease re-armed");
+    output.story(HumanEvent::Fact(
+        "the closed lid safety lease survived unplugging".to_owned(),
+    ));
 
+    output.story(HumanEvent::RucksackAction(
+        "checking the connection after unplugging".to_owned(),
+    ));
     let after_wifi = if require_verified_wifi {
         Some(read_wifi_status()?)
     } else {
@@ -357,7 +415,15 @@ fn pack_inner(
             after_provider.detail
         );
     }
-    output.pass("Network and remote route survived the transition");
+    if after_provider.reachable {
+        output.story(HumanEvent::Fact(format!(
+            "the network and the {agent} endpoint survived unplugging"
+        )));
+    } else {
+        output.story(HumanEvent::Warning(format!(
+            "the network survived unplugging but {agent} is still unverified"
+        )));
+    }
     output.detail(format!(
         "Post-unplug probe {} ms; provider {}",
         after_internet.elapsed_ms, after_provider.detail
@@ -366,21 +432,32 @@ fn pack_inner(
         .interface
         .as_deref()
         .context("The commute route has no interface after unplugging")?;
+    output.story(HumanEvent::RucksackAction(format!(
+        "starting mobile data accounting on {commute_interface}"
+    )));
     let mobile_data = report::read_mobile_data_baseline(commute_interface, output);
+    if mobile_data.counters.is_some() {
+        output.story(HumanEvent::Fact(format!(
+            "mobile data accounting is active on {commute_interface}"
+        )));
+    }
 
-    output.blank();
-    output.section("Safety");
-    output.pass(format!(
-        "Battery {battery_percent}% · warn at {}% · sleep at {}%",
-        config.safety.warn_battery_percent, config.safety.sleep_battery_percent
+    output.story(HumanEvent::RucksackAction(
+        "checking the final safety limits".to_owned(),
     ));
+    output.story(HumanEvent::Fact(format!(
+        "battery is {battery_percent} percent. rucksack warns at {} percent and restores normal sleep at {} percent",
+        config.safety.warn_battery_percent, config.safety.sleep_battery_percent
+    )));
 
     let thermal = require_known_safe_thermal()?;
-    output.pass(format!("Thermals {:?}", thermal.level).to_ascii_lowercase());
-    output.pass(format!(
-        "Ends at {}",
-        expires_at.with_timezone(&chrono::Local).format("%H:%M")
+    output.story(HumanEvent::Fact(
+        format!("thermal pressure is {:?}", thermal.level).to_ascii_lowercase(),
     ));
+    output.story(HumanEvent::Fact(format!(
+        "the session ends at {}",
+        expires_at.with_timezone(&chrono::Local).format("%H.%M")
+    )));
 
     let bind_commute_route = require_verified_wifi || require_iphone_usb;
     let commute_route_interface = if bind_commute_route {
@@ -432,13 +509,20 @@ fn pack_inner(
         release_reason: None,
     };
     session.save(paths)?;
+    cleanup.session_id = Some(session.id);
 
     helper.renew(lease_id, config.session.helper_ttl_seconds)?;
+    output.story(HumanEvent::RucksackAction(
+        "starting the safety watcher".to_owned(),
+    ));
     let daemon_pid = spawn_daemon(session.id, paths)?;
     cleanup.daemon_pid = Some(daemon_pid);
+    output.story(HumanEvent::Waiting {
+        condition: "the safety watcher to report its first heartbeat".to_owned(),
+        continuation: "packing will finish automatically".to_owned(),
+    });
     let session = wait_for_daemon(session.id, daemon_pid, paths, Duration::from_secs(8))?;
 
-    output.blank();
     match session.phase {
         SessionPhase::Failed | SessionPhase::Releasing | SessionPhase::Released => {
             anyhow::bail!(
@@ -452,14 +536,27 @@ fn pack_inner(
             );
         }
         SessionPhase::Completed | SessionPhase::IdleGrace => {
-            output.plain("Watcher ready; the agent is already finishing.");
+            output.story(HumanEvent::Fact(
+                "the safety watcher is running and the agent is already finishing".to_owned(),
+            ));
+            output.story(HumanEvent::Chapter("not packed".to_owned()));
+            output.story(HumanEvent::UserAction(vec![
+                "keep the lid open while rucksack restores normal sleep".to_owned(),
+            ]));
+            anyhow::bail!("the agent stopped before packing completed");
         }
         _ => {
-            output.plain("Ready.");
-            output.plain("Lock your Mac, close the lid, and go.");
+            output.story(HumanEvent::Fact("the safety watcher is running".to_owned()));
+            output.story(HumanEvent::Chapter("packed".to_owned()));
+            output.story(HumanEvent::UserAction(vec![
+                "lock this mac".to_owned(),
+                "close the lid and go".to_owned(),
+            ]));
         }
     }
-    output.plain("Normal sleep will be restored automatically.");
+    output.story(HumanEvent::Fact(
+        "rucksack will restore normal sleep automatically".to_owned(),
+    ));
     if output.json() {
         output.emit_json(&session)?;
     }
@@ -575,8 +672,7 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
             .as_ref()
             .filter(|report| report.session_id == session.id)
         {
-            output.blank();
-            output.section("Session report");
+            output.story(HumanEvent::Chapter("trip report".to_owned()));
             report::show_body(output, report)?;
         } else {
             output.warn("The report for this completed session is unavailable.");
@@ -611,19 +707,19 @@ pub fn unpack(
 }
 
 fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
-    output.title("Restoring this Mac");
+    output.story(HumanEvent::Chapter("unpacking".to_owned()));
     let session = SessionState::load(paths)?;
     let completed_report = if let Some(session) = &session {
-        if let Some(pid) = session.daemon_pid {
-            kill_process(pid);
-        }
+        output.story(HumanEvent::RucksackAction(
+            "restoring normal sleep".to_owned(),
+        ));
         let helper = HelperClient::default();
         match helper.release(session.lease_id, "user unpacked") {
             Ok(status)
                 if !status.active
                     && status.sleep_disabled == session.previous_sleep_disabled =>
             {
-                output.pass("Normal sleep restored")
+                output.story(HumanEvent::Fact("normal sleep is restored".to_owned()))
             }
             Ok(status) => anyhow::bail!(
                 "The helper did not prove normal sleep was restored: {:?}. Session state was kept for recovery.",
@@ -634,25 +730,54 @@ fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<(
                 if status.as_ref().is_some_and(|status| {
                     !status.active && status.sleep_disabled == session.previous_sleep_disabled
                 }) {
-                    output.pass("Normal sleep already restored");
+                    output.story(HumanEvent::Fact(
+                        "normal sleep was already restored".to_owned(),
+                    ));
                 } else {
                     return Err(error).context("Could not restore normal sleep");
                 }
             }
         }
+        let daemon_pid = session
+            .daemon_pid
+            .filter(|_| phase_has_stoppable_watcher(session.phase));
+        if let Some(pid) = daemon_pid {
+            output.story(HumanEvent::RucksackAction(
+                "stopping the safety watcher".to_owned(),
+            ));
+            if terminate_session_watcher(pid, session.id)? {
+                output.story(HumanEvent::Waiting {
+                    condition: "the safety watcher to stop".to_owned(),
+                    continuation: "unpacking will continue automatically".to_owned(),
+                });
+                wait_for_session_watcher_exit(pid, session.id, Duration::from_secs(3))?;
+                output.story(HumanEvent::Fact(
+                    "the safety watcher has stopped".to_owned(),
+                ));
+            } else {
+                output.story(HumanEvent::Fact(
+                    "the safety watcher was already stopped".to_owned(),
+                ));
+            }
+        }
+        output.story(HumanEvent::RucksackAction(
+            "removing commute mode".to_owned(),
+        ));
         cleanup_policy(paths, session.agent, &session.project_dir)?;
-        output.pass("Commute policy removed");
+        output.story(HumanEvent::Fact("commute mode is removed".to_owned()));
 
         if config.session.stop_owned_remote_on_unpack && session.remote_owned_by_rucksack {
-            stop_owned_remote(session);
+            stop_owned_remote(session)?;
         }
         let completed_report = archive_session_for_unpack(paths, session, output)?;
         if !SessionState::clear_if_current(paths, session.id)? {
             anyhow::bail!("Session state changed during unpack; refusing to clear a newer session");
         }
-        output.pass("Watcher stopped");
         Some(completed_report)
     } else {
+        output.story(HumanEvent::RucksackAction(
+            "checking normal sleep".to_owned(),
+        ));
         let helper = HelperClient::default();
         let status = helper.status().context("Could not read the power helper")?;
         if status.as_ref().is_some_and(|status| status.active) {
@@ -665,7 +790,9 @@ fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<(
                     recovered
                 );
             }
-            output.pass("Recovered an untracked power lease");
+            output.story(HumanEvent::Fact(
+                "an untracked power lease was recovered".to_owned(),
+            ));
         } else if status
             .as_ref()
             .is_some_and(|status| status.sleep_disabled != Some(0))
@@ -675,14 +802,12 @@ fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<(
             );
         }
         cleanup_orphaned_policy(paths)?;
-        output.pass("Normal sleep is enabled");
+        output.story(HumanEvent::Fact("normal sleep is enabled".to_owned()));
         load_report_or_quarantine(paths, output)?
     };
-    output.blank();
-    output.plain("Unpacked.");
+    output.story(HumanEvent::Chapter("unpacked".to_owned()));
     if let Some(report) = completed_report.as_ref() {
-        output.blank();
-        output.section("Session report");
+        output.story(HumanEvent::Chapter("trip report".to_owned()));
         report::show_body(output, report)?;
     }
     Ok(())
@@ -750,14 +875,19 @@ fn finalize_unpacked_session(
 }
 
 pub fn recover(args: &RecoverArgs, output: &Output, paths: &AppPaths) -> Result<()> {
-    output.title("Recovery");
+    output.story(HumanEvent::Chapter("recovering".to_owned()));
+    if !args.yes {
+        output.story(HumanEvent::UserAction(vec![
+            "allow rucksack to restore normal sleep and clear interrupted state".to_owned(),
+        ]));
+    }
     if !args.yes
         && !output.confirm(
-            "Restore normal sleep and clear any interrupted Rucksack state?",
+            "restore normal sleep and clear interrupted rucksack state",
             true,
         )?
     {
-        output.plain("No changes made.");
+        output.story(HumanEvent::Fact("nothing was changed".to_owned()));
         return Ok(());
     }
 
@@ -765,6 +895,9 @@ pub fn recover(args: &RecoverArgs, output: &Output, paths: &AppPaths) -> Result<
 }
 
 fn recover_locked(output: &Output, paths: &AppPaths) -> Result<()> {
+    output.story(HumanEvent::RucksackAction(
+        "restoring normal sleep".to_owned(),
+    ));
     restore_sleep_for_recovery(output)?;
 
     let mut cleanup_errors: Vec<String> = Vec::new();
@@ -785,8 +918,13 @@ fn recover_locked(output: &Output, paths: &AppPaths) -> Result<()> {
         }
     };
     if let Some(session) = session.as_ref() {
-        if let Some(pid) = session.daemon_pid {
-            kill_process(pid);
+        if let Some(pid) = session
+            .daemon_pid
+            .filter(|_| phase_has_stoppable_watcher(session.phase))
+        {
+            if let Err(error) = terminate_session_watcher(pid, session.id) {
+                cleanup_errors.push(format!("could not stop the safety watcher: {error:#}"));
+            }
         }
     }
 
@@ -859,12 +997,13 @@ fn recover_locked(output: &Output, paths: &AppPaths) -> Result<()> {
         );
     }
 
-    output.pass("Temporary policy and stale state cleared");
-    output.blank();
-    output.plain("This Mac will sleep normally.");
+    output.story(HumanEvent::Fact(
+        "temporary policy and stale state are cleared".to_owned(),
+    ));
+    output.story(HumanEvent::Chapter("recovered".to_owned()));
+    output.story(HumanEvent::Fact("this mac will sleep normally".to_owned()));
     if let Some(report) = completed_report.as_ref() {
-        output.blank();
-        output.section("Session report");
+        output.story(HumanEvent::Chapter("trip report".to_owned()));
         report::show_body(output, report)?;
     }
     Ok(())
@@ -928,7 +1067,7 @@ fn restore_sleep_for_recovery(output: &Output) -> Result<()> {
     let helper = HelperClient::default();
     match helper.recover() {
         Ok(Some(status)) if !status.active && status.sleep_disabled == Some(0) => {
-            output.pass("Normal sleep restored")
+            output.story(HumanEvent::Fact("normal sleep is restored".to_owned()))
         }
         Ok(Some(status)) => anyhow::bail!(
             "Recovery did not prove normal sleep was restored: {:?}. State was kept for manual recovery.",
@@ -942,12 +1081,16 @@ fn restore_sleep_for_recovery(output: &Output) -> Result<()> {
                     "The helper returned no status and pmset reports SleepDisabled={value}"
                 );
             }
-            output.pass("Normal sleep independently verified with pmset");
+            output.story(HumanEvent::Fact(
+                "normal sleep is independently verified by macos".to_owned(),
+            ));
         }
         Err(error) => {
             let value = read_sleep_disabled().ok();
             if value == Some(0) {
-                output.pass("Normal sleep is already enabled");
+                output.story(HumanEvent::Fact(
+                    "normal sleep is already enabled".to_owned(),
+                ));
             } else {
                 return Err(error).context(format!(
                     "Helper recovery failed and pmset did not verify SleepDisabled=0 (observed {value:?})"
@@ -1030,9 +1173,14 @@ fn select_agent(
 
 fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output) -> Result<()> {
     let binary = std::env::current_exe()?;
+    output.story(HumanEvent::RucksackAction(format!(
+        "checking the native {agent} commute mode adapter"
+    )));
     let evidence = verify_adapter(paths, &binary, agent);
     if evidence.current {
-        output.pass("Native Commute Mode adapter verified");
+        output.story(HumanEvent::Fact(format!(
+            "the native {agent} commute mode adapter is ready"
+        )));
         return Ok(());
     }
     report_adapter_issues(&evidence, output);
@@ -1044,12 +1192,14 @@ fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output
             agent
         );
     }
+    if !yes {
+        output.story(HumanEvent::UserAction(vec![format!(
+            "allow rucksack to install or repair the {agent} commute mode adapter"
+        )]));
+    }
     let should_install = yes
         || output.confirm(
-            &format!(
-                "Install or repair the reversible {} Commute Mode adapter now?",
-                agent.display_name()
-            ),
+            &format!("install or repair the reversible {agent} commute mode adapter now"),
             true,
         )?;
     if !should_install {
@@ -1059,6 +1209,9 @@ fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output
             agent
         );
     }
+    output.story(HumanEvent::RucksackAction(format!(
+        "installing the native {agent} commute mode adapter"
+    )));
     install_adapters(paths, &binary, &[agent])?;
     let installed = verify_adapter(paths, &binary, agent);
     if !installed.current {
@@ -1068,18 +1221,20 @@ fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output
             adapter_issue_summary(&installed)
         );
     }
-    output.pass("Native Commute Mode adapter installed and verified");
+    output.story(HumanEvent::Fact(format!(
+        "the native {agent} commute mode adapter is installed and verified"
+    )));
     Ok(())
 }
 
 fn report_adapter_issues(evidence: &AgentAdapterEvidence, output: &Output) {
     for file in evidence.files.iter().filter(|file| !file.is_current()) {
-        output.warn(format!(
-            "{} adapter {} · {}",
-            evidence.agent.display_name(),
+        output.story(HumanEvent::Warning(format!(
+            "{} adapter file is {} at {}",
+            evidence.agent,
             adapter_status_name(file.status),
             file.path.display()
-        ));
+        )));
         output.detail(&file.detail);
     }
 }
@@ -1126,23 +1281,28 @@ fn prepare_remote(
 ) -> Result<RemotePreparation> {
     match agent {
         AgentKind::Codex => {
+            output.story(HumanEvent::RucksackAction(
+                "starting codex remote control".to_owned(),
+            ));
             let remote_started = match codex_remote_start() {
                 Ok(result) if result.success() => {
-                    output.pass("Codex Remote Control daemon is running");
+                    output.story(HumanEvent::Fact(
+                        "codex remote control is running".to_owned(),
+                    ));
                     output.detail(result.combined_trimmed());
                     true
                 }
                 Ok(result) => {
-                    output.warn(format!(
-                        "Codex Remote Control could not be started automatically: {}",
+                    output.story(HumanEvent::Warning(format!(
+                        "rucksack could not start codex remote control automatically because {}",
                         result.combined_trimmed()
-                    ));
+                    )));
                     false
                 }
                 Err(error) => {
-                    output.warn(format!(
-                        "Codex Remote Control could not be started automatically: {error:#}"
-                    ));
+                    output.story(HumanEvent::Warning(format!(
+                        "rucksack could not start codex remote control automatically because {error:#}"
+                    )));
                     false
                 }
             };
@@ -1151,14 +1311,21 @@ fn prepare_remote(
                     "No running Codex conversation was detected and Remote Control could not be started"
                 );
             }
-            output.action("In an already-open Codex conversation, invoke `$commute-mode` once.");
-            output.action("Open ChatGPT on your phone and confirm this Codex session appears.");
-            let confirmed = confirm_remote(args, output, "Can your phone see the Codex session?")?;
-            output.pass(if confirmed {
-                "Codex session visibility confirmed by you"
+            output.story(HumanEvent::UserAction(vec![
+                "in the open codex conversation invoke `$commute-mode`".to_owned(),
+                "wait for codex to acknowledge commute mode".to_owned(),
+                "open chatgpt on your phone and find this codex session".to_owned(),
+            ]));
+            let confirmed = confirm_remote(
+                args,
+                output,
+                "confirm that codex acknowledged commute mode and your phone can see this session",
+            )?;
+            output.story(HumanEvent::Fact(if confirmed {
+                "commute mode and codex phone visibility were confirmed by you".to_owned()
             } else {
-                "Codex session visibility accepted without phone verification"
-            });
+                "codex phone visibility was accepted without verification".to_owned()
+            }));
             // `start` may attach to a pre-existing daemon. Until the JSON schema exposes
             // ownership explicitly, never stop it automatically during rollback or unpack.
             Ok(RemotePreparation {
@@ -1168,22 +1335,51 @@ fn prepare_remote(
             })
         }
         AgentKind::Claude => {
-            if detection.running {
-                output.pass("Claude Code conversation detected");
-            } else {
-                output.warn(
-                    "Rucksack cannot prove which Claude Code conversation should be handed off",
-                );
+            output.story(HumanEvent::RucksackAction(
+                "checking claude code remote control support".to_owned(),
+            ));
+            let remote_support = claude_remote_preflight()
+                .context("Could not inspect Claude Code Remote Control support")?;
+            if !remote_support.success() {
+                output.story(HumanEvent::Warning(
+                    "claude code remote control is unavailable on the installed version".to_owned(),
+                ));
+                output.detail(remote_support.combined_trimmed());
+                output.story(HumanEvent::UserAction(vec![
+                    "run `claude update`".to_owned(),
+                    "run `rucksack pack` again".to_owned(),
+                ]));
+                anyhow::bail!("claude code remote control is unavailable");
             }
-            output.action(claude_remote_user_instruction());
-            output.action("Then invoke `/commute-mode` once in that exact conversation.");
-            let confirmed =
-                confirm_remote(args, output, "Can your phone see that Claude session?")?;
-            output.pass(if confirmed {
-                "Claude Remote Control confirmed by you"
+            output.story(HumanEvent::Fact(
+                "claude code remote control is available".to_owned(),
+            ));
+            if detection.running {
+                output.story(HumanEvent::Fact(
+                    "a claude code conversation is running".to_owned(),
+                ));
             } else {
-                "Claude Remote Control accepted without phone verification"
-            });
+                output.story(HumanEvent::Warning(
+                    "rucksack cannot verify which claude code conversation should be handed off"
+                        .to_owned(),
+                ));
+            }
+            output.story(HumanEvent::UserAction(vec![
+                claude_remote_user_instruction().to_owned(),
+                "wait until `/rc active` appears".to_owned(),
+                "invoke `/commute-mode` in that exact conversation".to_owned(),
+                "open claude on your phone and find that conversation".to_owned(),
+            ]));
+            let confirmed = confirm_remote(
+                args,
+                output,
+                "confirm that claude code acknowledged commute mode and your phone can see that conversation",
+            )?;
+            output.story(HumanEvent::Fact(if confirmed {
+                "commute mode and claude code phone visibility were confirmed by you".to_owned()
+            } else {
+                "claude code phone visibility was accepted without verification".to_owned()
+            }));
             Ok(RemotePreparation {
                 owned: false,
                 pid: None,
@@ -1191,15 +1387,22 @@ fn prepare_remote(
             })
         }
         AgentKind::Cursor => {
-            output.action("In an already-open Cursor conversation, invoke `/commute-mode` once.");
-            output.action("In Cursor, open Agents → Remote Control.");
-            output.action("Confirm that Cursor on your phone can see this local agent.");
-            let confirmed = confirm_remote(args, output, "Can your phone see the Cursor agent?")?;
-            output.pass(if confirmed {
-                "Cursor Remote Control confirmed by you"
+            output.story(HumanEvent::UserAction(vec![
+                "in the open cursor conversation invoke `/commute-mode`".to_owned(),
+                "wait for cursor to acknowledge commute mode".to_owned(),
+                "in cursor open agents and then remote control".to_owned(),
+                "open cursor on your phone and find this local agent".to_owned(),
+            ]));
+            let confirmed = confirm_remote(
+                args,
+                output,
+                "confirm that cursor acknowledged commute mode and your phone can see this agent",
+            )?;
+            output.story(HumanEvent::Fact(if confirmed {
+                "commute mode and cursor phone visibility were confirmed by you".to_owned()
             } else {
-                "Cursor Remote Control accepted without phone verification"
-            });
+                "cursor phone visibility was accepted without verification".to_owned()
+            }));
             Ok(RemotePreparation {
                 owned: false,
                 pid: None,
@@ -1211,7 +1414,9 @@ fn prepare_remote(
 
 fn confirm_remote(args: &PackArgs, output: &Output, prompt: &str) -> Result<bool> {
     if args.allow_unverified_remote {
-        output.warn("Phone visibility was not verified; continuing by explicit override");
+        output.story(HumanEvent::Warning(
+            "phone visibility is unverified because allow unverified remote was set".to_owned(),
+        ));
         return Ok(false);
     }
     if args.yes {
@@ -1242,51 +1447,56 @@ fn wait_for_expected_wifi(
     let mut redacted_evidence: Option<RedactedWifiEvidence> = None;
     let mut manual_selection_required = false;
     if let Some(device) = current.device.as_deref() {
-        let should_switch = args.yes
-            || output.confirm(
-                &format!("Ask macOS to switch Wi-Fi to the saved hotspot “{expected}”?"),
-                true,
-            )?;
-        if should_switch {
-            output.checking(format!("Requesting saved hotspot “{expected}”"));
-            match connect_saved_wifi(device, expected) {
-                Ok(()) => {
-                    output.pass("macOS accepted the exact saved-hotspot join request");
-                    redacted_evidence = Some(RedactedWifiEvidence::SavedNetworkJoin);
-                }
-                Err(error) => {
-                    output.warn(format!("Automatic hotspot switch failed: {error}"));
-                    manual_selection_required = true;
-                }
+        output.story(HumanEvent::RucksackAction(format!(
+            "asking macos to join the saved hotspot {expected}"
+        )));
+        match connect_saved_wifi(device, expected) {
+            Ok(()) => {
+                output.story(HumanEvent::Fact(
+                    "macos accepted the saved hotspot join request".to_owned(),
+                ));
+                redacted_evidence = Some(RedactedWifiEvidence::SavedNetworkJoin);
             }
-        } else {
-            manual_selection_required = true;
+            Err(error) => {
+                output.story(HumanEvent::Warning(format!(
+                    "automatic hotspot joining failed because {error}"
+                )));
+                manual_selection_required = true;
+            }
         }
     } else {
-        output.warn("macOS did not report a Wi-Fi device for automatic hotspot switching");
+        output.story(HumanEvent::Warning(
+            "macos did not report a wifi device for automatic hotspot joining".to_owned(),
+        ));
         manual_selection_required = true;
     }
 
     if manual_selection_required {
-        output.action(
-            "Open the Wi-Fi menu and select the phone under Personal Hotspots (Instant Hotspot), then return here.",
-        );
+        output.story(HumanEvent::UserAction(vec![
+            format!("open wifi and choose {expected} under personal hotspots"),
+            "return here".to_owned(),
+        ]));
         if args.yes {
             anyhow::bail!(
                 "The automatic hotspot switch failed and requires interactive Wi-Fi-menu confirmation. Re-run without --yes, select “{expected}”, and confirm it."
             );
         }
         if !output.confirm(
-            &format!("Does the Wi-Fi menu now show “{expected}” as connected?"),
+            &format!("confirm that wifi now shows {expected} as connected"),
             false,
         )? {
             anyhow::bail!("The configured hotspot was not confirmed in the Wi-Fi menu");
         }
-        output.pass("Hotspot selection confirmed by you");
+        output.story(HumanEvent::Fact(
+            "the hotspot selection was confirmed by you".to_owned(),
+        ));
         redacted_evidence = Some(RedactedWifiEvidence::UserConfirmation);
     }
 
-    output.action(format!("Connect “{expected}” on this Mac"));
+    output.story(HumanEvent::Waiting {
+        condition: format!("{expected} to become the verified wifi route"),
+        continuation: "packing will continue automatically".to_owned(),
+    });
 
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
@@ -1298,6 +1508,32 @@ fn wait_for_expected_wifi(
                 redacted_evidence: wifi.redacted.then_some(usable_redacted_evidence).flatten(),
                 status: wifi,
             });
+        }
+        if wifi.connected
+            && wifi.redacted
+            && redacted_evidence == Some(RedactedWifiEvidence::SavedNetworkJoin)
+            && !args.allow_unverified_ssid
+        {
+            output.story(HumanEvent::UserAction(vec![
+                "open wifi and verify the connected hotspot name".to_owned(),
+                "return here".to_owned(),
+            ]));
+            if args.yes {
+                anyhow::bail!(
+                    "macOS hid the hotspot name after the saved-network join. Re-run without --yes and confirm the connected network, or use --allow-unverified-ssid."
+                );
+            }
+            if !output.confirm(
+                &format!("confirm that wifi shows {expected} as connected"),
+                false,
+            )? {
+                anyhow::bail!("The configured hotspot was not confirmed in the Wi-Fi menu");
+            }
+            output.story(HumanEvent::Fact(
+                "the privacy hidden hotspot name was confirmed by you".to_owned(),
+            ));
+            redacted_evidence = Some(RedactedWifiEvidence::UserConfirmation);
+            continue;
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
@@ -1366,9 +1602,18 @@ fn post_unplug_redacted_evidence(
 fn wait_for_iphone_usb_route(output: &Output) -> Result<RouteStatus> {
     let device = read_iphone_usb_device()?
         .context("macOS does not currently expose an iPhone USB network service")?;
-    output.action(
-        "Turn on Personal Hotspot on the connected iPhone; disconnect Wi-Fi if macOS keeps it as the default route.",
-    );
+    let current_route = read_default_route()?;
+    if current_route.interface.as_deref() == Some(device.as_str()) {
+        return Ok(current_route);
+    }
+    output.story(HumanEvent::UserAction(vec![
+        "turn on personal hotspot on the connected iphone".to_owned(),
+        "disconnect wifi if macos keeps using it as the default route".to_owned(),
+    ]));
+    output.story(HumanEvent::Waiting {
+        condition: "iphone usb to become the default route".to_owned(),
+        continuation: "packing will continue automatically".to_owned(),
+    });
 
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
@@ -1410,11 +1655,13 @@ fn describe_wifi(
         if expected != ssid {
             anyhow::bail!("Wi-Fi is on {ssid:?}, not the configured hotspot {expected:?}",);
         }
-        output.pass(format!("Wi-Fi: {ssid}"));
+        output.story(HumanEvent::Fact(format!("wifi is connected to {ssid}")));
         return Ok(());
     }
     if wifi.redacted && redacted_evidence.is_some() {
-        output.warn("Wi-Fi is connected, but macOS privacy-redacted the SSID");
+        output.story(HumanEvent::Warning(
+            "wifi is connected but macos hid the network name".to_owned(),
+        ));
         return Ok(());
     }
     anyhow::bail!(
@@ -1423,10 +1670,13 @@ fn describe_wifi(
 }
 
 fn require_probe(url: &str, timeout: u64, label: &str, output: &Output) -> Result<ProbeResult> {
-    output.checking(format!("Checking {label}"));
+    let display_label = label.to_ascii_lowercase();
+    output.story(HumanEvent::RucksackAction(format!(
+        "checking {display_label}"
+    )));
     let result = retry_probe(label, output, || internet_probe(url, timeout));
     if result.reachable {
-        output.pass(format!("{label}: reachable"));
+        output.story(HumanEvent::Fact(format!("{display_label} is reachable")));
         Ok(result)
     } else {
         Err(anyhow!("{label} probe failed: {}", result.detail))
@@ -1444,9 +1694,10 @@ fn retry_probe(label: &str, output: &Output, request: impl Fn() -> ProbeResult) 
         if result.reachable {
             return result;
         }
-        output.warn(format!(
-            "{label} probe attempt {attempt}/{PREFLIGHT_PROBE_ATTEMPTS} failed; retrying"
-        ));
+        output.story(HumanEvent::Warning(format!(
+            "{} probe attempt {attempt} of {PREFLIGHT_PROBE_ATTEMPTS} failed. rucksack is retrying",
+            label.to_ascii_lowercase()
+        )));
         output.detail(&result.detail);
         thread::sleep(PREFLIGHT_PROBE_RETRY_DELAY);
         result = request();
@@ -1571,25 +1822,129 @@ fn spawn_daemon(session_id: Uuid, paths: &AppPaths) -> Result<u32> {
     Ok(child.id())
 }
 
-fn stop_owned_remote(session: &SessionState) {
+fn stop_owned_remote(session: &SessionState) -> Result<()> {
     match session.agent {
         AgentKind::Codex => {
-            let _ = codex_remote_stop();
+            let result = codex_remote_stop()?;
+            if !result.success() {
+                anyhow::bail!(
+                    "Could not stop Rucksack-owned Codex Remote Control: {}",
+                    result.combined_trimmed()
+                );
+            }
         }
         AgentKind::Claude => {
             if let Some(pid) = session.remote_pid {
-                kill_process(pid);
+                terminate_matching_process(pid, "Claude Code Remote Control", |process| {
+                    process_matches_claude_remote(process)
+                })?;
             }
         }
         AgentKind::Cursor => {}
     }
+    Ok(())
 }
 
-fn kill_process(pid: u32) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(pid as i32, libc::SIGTERM);
+fn phase_has_stoppable_watcher(phase: SessionPhase) -> bool {
+    !matches!(
+        phase,
+        SessionPhase::Completed
+            | SessionPhase::Releasing
+            | SessionPhase::Released
+            | SessionPhase::Failed
+    )
+}
+
+fn terminate_session_watcher(pid: u32, session_id: Uuid) -> Result<bool> {
+    terminate_matching_process(pid, "Rucksack safety watcher", |process| {
+        process_matches_session_watcher(process, session_id)
+    })
+}
+
+fn terminate_matching_process(
+    pid: u32,
+    label: &str,
+    matches_expected_process: impl FnOnce(&ProcessInfo) -> bool,
+) -> Result<bool> {
+    let Some(process) = processes()?.into_iter().find(|process| process.pid == pid) else {
+        return Ok(false);
+    };
+    if !matches_expected_process(&process) {
+        anyhow::bail!(
+            "Refusing to signal PID {pid} because it is not the expected {label}. Observed command: {}",
+            process.arguments
+        );
     }
+    send_sigterm(pid, label)
+}
+
+fn send_sigterm(pid: u32, label: &str) -> Result<bool> {
+    let raw_pid = checked_process_id(pid)?;
+    #[cfg(unix)]
+    {
+        let result = unsafe { libc::kill(raw_pid, libc::SIGTERM) };
+        if result == 0 {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(false);
+        }
+        Err(error).with_context(|| format!("Could not stop {label} at PID {pid}"))
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (raw_pid, label);
+        anyhow::bail!("Process termination is unsupported on this platform")
+    }
+}
+
+fn wait_for_session_watcher_exit(pid: u32, session_id: Uuid, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    while session_watcher_is_running(pid, session_id)? {
+        if Instant::now() >= deadline {
+            anyhow::bail!("The safety watcher did not stop after SIGTERM");
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Ok(())
+}
+
+fn session_watcher_is_running(pid: u32, session_id: Uuid) -> Result<bool> {
+    Ok(processes()?
+        .iter()
+        .find(|process| process.pid == pid)
+        .is_some_and(|process| process_matches_session_watcher(process, session_id)))
+}
+
+fn checked_process_id(pid: u32) -> Result<i32> {
+    if pid == 0 {
+        anyhow::bail!("Refusing to signal process group PID 0");
+    }
+    i32::try_from(pid).context("Process ID exceeds the platform PID range")
+}
+
+fn process_matches_session_watcher(process: &ProcessInfo, session_id: Uuid) -> bool {
+    let mut arguments = process.arguments.split_whitespace();
+    executable_name(arguments.next()) == Some("rucksack")
+        && arguments.next() == Some("daemon")
+        && arguments.next() == Some("--session-id")
+        && arguments
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            == Some(session_id)
+        && arguments.next().is_none()
+}
+
+fn process_matches_claude_remote(process: &ProcessInfo) -> bool {
+    let mut arguments = process.arguments.split_whitespace();
+    executable_name(arguments.next()) == Some("claude")
+        && arguments.next() == Some("remote-control")
+}
+
+fn executable_name(argument: Option<&str>) -> Option<&str> {
+    Path::new(argument?).file_name()?.to_str()
 }
 
 fn project_name(project: &Path) -> Option<String> {
@@ -1607,6 +1962,7 @@ struct PackCleanup<'a> {
     remote_agent: Option<AgentKind>,
     remote_owned: bool,
     remote_pid: Option<u32>,
+    session_id: Option<Uuid>,
     daemon_pid: Option<u32>,
     committed: bool,
 }
@@ -1621,6 +1977,7 @@ impl<'a> PackCleanup<'a> {
             remote_agent: None,
             remote_owned: false,
             remote_pid: None,
+            session_id: None,
             daemon_pid: None,
             committed: false,
         }
@@ -1631,8 +1988,10 @@ impl<'a> PackCleanup<'a> {
             return Vec::new();
         }
         let mut errors = Vec::new();
-        if let Some(pid) = self.daemon_pid {
-            kill_process(pid);
+        if let (Some(pid), Some(session_id)) = (self.daemon_pid, self.session_id) {
+            if let Err(error) = terminate_session_watcher(pid, session_id) {
+                errors.push(format!("could not stop the safety watcher: {error:#}"));
+            }
         }
         if let Some(lease_id) = self.lease_id {
             match HelperClient::default().release(lease_id, "preflight failed") {
@@ -1670,10 +2029,25 @@ impl<'a> PackCleanup<'a> {
                 },
                 Some(AgentKind::Claude) => {
                     if let Some(pid) = self.remote_pid {
-                        kill_process(pid);
+                        match terminate_matching_process(
+                            pid,
+                            "Claude Code Remote Control",
+                            process_matches_claude_remote,
+                        ) {
+                            Ok(_) => {}
+                            Err(error) => errors.push(format!(
+                                "could not stop Rucksack-owned Claude Code Remote Control: {error:#}"
+                            )),
+                        }
                     }
                 }
                 _ => {}
+            }
+        }
+        if let Some(session_id) = self.session_id {
+            match SessionState::clear_if_current(self.paths, session_id) {
+                Ok(_) => {}
+                Err(error) => errors.push(format!("could not clear failed session state: {error}")),
             }
         }
         errors
@@ -1945,5 +2319,60 @@ mod tests {
         assert!(!watcher_has_started(&started, started.id, 43));
         started.last_heartbeat_at = None;
         assert!(!watcher_has_started(&started, started.id, 42));
+    }
+
+    #[test]
+    fn watcher_process_identity_requires_the_exact_session_command() {
+        let session_id = Uuid::new_v4();
+        let expected = ProcessInfo {
+            pid: 42,
+            command: "/usr/local/bin/rucksack".to_owned(),
+            arguments: format!("/usr/local/bin/rucksack daemon --session-id {session_id}"),
+        };
+
+        assert!(process_matches_session_watcher(&expected, session_id));
+
+        let wrong_session = Uuid::new_v4();
+        assert!(!process_matches_session_watcher(&expected, wrong_session));
+
+        let mut extra_argument = expected.clone();
+        extra_argument.arguments.push_str(" --unexpected");
+        assert!(!process_matches_session_watcher(
+            &extra_argument,
+            session_id
+        ));
+    }
+
+    #[test]
+    fn process_signal_rejects_group_and_out_of_range_ids() {
+        assert!(checked_process_id(0).is_err());
+        assert!(checked_process_id(u32::MAX).is_err());
+        assert_eq!(checked_process_id(42).unwrap(), 42);
+    }
+
+    #[test]
+    fn terminal_sessions_do_not_signal_persisted_watcher_pids() {
+        assert!(!phase_has_stoppable_watcher(SessionPhase::Completed));
+        assert!(!phase_has_stoppable_watcher(SessionPhase::Releasing));
+        assert!(!phase_has_stoppable_watcher(SessionPhase::Released));
+        assert!(!phase_has_stoppable_watcher(SessionPhase::Failed));
+        assert!(phase_has_stoppable_watcher(SessionPhase::Active));
+        assert!(phase_has_stoppable_watcher(SessionPhase::IdleGrace));
+    }
+
+    #[test]
+    fn failed_pack_rollback_clears_its_saved_session() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        fs::create_dir_all(&paths.data_dir).unwrap();
+        let mut persisted = session(Utc::now());
+        persisted.save(&paths).unwrap();
+
+        let mut cleanup = PackCleanup::new(&paths);
+        cleanup.session_id = Some(persisted.id);
+        assert!(cleanup.rollback().is_empty());
+        cleanup.committed = true;
+
+        assert!(SessionState::load(&paths).unwrap().is_none());
     }
 }

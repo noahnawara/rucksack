@@ -50,7 +50,7 @@ external power → hotspot → battery → lid closed
 ```
 
 Rucksack must guide the user through the same transition and re-check the resulting
-system. “Ready” means the transition was observed and validated.
+system. “Packed” means the transition was observed and validated.
 
 ### 2. Confidence is the primary interface
 
@@ -59,6 +59,17 @@ The CLI should communicate three things only:
 - what Rucksack knows;
 - what the user needs to do now;
 - what will happen automatically.
+
+The packing story has an explicit ownership grammar:
+
+- Rucksack work begins with `→ rucksack is`;
+- user work begins with `your turn`, followed by `→` steps;
+- every wait names what Rucksack is waiting for and what continues automatically with `↳`;
+- measured results begin with `✓` and contain facts only;
+- flavor never replaces an instruction.
+
+The renderer enforces this grammar. Agent models never generate safety-critical CLI copy.
+The words remain clear when color, symbols, animation, and terminal styling are unavailable.
 
 Internal concepts such as IOKit, root domains, launchd, hook payloads, and network routes
 belong under `--verbose`.
@@ -149,7 +160,7 @@ reconnect grace.
 
 ### Activation
 
-- median time from `rucksack pack` to “Ready”;
+- median time from `rucksack pack` to “Packed”;
 - percentage of first sessions completed without documentation;
 - helper-install completion rate;
 - adapter-install success and clean-uninstall rate.
@@ -158,7 +169,7 @@ reconnect grace.
 
 - percentage of sessions that survive the AC→battery transition;
 - remote reachability five and fifteen minutes after lid closure;
-- number of false “Ready” states;
+- number of false “Packed” states;
 - baseline-restoration success rate;
 - heartbeat-expiry restoration latency.
 

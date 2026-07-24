@@ -7,58 +7,90 @@ already leaving and has very little spare attention.
 
 ## Information hierarchy
 
-Every screen uses four levels:
+The default flow is a short story with explicit ownership:
 
-1. **Product title and current goal**
-2. **Section**: Agent, Connection, Power, Safety
-3. **Measured status or one required action**
-4. **Optional detail under `--verbose`**
+1. `🎒 packing up.` or `🎒 unpacking.` names the chapter.
+2. `→ rucksack is` names work the program is doing.
+3. `your turn.` appears immediately before every `→` user action.
+4. a wait is marked `→` and its automatic continuation is marked `↳`.
+5. a measured result starts with `✓` and states only what its evidence proves.
+6. optional implementation detail remains under `--verbose`.
 
-Symbols:
+Color, symbols, and animation may support the hierarchy but never carry meaning on their
+own. Redirected output must remain just as clear as an interactive terminal.
 
-- `✓` measured and passed;
-- `→` user action required;
-- `…` checking;
-- `!` warning with a safe default;
-- `×` blocking failure.
-
-Do not use a green check for user confirmation. Use `✓ Confirmed by you` so the evidence
-source remains honest.
+User confirmation is always attributed with `confirmed by you`. It is never presented as a
+machine measurement.
 
 ## Primary flow
 
 ```text
 $ rucksack pack
 
-Rucksack
-Preparing this Mac for the walk home
+🎒 packing up.
 
-Agent
-✓ Codex is running in ~/work/atlas
-✓ Remote Control daemon is available
-✓ Commute policy loaded
+→ rucksack is checking the active agent.
+✓ codex is installed.
+✓ codex is active in this project.
+→ rucksack is checking the native codex commute mode adapter.
+✓ the native codex commute mode adapter is ready.
+→ rucksack is arming commute mode for codex.
+✓ commute mode is armed for codex with continue focus.
+→ rucksack is starting codex remote control.
+✓ codex remote control is running.
 
-Connection
-→ Connect “Max’s iPhone”
-✓ Wi-Fi: Max’s iPhone
-✓ Internet: reachable
-✓ Codex remote endpoint: reachable
+your turn.
 
-Power
-→ Unplug this Mac while the lid is open
-… Waiting for battery power
-✓ Running on battery
-✓ Closed-lid lease re-armed
-✓ Hotspot and remote route survived the transition
+→ in the open codex conversation invoke `$commute-mode`.
+→ wait for codex to acknowledge commute mode.
+→ open chatgpt on your phone and find this codex session.
+confirm that codex acknowledged commute mode and your phone can see this session [Y/n]
 
-Safety
-✓ Battery 78% · warn at 20% · sleep at 15%
-✓ Thermal pressure normal
-✓ Session ends at 19:42
+✓ commute mode and codex phone visibility were confirmed by you.
+→ rucksack is checking the commute connection.
+→ rucksack is asking macos to join the saved hotspot Max’s iPhone.
+✓ macos accepted the saved hotspot join request.
+→ rucksack is waiting for Max’s iPhone to become the verified wifi route.
+↳ packing will continue automatically.
+✓ wifi is connected to Max’s iPhone.
+✓ the default route uses en0.
+→ rucksack is checking internet.
+✓ internet is reachable.
+→ rucksack is checking the codex endpoint.
+✓ the codex endpoint is reachable.
+→ rucksack is checking battery and thermal safety.
+→ rucksack is securing the closed lid safety lease.
+✓ the closed lid safety lease is active.
 
-Ready.
-Lock your Mac, close the lid, and go.
-Normal sleep will be restored automatically.
+your turn.
+
+→ unplug this mac while the lid is open.
+→ rucksack is waiting for battery power.
+↳ packing will continue automatically.
+✓ this mac is running on battery at 78 percent.
+→ rucksack is rearming the safety lease after unplugging.
+✓ the closed lid safety lease survived unplugging.
+→ rucksack is checking the connection after unplugging.
+✓ internet after unplugging is reachable.
+✓ the network and the codex endpoint survived unplugging.
+→ rucksack is starting mobile data accounting on en0.
+✓ mobile data accounting is active on en0.
+→ rucksack is checking the final safety limits.
+✓ battery is 78 percent. rucksack warns at 20 percent and restores normal sleep at 15 percent.
+✓ thermal pressure is nominal.
+✓ the session ends at 19.42.
+→ rucksack is starting the safety watcher.
+→ rucksack is waiting for the safety watcher to report its first heartbeat.
+↳ packing will finish automatically.
+✓ the safety watcher is running.
+
+🎒 packed.
+
+your turn.
+
+→ lock this mac.
+→ close the lid and go.
+✓ rucksack will restore normal sleep automatically.
 ```
 
 The user should never be asked to remember “start Amphetamine before unplugging” or
@@ -109,13 +141,15 @@ instead of using the debug-only helper installer.
 ## Connection modes
 
 With `--hotspot "Max’s iPhone"`, Rucksack first asks macOS to join that saved Wi-Fi
-network. It never accepts a hotspot password because command arguments are visible to
-other local processes. If the phone is advertised only through Apple Instant Hotspot,
-Rucksack gives one bounded prompt to select it from the Wi-Fi menu and then verifies the
-route and internet path. That explicit interactive confirmation is sufficient evidence
-when macOS privacy-redacts the SSID. `--allow-unverified-ssid` permits a redacted configured
-SSID after a successful exact saved-network join request. `--yes` cannot supply interactive
-evidence.
+network without asking an extra confirmation. It never accepts a hotspot password because
+command arguments are visible to other local processes. If the saved-network request
+fails, or the phone is advertised only through Apple Instant Hotspot, Rucksack prints one
+`your turn` block that tells the user to select it from the Wi-Fi menu. It then waits for
+the configured route and continues automatically. If the saved-network request succeeds
+but macOS privacy-hides the connected name, Rucksack asks for one exact Wi-Fi-menu
+confirmation. That explicit confirmation is sufficient evidence.
+`--allow-unverified-ssid` permits a redacted configured SSID after a successful exact
+saved-network join request. `--yes` cannot supply interactive evidence.
 
 With `--usb`, Rucksack waits for the `iPhone USB` network device to become the default
 route. A connected charging cable is not sufficient evidence: Personal Hotspot must be
@@ -158,10 +192,16 @@ Rucksack cannot safely inject `/remote-control` into a live terminal. The UI say
 without presenting it as an error:
 
 ```text
-Agent
-✓ Claude Code is running
-→ In Claude Code, run `/remote-control`
-  Return here when the `/rc active` indicator appears.
+rucksack is checking claude code remote control support.
+claude code remote control is available.
+a claude code conversation is running.
+
+your turn.
+
+in the active claude code conversation run `/remote-control`.
+wait until `/rc active` appears.
+invoke `/commute-mode` in that exact conversation.
+open claude on your phone and find that conversation.
 ```
 
 ## Cursor
@@ -169,13 +209,14 @@ Agent
 Cursor Remote Control currently requires a UI action:
 
 ```text
-Agent
-✓ Cursor is running
-→ In the open Cursor conversation, invoke `/commute-mode` once
-→ In Cursor, open Agents → Remote Control
-  Confirm the phone can see this agent, then return here.
-✓ Confirmed by you
-✓ Temporary project rule, command, and telemetry hooks loaded
+your turn.
+
+in the open cursor conversation invoke `/commute-mode`.
+wait for cursor to acknowledge commute mode.
+in cursor open agents and then remote control.
+open cursor on your phone and find this local agent.
+
+commute mode and cursor phone visibility were confirmed by you.
 ```
 
 Do not say “Remote Control verified” until Cursor exposes a stable machine-readable API.
@@ -225,22 +266,31 @@ prints the complete session/helper view as JSON.
 ```text
 $ rucksack unpack
 
-Rucksack
-Restoring this Mac
+🎒 unpacking.
 
-✓ Normal sleep restored
-✓ Commute policy removed
-✓ Watcher stopped
+rucksack is restoring normal sleep.
+normal sleep is restored.
+rucksack is stopping the safety watcher.
+rucksack is waiting for the safety watcher to stop.
+unpacking will continue automatically.
+the safety watcher has stopped.
+rucksack is removing commute mode.
+commute mode is removed.
 
-Unpacked.
+🎒 unpacked.
 
-Session report
-✓ Codex · ~/work/atlas
-Duration 42m 18s · ended 2026-07-24 19:42
-Ended by unpack: user unpacked
-Battery 78% → 61%
-Estimated mobile data 184.2 MB total · 151.7 MB downloaded · 32.5 MB uploaded
-Aggregate traffic on en0; not agent-only usage or carrier billing.
+🎒 trip report.
+
+codex worked in ~/work/atlas.
+the rucksack was packed for 42m 18s.
+the session ended at 24 july 2026 at 19.42.
+the session ended by unpack because user unpacked.
+battery moved from 78 percent to 61 percent.
+estimated mobile data was 184.2 MB.
+151.7 MB was downloaded.
+32.5 MB was uploaded.
+this counts all traffic on en0.
+this is not agent only usage or carrier billing.
 ```
 
 Automatic release writes the same report before the active session ends. `status` describes
@@ -249,15 +299,18 @@ the live session; `report` reads the most recent completed session:
 ```text
 $ rucksack report
 
-Rucksack
-Last session report
+🎒 trip report.
 
-✓ Codex · ~/work/atlas
-Duration 42m 18s · ended 2026-07-24 19:42
-Ended by automatic release: commute route moved to ordinary Wi-Fi
-Battery 78% → 61%
-Estimated mobile data 184.2 MB total · 151.7 MB downloaded · 32.5 MB uploaded
-Aggregate traffic on en0; not agent-only usage or carrier billing.
+codex worked in ~/work/atlas.
+the rucksack was packed for 42m 18s.
+the session ended at 24 july 2026 at 19.42.
+the session ended by automatic release because commute route moved to ordinary wifi.
+battery moved from 78 percent to 61 percent.
+estimated mobile data was 184.2 MB.
+151.7 MB was downloaded.
+32.5 MB was uploaded.
+this counts all traffic on en0.
+this is not agent only usage or carrier billing.
 ```
 
 The estimate covers all Mac traffic observed on the verified commute interface during the
@@ -269,25 +322,39 @@ unavailable, never fabricated as zero. `rucksack --json report` returns the type
 ```text
 $ rucksack recover
 
-Recovery
-✓ Normal sleep restored
-✓ Temporary policy and stale state cleared
+🎒 recovering.
 
-This Mac will sleep normally.
+your turn.
+
+allow rucksack to restore normal sleep and clear interrupted state.
+rucksack is restoring normal sleep.
+normal sleep is restored.
+temporary policy and stale state are cleared.
+
+🎒 recovered.
+
+this mac will sleep normally.
 ```
 
 ## Copy rules
 
 - State facts, not implementation.
-- Use “this Mac,” not “the host.”
+- Use `this mac`, not `the host`.
 - Use “normal sleep,” not “baseline power configuration.”
-- Put the physical action first.
+- Begin Rucksack work with `rucksack is`.
+- Put `your turn` immediately before every user action.
+- Name the condition and automatic continuation before a bounded wait.
+- Keep measured results literal and deterministic.
+- Never ask an agent model to generate handoff copy.
+- Use lowercase for authored human copy. Preserve paths, SSIDs, commands, and provider values
+  exactly.
+- Use periods in story copy. Terminal controls and exact technical values are exempt.
 - Name the exact consequence of a failure.
 - Never say “probably.”
 - Never blame the user for the wrong sequence; the tool owns sequencing.
 - Default to a single recommendation.
 - Hide technical remediation behind `Show details`/`--verbose`.
-- “Ready” is a reserved word and means every mandatory invariant passed.
+- “Packed” is a reserved word and means every mandatory invariant passed.
 
 ## Non-interactive mode
 

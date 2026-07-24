@@ -113,21 +113,7 @@ This commute lease has roughly {minutes} minutes remaining. The host will restor
 }
 
 pub fn skill_document() -> &'static str {
-    r#"---
-name: commute-mode
-description: Continue the current coding task safely while the host Mac is closed, on battery, and controlled remotely.
----
-
-# Commute Mode
-
-Adopt Rucksack's active Commute Mode policy. First read
-`~/Library/Application Support/Rucksack/active-policy.json`; if it exists, follow the `policy`
-field exactly. The Rucksack hook may also supply the same policy as session context. If neither
-source contains an active policy, tell the user to run `rucksack pack`.
-
-Continue the current task under its existing instructions and active agent configuration.
-Rucksack changes only the temporary focus and handoff context.
-"#
+    include_str!("../../../assets/adapters/shared/commute-mode/SKILL.md")
 }
 
 #[cfg(test)]
