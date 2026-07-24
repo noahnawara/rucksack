@@ -49,6 +49,10 @@ impl AppPaths {
     pub fn terminal_lock_file(&self) -> PathBuf {
         self.session_file.with_extension("terminal.lock")
     }
+
+    pub fn remote_onboarding_file(&self) -> PathBuf {
+        self.data_dir.join("remote-onboarding.json")
+    }
 }
 
 fn log_directory(

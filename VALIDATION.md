@@ -12,12 +12,12 @@ project must not be described as production-ready until those checks pass.
 
 Counts include repository dotfiles and exclude `.git` and `target`:
 
-- 31 Rust source files;
-- 8 TOML files;
-- 3 JSON fixtures/configuration files;
+- 33 Rust source files;
+- 11 TOML files;
+- 8 JSON files;
 - 1 launchd plist;
-- 3 YAML workflow/configuration files, including 2 GitHub Actions workflows;
-- 21 Markdown files.
+- 4 YAML workflow/configuration files, including 2 GitHub Actions workflows;
+- 57 Markdown files.
 
 ## Completed automated checks
 
@@ -34,13 +34,17 @@ RUCKSACK_TEAM_ID=CI00000000 \
   cargo test --workspace --release --locked
 RUCKSACK_TEAM_ID=CI00000000 \
   cargo build --workspace --release --locked
+cd site && npm audit --audit-level=high
+cd site && npm run build
+cd site && npm run test:e2e
 ```
 
 Test results:
 
-- 169 debug tests: CLI 69, CLI JSON E2E 8, core 81, helper 11;
-- 170 release tests with the dummy CI Team ID: CLI 69, CLI JSON E2E 8, core 81,
+- 183 debug tests: CLI 75, CLI JSON E2E 8, core 89, helper 11;
+- 184 release tests with the dummy CI Team ID: CLI 75, CLI JSON E2E 8, core 89,
   helper 12;
+- 10 browser tests and 0 high-severity npm vulnerabilities;
 - 0 failures.
 
 The automated and structural review also verifies:
@@ -59,6 +63,14 @@ The automated and structural review also verifies:
 - rollback of helper lease, temporary policy, Cursor files, and watcher state;
 - one-time provider confirmation tokens bind policy delivery to the exact active agent,
   project, and provider session;
+- a strict provider-scoped onboarding registry stores only measured/user-confirmed
+  evidence, timestamps, typed invalidation reasons, and SHA-256 bases under `0700`/`0600`
+  ownership checks;
+- pairing, native-trust, and baseline phone-visibility evidence survives unchanged packs,
+  while adapter changes and explicit re-pairing invalidate only the affected provider
+  evidence;
+- `--allow-unverified-remote` can bypass missing phone-onboarding or endpoint evidence but
+  cannot bypass the fresh exact-task provider binding;
 - inactive cleanup locators survive Cursor cleanup failures without exposing policy text;
 - Cursor activation, rollback, and cleanup use held directory descriptors, bounded reads,
   and transactional writes so path or symlink swaps cannot redirect managed operations;

@@ -14,6 +14,7 @@ $ rucksack pack
 
 → rucksack is checking the active agent.
 ✓ claude is active in this project.
+✓ claude pairing, native trust, and baseline phone visibility were confirmed by you during setup.
 → rucksack is arming commute mode for claude.
 ✓ commute mode is armed for claude with continue focus.
 
@@ -22,9 +23,8 @@ your turn.
 → in the active claude code conversation run `/remote-control`.
 → wait until `/rc active` appears.
 → invoke `/commute-mode rucksack-<16-hex-code>` in that exact conversation.
-→ open claude on your phone and find that conversation.
 
-✓ commute mode and claude code phone visibility were confirmed by you.
+✓ the exact claude task activation was observed.
 → rucksack is asking macos to join the saved hotspot Max’s iPhone.
 → rucksack is waiting for Max’s iPhone to become the verified wifi route.
 ↳ packing will continue automatically.
@@ -104,6 +104,11 @@ Rucksack does not enable, disable, tighten, or bypass provider permissions. Comm
 inherits the active Codex, Claude Code, or Cursor session's permission, approval, and
 sandbox configuration exactly. Codex users complete one native trust step after adapter
 installation: open `/hooks`, review the marked Rucksack entries, and trust them.
+Setup stores provider-scoped installation, pairing, native-trust, and baseline
+phone-visibility evidence in a private `remote-onboarding.json`. UI-only facts are labeled
+“confirmed by you.” Unchanged `pack` runs reuse that evidence, but every pack still
+requires and machine-observes the fresh tokenized command in the exact live conversation.
+Adapter repair/removal or an explicit new pairing invalidates only the affected evidence.
 
 Version 0.1 has no Rucksack-operated backend, relay, or webhook transport. Provider-native
 remote products carry the coding conversation.
@@ -162,6 +167,9 @@ separate strict mode: Rucksack waits until `iPhone USB` is the actual default ro
 will not mistake ordinary Wi-Fi for wired tethering. Strict hotspot and USB sessions bind
 the verified SSID, route interface, and gateway. A different live network releases the
 lease immediately; temporary route loss uses the configured reconnect grace.
+
+`--allow-unverified-remote` may bypass missing stored phone-onboarding or provider-endpoint
+evidence. It never bypasses the fresh exact-task token and provider-session binding.
 
 ## Build
 

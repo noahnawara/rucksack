@@ -1,10 +1,12 @@
 use crate::helper_client::HelperClient;
 use crate::install::installed_helper_exists;
+use crate::onboarding::{assess, bases, ProviderOnboarding};
 use rucksack_core::agent::{detect_all, verify_adapters, AdapterFileStatus, AgentAdapterEvidence};
 use rucksack_core::network::{
     internet_probe, probe, provider_probe_url, read_default_route, read_iphone_usb_device,
     read_wifi_status, DEFAULT_INTERNET_PROBE_URL,
 };
+use rucksack_core::onboarding::RemoteOnboardingRegistry;
 use rucksack_core::power::{
     read_active_sleep_utilities, read_power_status, read_sleep_disabled, read_thermal_status,
     PowerSource, ThermalLevel,
@@ -344,8 +346,42 @@ pub fn run(
         ));
     } else {
         let verification = verify_adapters(paths, rucksack_binary, &adapter_agents);
+        let onboarding_registry = RemoteOnboardingRegistry::load(paths);
+        if let Err(error) = &onboarding_registry {
+            checks.push(with_error("Remote onboarding", error));
+        }
         for evidence in verification.agents {
             checks.push(adapter_check(&evidence));
+            let Some(detection) = selected
+                .iter()
+                .find(|detection| detection.kind == evidence.agent)
+            else {
+                checks.push(fail(
+                    "Remote onboarding",
+                    "Agent detection disappeared during readiness checks",
+                ));
+                continue;
+            };
+            if !evidence.current {
+                checks.push(fail(
+                    &format!("{} Remote Control", evidence.agent.display_name()),
+                    "Adapter must be current before onboarding can be assessed",
+                ));
+                continue;
+            }
+            let Ok(registry) = onboarding_registry.as_ref() else {
+                continue;
+            };
+            match bases(detection, &evidence) {
+                Ok(provider_bases) => checks.push(onboarding_check(
+                    evidence.agent,
+                    &assess(registry, evidence.agent, &provider_bases),
+                )),
+                Err(error) => checks.push(with_error(
+                    &format!("{} Remote Control", evidence.agent.display_name()),
+                    error,
+                )),
+            }
         }
     }
 
@@ -353,6 +389,25 @@ pub fn run(
         .iter()
         .all(|check| !matches!(check.level, CheckLevel::Fail));
     DoctorReport { ready, checks }
+}
+
+fn onboarding_check(agent: AgentKind, onboarding: &ProviderOnboarding) -> Check {
+    let name = format!("{} Remote Control", agent.display_name());
+    if onboarding.is_current() {
+        return Check {
+            name,
+            level: CheckLevel::Pass,
+            summary: "Pairing, native trust, and baseline phone visibility confirmed by you"
+                .to_owned(),
+            detail: Some(onboarding.detail()),
+        };
+    }
+    Check {
+        name,
+        level: CheckLevel::Fail,
+        summary: "Onboarding incomplete; run `rucksack setup` interactively".to_owned(),
+        detail: Some(onboarding.detail()),
+    }
 }
 
 fn pass(name: &str, summary: &str) -> Check {

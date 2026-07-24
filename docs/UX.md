@@ -34,6 +34,7 @@ $ rucksack pack
 ✓ codex is active in this project.
 → rucksack is checking the native codex commute mode adapter.
 ✓ the native codex commute mode adapter is ready.
+✓ codex pairing, native trust, and baseline phone visibility were confirmed by you during setup.
 → rucksack is arming commute mode for codex.
 ✓ commute mode is armed for codex with continue focus.
 → rucksack is starting codex remote control.
@@ -43,10 +44,9 @@ your turn.
 
 → in the open codex conversation invoke `$commute-mode rucksack-<16-hex-code>`.
 → wait for codex to acknowledge commute mode.
-→ open chatgpt on your phone and find this codex session.
-confirm that codex acknowledged commute mode and your phone can see this session [Y/n]
+confirm that codex acknowledged commute mode in that exact conversation [Y/n]
 
-✓ commute mode and codex phone visibility were confirmed by you.
+✓ the exact codex task activation was observed.
 → rucksack is checking the commute connection.
 → rucksack is asking macos to join the saved hotspot Max’s iPhone.
 ✓ macos accepted the saved hotspot join request.
@@ -102,7 +102,7 @@ The user should never be asked to remember “start Amphetamine before unpluggin
 $ rucksack setup
 
 Rucksack Setup
-Three things make the handoff reliable.
+Four things make the handoff reliable.
 
 1. Hotspot
 → Connect the hotspot you normally use
@@ -122,6 +122,13 @@ Three things make the handoff reliable.
 ✓ Claude Code found
 ✓ Cursor found
 → Install reversible Commute Mode adapters? [Y/n]
+
+4. Remote Control
+Codex: if needed, run `rucksack pair codex` and finish pairing in ChatGPT.
+Codex: open `/hooks`, review the marked Rucksack entries, and trust them.
+Codex: confirm that ChatGPT on your phone can see a remote session.
+Confirm that Codex pairing, native adapter trust, and baseline phone visibility are complete [y/N]
+✓ Codex pairing, native trust, and baseline phone visibility were confirmed by you.
 
 Defaults
   Commute deadline: 24 hours
@@ -183,8 +190,9 @@ The choice should show product names and surfaces, not process IDs.
 Rucksack first attempts `codex remote-control start`. Some bundled Codex installations do
 not expose that standalone command even while an existing provider-hosted conversation is
 available. In that case, Rucksack continues only when it detects a running Codex
-conversation and the user confirms the exact session on the phone. With neither automatic
-startup nor a running conversation, the handoff stops.
+conversation, the stored baseline phone onboarding is current, and the fresh token binds
+that exact provider session. With neither automatic startup nor a running conversation,
+the handoff stops.
 
 ## Existing Claude Code session
 
@@ -195,13 +203,16 @@ without presenting it as an error:
 rucksack is checking claude code remote control support.
 claude code remote control is available.
 a claude code conversation is running.
+claude code pairing, native trust, and baseline phone visibility were confirmed by you during setup.
 
 your turn.
 
 in the active claude code conversation run `/remote-control`.
 wait until `/rc active` appears.
 invoke `/commute-mode rucksack-<16-hex-code>` in that exact conversation.
-open claude on your phone and find that conversation.
+confirm that claude code acknowledged commute mode in that exact conversation.
+
+the exact claude code task activation was observed.
 ```
 
 ## Cursor
@@ -214,9 +225,9 @@ your turn.
 in the open cursor conversation invoke `/commute-mode rucksack-<16-hex-code>`.
 wait for cursor to acknowledge commute mode.
 in cursor open agents and then remote control.
-open cursor on your phone and find this local agent.
+confirm that cursor acknowledged commute mode in that exact conversation.
 
-commute mode and cursor phone visibility were confirmed by you.
+the exact cursor task activation was observed.
 ```
 
 Do not say “Remote Control verified” until Cursor exposes a stable machine-readable API.
@@ -240,6 +251,8 @@ Pairing code
 
 Open ChatGPT on your phone and enter the code.
 Expires at 2026-07-24T18:31:00Z
+Confirm that Codex pairing completed and your phone can see a remote session [y/N]
+✓ Pairing and baseline phone visibility were confirmed by you.
 ```
 
 Machine JSON is available with `--json`.
@@ -370,8 +383,10 @@ rucksack pack \
   --json
 ```
 
-`--yes` skips ordinary setup confirmations but cannot skip physical state checks,
-privacy-redacted SSID confirmation, or a UI-only phone-visibility check. The explicit
-`--allow-unverified-remote` exception accepts missing provider-endpoint evidence and/or
-phone-visibility evidence; that risk is recorded. `--force` is not a general escape
-hatch. Individual unsafe exceptions must be named and recorded.
+`--yes` skips ordinary measured-state confirmations but cannot fabricate UI-only setup
+evidence. During packing, non-interactive mode waits up to two minutes for the native hook
+to bind the fresh task activation. The explicit
+`--allow-unverified-remote` exception accepts missing stored phone-onboarding and/or
+provider-endpoint evidence; it never bypasses the exact tokenized task binding.
+`--force` is not a general escape hatch. Individual unsafe exceptions must be named and
+recorded.

@@ -6,6 +6,7 @@ mod flow;
 mod helper_client;
 mod hooks;
 mod install;
+mod onboarding;
 mod output;
 mod report;
 

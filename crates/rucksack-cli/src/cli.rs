@@ -25,7 +25,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// One-time helper, adapter, and hotspot setup.
+    /// One-time hotspot, helper, adapter, and Remote Control setup.
     Setup(SetupArgs),
 
     /// Check whether this Mac is ready for a commute.
@@ -130,7 +130,7 @@ pub struct PackArgs {
     #[arg(long)]
     pub allow_unverified_ssid: bool,
 
-    /// Continue after an explicit provider-remote confirmation rather than a machine check.
+    /// Skip stored phone onboarding or endpoint proof; exact task binding remains mandatory.
     #[arg(long)]
     pub allow_unverified_remote: bool,
 }

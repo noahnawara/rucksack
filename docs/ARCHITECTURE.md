@@ -73,8 +73,15 @@ User state:
 ~/Library/Application Support/Rucksack/session.json
 ~/Library/Application Support/Rucksack/last-report.json
 ~/Library/Application Support/Rucksack/active-policy.json
+~/Library/Application Support/Rucksack/remote-onboarding.json
 ~/Library/Logs/Rucksack/daemon.log
 ```
+
+`remote-onboarding.json` is a strict versioned registry written atomically under an
+advisory lock. It contains only provider kind, typed measured/user-confirmed evidence,
+timestamps, invalidation reasons, and SHA-256 bases. It is owner-only (`0600`) inside the
+owner-only data directory (`0700`) and contains no pairing code, credential, prompt,
+transcript, repository content, or durable provider task ID.
 
 Root state:
 

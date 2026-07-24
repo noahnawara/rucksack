@@ -14,6 +14,7 @@ chrono.workspace = true
 dirs.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
