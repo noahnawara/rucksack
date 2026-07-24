@@ -80,6 +80,16 @@ impl HelperCallError {
         }
     }
 
+    fn completed_release_status(&self) -> Option<HelperStatus> {
+        if !self.request_may_have_been_processed || self.acquire_state_is_ambiguous {
+            return None;
+        }
+        self.response_status
+            .as_ref()
+            .filter(|status| !status.active && status.sleep_disabled == Some(0))
+            .cloned()
+    }
+
     pub fn into_anyhow(self) -> anyhow::Error {
         self.error
     }
@@ -140,11 +150,18 @@ impl HelperClient {
     }
 
     pub fn release(&self, lease_id: Uuid, reason: impl Into<String>) -> Result<HelperStatus> {
-        self.call(HelperOperation::Release {
+        let operation = HelperOperation::Release {
             lease_id,
             reason: reason.into(),
-        })?
-        .ok_or_else(|| anyhow!("helper returned no status after releasing a lease"))
+        };
+        match self.call_with_delivery_state(operation) {
+            Ok(Some(status)) => Ok(status),
+            Ok(None) => Err(anyhow!("helper returned no status after releasing a lease")),
+            Err(error) => match error.completed_release_status() {
+                Some(status) => Ok(status),
+                None => Err(error.into_anyhow()),
+            },
+        }
     }
 
     pub fn recover(&self) -> Result<Option<HelperStatus>> {
@@ -489,5 +506,64 @@ mod tests {
             .unwrap_err();
 
         assert!(!error.acquire_needs_cleanup(lease_id));
+    }
+
+    #[test]
+    fn release_accepts_an_authoritative_already_inactive_status() {
+        let directory = tempdir().unwrap();
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let lease_id = Uuid::new_v4();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request_line)
+                .unwrap();
+            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+            assert!(matches!(
+                request.operation,
+                HelperOperation::Release {
+                    lease_id: requested_lease_id,
+                    ..
+                } if requested_lease_id == lease_id
+            ));
+            let response = HelperResponse::failure(
+                request.request_id,
+                "no active lease",
+                Some(inactive_status()),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let status = HelperClient::new(&socket)
+            .release(lease_id, "hard timeout reached")
+            .unwrap();
+
+        assert!(!status.active);
+        assert_eq!(status.sleep_disabled, Some(0));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn completed_release_requires_authoritative_normal_sleep_proof() {
+        let confirmed =
+            HelperCallError::response_error(anyhow!("no active lease"), Some(inactive_status()));
+        assert!(confirmed.completed_release_status().is_some());
+
+        let mut unsafe_status = inactive_status();
+        unsafe_status.sleep_disabled = Some(1);
+        let unsafe_release =
+            HelperCallError::response_error(anyhow!("no active lease"), Some(unsafe_status));
+        assert!(unsafe_release.completed_release_status().is_none());
+
+        let ambiguous = HelperCallError::ambiguous_response(
+            anyhow!("helper response protocol did not match"),
+            Some(inactive_status()),
+        );
+        assert!(ambiguous.completed_release_status().is_none());
     }
 }

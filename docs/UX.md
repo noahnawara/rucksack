@@ -124,7 +124,7 @@ Three things make the handoff reliable.
 → Install reversible Commute Mode adapters? [Y/n]
 
 Defaults
-  Commute: 75 minutes
+  Commute deadline: 24 hours
   Warn: 20% battery
   Sleep: 15% battery
   Thermal release: serious

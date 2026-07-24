@@ -84,7 +84,7 @@ impl Default for HotspotConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            duration_minutes: 75,
+            duration_minutes: 24 * 60,
             focus: Focus::Continue,
             heartbeat_seconds: 30,
             helper_ttl_seconds: 90,
@@ -219,7 +219,10 @@ mod tests {
 
     #[test]
     fn default_config_is_valid() {
-        assert!(Config::default().validate().is_ok());
+        let config = Config::default();
+
+        assert!(config.validate().is_ok());
+        assert_eq!(config.session.duration_minutes, 24 * 60);
     }
 
     #[test]
