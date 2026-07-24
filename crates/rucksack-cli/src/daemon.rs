@@ -969,6 +969,78 @@ mod tests {
     }
 
     #[test]
+    fn helper_expiry_before_daemon_release_still_finishes_accounting() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut session = cursor_session(project);
+        session.agent = AgentKind::Codex;
+        session.save(&paths).unwrap();
+        active_policy(&session).save(&paths).unwrap();
+
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let lease_id = session.lease_id;
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request_line)
+                .unwrap();
+            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+            assert!(matches!(
+                &request.operation,
+                HelperOperation::Release {
+                    lease_id: requested_lease_id,
+                    ..
+                } if *requested_lease_id == lease_id
+            ));
+            let response = HelperResponse::failure(
+                request.request_id,
+                "no active lease",
+                Some(HelperStatus {
+                    active: false,
+                    lease_id: None,
+                    owner_uid: None,
+                    created_at: None,
+                    expires_at: None,
+                    hard_expires_at: None,
+                    previous_sleep_disabled: None,
+                    sleep_disabled: Some(0),
+                    reason: None,
+                    last_reasserted_at: None,
+                }),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).unwrap();
+            stream.flush().unwrap();
+        });
+
+        assert!(release_locked(
+            &HelperClient::new(&socket),
+            &paths,
+            &mut session,
+            "hard timeout reached",
+            |_| true,
+        )
+        .unwrap());
+
+        let persisted = SessionState::load(&paths).unwrap().unwrap();
+        assert_eq!(persisted.phase, SessionPhase::Released);
+        assert_eq!(
+            persisted.release_reason.as_deref(),
+            Some("hard timeout reached")
+        );
+        assert!(ActivePolicy::load(&paths).unwrap().is_none());
+        let report = rucksack_core::SessionReport::load(&paths).unwrap().unwrap();
+        assert_eq!(report.session_id, session.id);
+        assert_eq!(report.release_reason, "hard timeout reached");
+        server.join().unwrap();
+    }
+
+    #[test]
     fn automatic_release_attempts_cleanup_and_report_after_final_accounting_fails() {
         let directory = tempdir().unwrap();
         let paths = test_paths(directory.path());
