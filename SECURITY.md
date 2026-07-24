@@ -52,6 +52,6 @@ production-signed package is published.
 
 ## Data handling
 
-Rucksack does not transmit code, prompts, transcripts, command output, or repository
-paths to a Rucksack-operated service. Version 0.1 has no Rucksack backend, relay, or
+rucksack does not transmit code, prompts, transcripts, command output, or repository
+paths to a rucksack-operated service. Version 0.1 has no rucksack backend, relay, or
 webhook transport; provider-native remote products carry the coding conversation.

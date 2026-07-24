@@ -36,13 +36,7 @@ body {
   min-height: 100svh;
   margin: 0;
   overflow-x: hidden;
-  background:
-    radial-gradient(
-      34rem 28rem at 50% 58%,
-      rgb(206 255 57 / 8%),
-      transparent 74%
-    ),
-    var(--night);
+  background: var(--night);
   color: var(--ink);
 }
 
@@ -177,9 +171,32 @@ svg {
 }
 
 .hero {
+  position: relative;
+  isolation: isolate;
   display: grid;
   gap: 2.4rem;
   padding-block: 1.65rem 2.2rem;
+}
+
+.hero::before,
+.setup-contrast::before {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 100vw;
+  content: "";
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.hero::before {
+  background: radial-gradient(
+    26rem 22rem at 72% 56%,
+    rgb(206 255 57 / 8%),
+    transparent 72%
+  );
 }
 
 .intro {
@@ -486,9 +503,26 @@ h1 {
 }
 
 .setup-contrast {
+  position: relative;
+  isolation: isolate;
   display: grid;
   gap: 2.4rem;
   padding-block: 5.5rem 7rem;
+}
+
+.setup-contrast::before {
+  background:
+    radial-gradient(
+      26rem 24rem at 78% 70%,
+      rgb(206 255 57 / 9%),
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      rgb(8 10 7 / 0%) 0%,
+      #0b0e09 58%,
+      #10140e 100%
+    );
 }
 
 .setup-copy {
@@ -569,7 +603,13 @@ h1 {
 }
 
 .handoff-proof {
-  background: #10140e;
+  background:
+    radial-gradient(
+      26rem 24rem at 76% 40%,
+      rgb(206 255 57 / 6%),
+      transparent 74%
+    ),
+    linear-gradient(180deg, #10140e 0%, #0e110d 100%);
 }
 
 .handoff-proof-inner {
@@ -672,7 +712,7 @@ h1 {
 }
 
 .site-footer {
-  background: #10140e;
+  background: #0e110d;
 }
 
 .site-footer-inner {
@@ -780,14 +820,37 @@ h1 {
 }
 
 @media (min-width: 60rem) {
-  body {
+  .hero::before {
+    background: radial-gradient(
+      42rem 32rem at 76% 48%,
+      rgb(206 255 57 / 8%),
+      transparent 72%
+    );
+  }
+
+  .setup-contrast::before {
     background:
       radial-gradient(
-        48rem 34rem at 36% 56%,
-        rgb(206 255 57 / 9%),
+        50rem 36rem at 72% 66%,
+        rgb(206 255 57 / 10%),
         transparent 72%
       ),
-      var(--night);
+      linear-gradient(
+        180deg,
+        rgb(8 10 7 / 0%) 0%,
+        #0b0e09 58%,
+        #10140e 100%
+      );
+  }
+
+  .handoff-proof {
+    background:
+      radial-gradient(
+        42rem 30rem at 74% 36%,
+        rgb(206 255 57 / 6%),
+        transparent 74%
+      ),
+      linear-gradient(180deg, #10140e 0%, #0e110d 100%);
   }
 
   .site-header {

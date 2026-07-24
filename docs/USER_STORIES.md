@@ -23,14 +23,14 @@ remove external power.
 
 Acceptance criteria:
 
-- Rucksack observes the active Wi-Fi interface;
+- rucksack observes the active Wi-Fi interface;
 - configured SSID is verified when macOS exposes it;
 - a configured privacy-redacted SSID is accepted after the user explicitly confirms the
   Wi-Fi menu, or after an exact saved-network join request succeeds together with
   `--allow-unverified-ssid`;
 - `--yes` alone cannot confirm a privacy-redacted configured SSID;
 - default route and real HTTP connectivity are checked;
-- Rucksack asks the user to unplug while the lid remains open;
+- rucksack asks the user to unplug while the lid remains open;
 - the route and provider endpoint are rechecked after battery power is observed;
 - configured hotspot/USB sessions retain the verified route interface and gateway;
 - a different live SSID, interface, or gateway releases immediately, while missing-route
@@ -59,7 +59,7 @@ my phone.
 
 Acceptance criteria:
 
-- Rucksack attempts `codex remote-control start` when the installed CLI supports it;
+- rucksack attempts `codex remote-control start` when the installed CLI supports it;
 - if standalone startup is unavailable but a Codex conversation is already running, the
   pack may continue after the fresh exact activation binds that conversation;
 - startup failure with no running Codex conversation blocks readiness;
@@ -85,9 +85,9 @@ Acceptance criteria:
   an existing conversation;
 - hooks inject context only for the canonical project and provider session bound during
   packing by the fresh `/commute-mode rucksack-…` prompt;
-- `Notification` and `PermissionRequest` update Rucksack’s operational state;
+- `Notification` and `PermissionRequest` update rucksack’s operational state;
 - a `/commute-mode` skill is installed;
-- Rucksack neither enables nor disables bypass-permission mode and inherits the active
+- rucksack neither enables nor disables bypass-permission mode and inherits the active
   session configuration exactly.
 
 ### B3. Cursor Commute Mode
@@ -99,7 +99,7 @@ Acceptance criteria:
 
 - Cursor process and current workspace are detected;
 - the CLI tells the user where to enable Remote Control;
-- a temporary project rule and `/commute-mode` command are created only for the active Rucksack session;
+- a temporary project rule and `/commute-mode` command are created only for the active rucksack session;
 - Cursor hooks provide best-effort telemetry only after the exact `/commute-mode rucksack-…`
   prompt binds the project and provider session;
 - temporary Cursor files and their local `.git/info/exclude` block are removed on `unpack`,
@@ -151,14 +151,14 @@ Acceptance criteria:
 
 ### C4. Configuration integrity
 
-As a developer with existing hooks and rules, I want Rucksack to avoid destroying my
+As a developer with existing hooks and rules, I want rucksack to avoid destroying my
 configuration.
 
 Acceptance criteria:
 
 - writes are atomic;
 - a timestamped backup is created before first modification;
-- Rucksack entries include a stable marker;
+- rucksack entries include a stable marker;
 - uninstall removes only marked entries;
 - invalid JSON aborts with a clear path and no overwrite;
 - file permissions are user-only where operational state is stored.
@@ -175,7 +175,7 @@ Acceptance criteria:
 - daemon exits;
 - temporary Cursor rule is removed;
 - active-policy state is removed;
-- a provider process may be stopped only after Rucksack has proven ownership; the current
+- a provider process may be stopped only after rucksack has proven ownership; the current
   Codex path records no ownership and does not stop the daemon;
 - processes that existed before the session are never killed;
 - final output says “Normal sleep restored”;

@@ -2,6 +2,13 @@
   "name": "rucksack-site",
   "private": true,
   "version": "0.1.0",
+  "description": "switch to your hotspot. keep your agent running.",
+  "homepage": "https://rucksack-seven.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noahnawara/rucksack.git",
+    "directory": "site"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"

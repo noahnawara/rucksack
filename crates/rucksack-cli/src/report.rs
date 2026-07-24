@@ -75,7 +75,7 @@ pub fn archive_session(
 pub fn run(output: &Output, paths: &AppPaths) -> Result<()> {
     let report = SessionReport::load(paths)?.ok_or_else(|| {
         anyhow::anyhow!(
-            "No completed Rucksack session report is available. Run `rucksack pack` to start one."
+            "No completed rucksack session report is available. Run `rucksack pack` to start one."
         )
     })?;
     show(output, &report)

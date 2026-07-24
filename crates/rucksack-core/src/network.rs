@@ -293,7 +293,7 @@ pub fn probe(url: &str, timeout_seconds: u64) -> ProbeResult {
 /// Verify an actual internet path, not merely an HTTP response.
 ///
 /// The default Apple captive-network endpoint is intercepted by many login portals. For that
-/// endpoint, Rucksack requires Apple's exact success page and final host. A redirect to a portal,
+/// endpoint, rucksack requires Apple's exact success page and final host. A redirect to a portal,
 /// a 200 response with login HTML, or a truncated response fails the preflight.
 pub fn internet_probe(url: &str, timeout_seconds: u64) -> ProbeResult {
     probe_with_policy(url, timeout_seconds, true)

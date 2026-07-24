@@ -5,7 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Shared types and host/agent logic for Rucksack"
+homepage.workspace = true
+description = "Host-safety and coding-agent handoff primitives for rucksack"
 publish = false
 
 [dependencies]

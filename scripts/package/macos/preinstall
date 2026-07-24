@@ -5,7 +5,7 @@ state_path=/var/db/rucksack/helper-state.json
 helper_label=io.rucksack.helper
 
 if [ -s "$state_path" ]; then
-    echo "Rucksack has an active or interrupted lease. Run 'rucksack unpack' or 'rucksack recover' before installing this update." >&2
+    echo "rucksack has an active or interrupted lease. Run 'rucksack unpack' or 'rucksack recover' before installing this update." >&2
     exit 1
 fi
 

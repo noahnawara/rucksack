@@ -1,15 +1,15 @@
-# Sustaining Rucksack
+# sustaining rucksack
 
-Rucksack is MIT-licensed and designed to remain useful without an account, telemetry, or a paid
-service. Donations should fund work that benefits every user: macOS compatibility testing,
-signing and notarization, hardware test coverage, provider-adapter maintenance, documentation,
-and security review.
+the rucksack CLI and helper work without an account or paid service and send no rucksack
+telemetry. the public website uses Vercel Analytics and Speed Insights. donations should fund
+work that benefits every user: macOS compatibility testing, signing and notarization, hardware
+test coverage, provider-adapter maintenance, documentation, and security review.
 
 ## Product rules for donations
 
 - Core safety, recovery, and all agent adapters stay open source.
 - No feature is withheld to manufacture a subscription.
-- No telemetry is added merely to optimize fundraising.
+- No CLI or helper telemetry is added merely to optimize fundraising.
 - The CLI never interrupts `rucksack pack` with a donation prompt.
 - A support message may appear only after a successful `unpack`, at most once per installed major
   version, and must be permanently dismissible.

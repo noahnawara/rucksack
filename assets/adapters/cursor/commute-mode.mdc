@@ -1,8 +1,8 @@
 ---
-description: Rucksack Commute Mode for a closed, battery-powered Mac
+description: rucksack Commute Mode for a closed, battery-powered Mac
 alwaysApply: true
 ---
 
 <!-- rucksack-managed -->
 
-Rucksack replaces this example body with the active, time-bounded Commute Mode policy.
+rucksack replaces this example body with the active, time-bounded Commute Mode policy.

@@ -49,7 +49,7 @@ pub fn run(
     checks.push(if cfg!(target_os = "macos") {
         pass("macOS", "Supported host")
     } else {
-        fail("macOS", "Rucksack closed-lid mode requires macOS")
+        fail("macOS", "rucksack closed-lid mode requires macOS")
     });
 
     checks.push(if installed_helper_exists() {
@@ -128,7 +128,7 @@ pub fn run(
             summary: if value == 0 {
                 "Normal sleep is enabled".to_owned()
             } else {
-                "SleepDisabled is already 1; end the utility that owns it before using Rucksack"
+                "SleepDisabled is already 1; end the utility that owns it before using rucksack"
                     .to_owned()
             },
             detail: Some(format!("SleepDisabled={value}")),
@@ -152,7 +152,7 @@ pub fn run(
                 level: CheckLevel::Fail,
                 summary: format!("Active keep-awake utilities: {names}"),
                 detail: Some(
-                    "End these utilities before starting Rucksack so sleep ownership is unambiguous"
+                    "End these utilities before starting rucksack so sleep ownership is unambiguous"
                         .to_owned(),
                 ),
             });

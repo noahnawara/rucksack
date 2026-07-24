@@ -5,7 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Minimal privileged sleep-lease helper for Rucksack"
+homepage.workspace = true
+description = "Lease-based closed-lid safety helper for rucksack on macOS"
 publish = false
 
 [[bin]]

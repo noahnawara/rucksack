@@ -274,7 +274,7 @@ fn validate_peer_code_signature(pid: libc::pid_t, team_id: &str) -> Result<()> {
     let requirement_text = client_code_requirement(team_id)?;
     let requirement: SecRequirement = requirement_text
         .parse()
-        .context("Could not compile the Rucksack client code requirement")?;
+        .context("Could not compile the rucksack client code requirement")?;
     let mut attributes = GuestAttributes::new();
     attributes.set_pid(pid);
     let code = SecCode::copy_guest_with_attribues(None, &attributes, Flags::NONE)

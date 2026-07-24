@@ -30,6 +30,13 @@ test("shows one promise, one distilled commute pass, one action, and the live st
 }): Promise<void> => {
   await page.goto("/");
 
+  await expect(page).toHaveTitle(
+    "rucksack — switch to your hotspot. keep your agent running.",
+  );
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://rucksack-seven.vercel.app",
+  );
   await expect(
     page.getByRole("heading", {
       level: 1,
@@ -72,6 +79,16 @@ test("shows one promise, one distilled commute pass, one action, and the live st
     }),
   ).toBeVisible();
   await expect(page.getByText("phone hotspot has internet")).toBeVisible();
+  await expect(page.getByText("current task observed")).toBeVisible();
+  await expect(page.getByText("access confirmed by you")).toBeVisible();
+  await expect(
+    page.getByText("closed-lid lease active and bounded"),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "permissions stay unchanged. rucksack never relays your code.",
+    ),
+  ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "project" }),
   ).toContainText("security");

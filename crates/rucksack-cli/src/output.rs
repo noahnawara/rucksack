@@ -86,7 +86,7 @@ impl Output {
             return;
         }
         println!();
-        println!("{}", self.bold("Rucksack"));
+        println!("{}", self.bold("rucksack"));
         println!("{subtitle}");
         println!();
     }

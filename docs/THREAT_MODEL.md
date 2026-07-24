@@ -33,12 +33,12 @@ choose an arbitrary `pmset` argument.
 ### Agent hooks
 
 Untrusted input. Hook JSON can contain repository-controlled strings and must never be
-used to construct shell commands. Rucksack parses only fields needed for operational
+used to construct shell commands. rucksack parses only fields needed for operational
 state.
 
 ### Provider remote
 
-Out of scope for authentication design. Rucksack relies on provider-native TLS,
+Out of scope for authentication design. rucksack relies on provider-native TLS,
 authentication, pairing, and organization policy.
 
 ## Root helper controls
@@ -75,7 +75,7 @@ clients.
 - parse before backup/write;
 - atomic rename;
 - `0600` operational files;
-- stable Rucksack marker;
+- stable rucksack marker;
 - backup before first mutation;
 - no symlink following for reserved files;
 - ownership check;
@@ -110,7 +110,7 @@ clients.
 - strict hotspot/USB sessions bind the verified SSID, route interface, and gateway;
 - a different live route identity releases immediately, while route loss receives only
   the bounded reconnect grace;
-- version 0.1 has no Rucksack-operated backend, relay, webhook, or notification transport.
+- version 0.1 has no rucksack-operated backend, relay, webhook, or notification transport.
 
 ## Prompt-injection posture
 
@@ -119,8 +119,8 @@ instructions, sandbox, approval, and permission configuration remain the boundar
 any bypass mode the user deliberately selected. A repository can attempt to override
 guidance; therefore:
 
-- Rucksack neither grants nor revokes provider permissions;
-- Commute Mode adds no Rucksack-specific approval or deny rules;
+- rucksack neither grants nor revokes provider permissions;
+- Commute Mode adds no rucksack-specific approval or deny rules;
 - permission lifecycle hooks observe state but return no decision;
 - user documentation must not claim prompt text alone guarantees safety.
 
@@ -136,7 +136,7 @@ input.
 
 ## Privacy
 
-Default Rucksack state should not contain:
+Default rucksack state should not contain:
 
 - prompt text;
 - assistant responses;
@@ -147,15 +147,15 @@ Default Rucksack state should not contain:
 - repository remote URLs.
 
 The active policy temporarily stores a one-time confirmation token until the matching hook
-consumes it. Rucksack never stores the submitted prompt text; the token is cleared when the
+consumes it. rucksack never stores the submitted prompt text; the token is cleared when the
 provider session binds.
 
 The completed-session report may store local operational metadata and aggregate start/end
-byte counters for the verified commute interface. Rucksack does not capture packets,
+byte counters for the verified commute interface. rucksack does not capture packets,
 destinations, hostnames, URLs, payloads, prompts, responses, command output, file contents,
 or repository content for reporting.
 
-Project directory and reports remain local and are never uploaded by Rucksack. The mobile
+Project directory and reports remain local and are never uploaded by rucksack. The mobile
 data value can include macOS and unrelated-app traffic, can omit traffic on other
 interfaces, and is neither per-agent attribution nor carrier billing.
 

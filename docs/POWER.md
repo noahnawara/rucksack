@@ -35,7 +35,7 @@ commands:
 ```
 
 Amphetamine re-applies the setting after external-power changes on Apple-silicon Macs.
-Rucksack adopts the mechanism but changes the lifecycle:
+rucksack adopts the mechanism but changes the lifecycle:
 
 - no indefinite global toggle;
 - exact baseline preservation;
@@ -45,7 +45,7 @@ Rucksack adopts the mechanism but changes the lifecycle:
 - battery/thermal release;
 - explicit post-unplug validation.
 
-## Why Rucksack does not fake AC
+## Why rucksack does not fake AC
 
 The system power source is derived from hardware and exposed by macOS power-management
 services. There is no supported API for an application to declare “pretend the charger
@@ -60,7 +60,7 @@ Attempting to spoof AC would be the wrong abstraction for four reasons:
 3. It would be harder to recover from than a single documented power-management flag.
 4. A real USB-C PD battery is available when actual external power is required.
 
-Rucksack changes only the sleep decision it needs to change.
+rucksack changes only the sleep decision it needs to change.
 
 ## Required handoff order
 
@@ -85,15 +85,15 @@ Unplugging with the lid open is a deliberate race-elimination strategy. The powe
 observer still exists for later transitions, but the product does not depend on winning a
 sub-second race against sleep for its primary path.
 
-For a configured hotspot or USB tether, Rucksack persists the verified route interface and
+For a configured hotspot or USB tether, rucksack persists the verified route interface and
 gateway. A different live SSID, interface, or gateway means the commute route was replaced
 and releases the lease immediately. A missing route may be a transient mobile outage, so it
 uses the configured reconnect grace before release.
 
-Rucksack also inspects active `pmset` assertion owners before starting. Amphetamine and
+rucksack also inspects active `pmset` assertion owners before starting. Amphetamine and
 `caffeinate` are never stopped or modified, but an active assertion from either utility
 blocks readiness because it would make sleep ownership and cleanup results ambiguous.
-Users do not need another keep-awake utility while Rucksack owns its time-limited lease.
+Users do not need another keep-awake utility while rucksack owns its time-limited lease.
 
 ## Lease invariants
 
@@ -145,7 +145,7 @@ Defaults:
 - warning: 20%;
 - sleep release: 15%.
 
-At the floor, Rucksack restores normal sleep. It does not attempt to finish “one last
+At the floor, rucksack restores normal sleep. It does not attempt to finish “one last
 build.”
 
 ## Thermal pressure
@@ -162,14 +162,14 @@ Default behavior:
 - serious or critical: release the lease;
 - any reported CPU speed or scheduler throttling: release the lease.
 
-High CPU utilization alone is not a thermal signal. Rucksack allows task-required work and
+High CPU utilization alone is not a thermal signal. rucksack allows task-required work and
 uses macOS thermal pressure and throttling telemetry as the stop condition.
 
 ## Display and screen lock
 
-Rucksack allows the display to sleep. It does not use a display-awake assertion.
+rucksack allows the display to sleep. It does not use a display-awake assertion.
 
-The user should lock the Mac before closing it. Rucksack does not synthesize the lock
+The user should lock the Mac before closing it. rucksack does not synthesize the lock
 keyboard shortcut because that would require accessibility automation and creates another
 privileged surface.
 

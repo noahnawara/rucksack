@@ -182,7 +182,7 @@ pub fn verify_events(
             marker_present: false,
             schema_match: Some(false),
             binary_match: Some(false),
-            detail: "The hook file parses but contains no Rucksack-owned hooks".to_owned(),
+            detail: "The hook file parses but contains no rucksack-owned hooks".to_owned(),
         };
     };
     let managed_count = hooks
@@ -201,7 +201,7 @@ pub fn verify_events(
             marker_present: false,
             schema_match: Some(false),
             binary_match: Some(false),
-            detail: "The hook file parses but contains no Rucksack-owned hooks".to_owned(),
+            detail: "The hook file parses but contains no rucksack-owned hooks".to_owned(),
         };
     }
 

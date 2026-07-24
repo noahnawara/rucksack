@@ -119,7 +119,7 @@ impl LeaseManager {
         }
 
         // First write immediately, then again after the power-management transition settles.
-        // If either write or verification fails, restore the pre-Rucksack baseline. A helper
+        // If either write or verification fails, restore the pre-rucksack baseline. A helper
         // that cannot prove the override is active must fail safe to ordinary sleep.
         let reassert = (|| -> Result<()> {
             set_sleep_disabled(1)?;
@@ -213,7 +213,7 @@ impl LeaseManager {
             .context("Could not read SleepDisabled before acquiring the lease")?;
         if previous != 0 {
             anyhow::bail!(
-                "SleepDisabled is already {previous}; stop Amphetamine or any other closed-lid utility before starting Rucksack so the helper has an unambiguous rollback target"
+                "SleepDisabled is already {previous}; stop Amphetamine or any other closed-lid utility before starting rucksack so the helper has an unambiguous rollback target"
             );
         }
         self.lease = Some(PersistedLease {

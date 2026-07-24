@@ -1,9 +1,9 @@
-# Product: Rucksack Commute Mode
+# product: rucksack commute mode
 
-## One-sentence product
+## one-sentence product
 
-Rucksack gives a developer one trustworthy command for handing a live local coding-agent
-session from a Mac to a phone while leaving the office.
+rucksack prepares and verifies the move from office wifi to a phone hotspot so a
+developer can keep steering the same local coding agent from a phone.
 
 ## Primary persona
 
@@ -37,7 +37,8 @@ specific doubts:
 4. **Will the agent get stuck asking for something I cannot safely approve?**
 5. **Will the laptop overheat or run flat in the bag?**
 
-The CLI should answer each doubt with measured evidence.
+the CLI should answer each doubt with measured evidence or an explicit “confirmed by you”
+handoff.
 
 ## First principles
 
@@ -49,22 +50,22 @@ A checked setting is not proof. The failure happens during a state transition:
 external power → hotspot → battery → lid closed
 ```
 
-Rucksack must guide the user through the same transition and re-check the resulting
+rucksack must guide the user through the same transition and re-check the resulting
 system. “Packed” means the transition was observed and validated.
 
 ### 2. Confidence is the primary interface
 
 The CLI should communicate three things only:
 
-- what Rucksack knows;
+- what rucksack knows;
 - what the user needs to do now;
 - what will happen automatically.
 
 The packing story has an explicit ownership grammar:
 
-- Rucksack work begins with `→ rucksack is`;
+- rucksack work begins with `→ rucksack is`;
 - user work begins with `your turn`, followed by `→` steps;
-- every wait names what Rucksack is waiting for and what continues automatically with `↳`;
+- every wait names what rucksack is waiting for and what continues automatically with `↳`;
 - measured results begin with `✓` and contain facts only;
 - flavor never replaces an instruction.
 
@@ -97,12 +98,12 @@ Closed-lid wakefulness is a lease with:
 - a saved baseline;
 - a recovery path.
 
-Agent policy is also temporary. Rucksack should remove or deactivate every injected rule
+Agent policy is also temporary. rucksack should remove or deactivate every injected rule
 when the session ends.
 
 ### 5. Safe failure means sleep
 
-If Rucksack cannot prove that its helper, heartbeat, baseline, or safety monitors are
+If rucksack cannot prove that its helper, heartbeat, baseline, or safety monitors are
 healthy, it should restore normal sleep. Losing a remote session is inconvenient. Leaving
 a hot Mac awake indefinitely is unacceptable.
 
@@ -126,21 +127,20 @@ Each adapter should use the agent’s own supported extension surface:
 - Claude Code hooks, skills, and Remote Control;
 - Cursor rules, hooks, and Remote Control.
 
-Rucksack should never inject keystrokes into a terminal or parse pixels from an IDE.
+rucksack should never inject keystrokes into a terminal or parse pixels from an IDE.
 
 ### 8. Local by default
 
-Rucksack does not need to become another remote coding service. Provider-native remotes
-carry the conversation. Rucksack manages host health and short operational status. No
-repository content should transit a Rucksack relay. Version 0.1 has no Rucksack backend,
+rucksack does not need to become another remote coding service. Provider-native remotes
+carry the conversation. rucksack manages host health and short operational status. No
+repository content should transit a rucksack relay. Version 0.1 has no rucksack backend,
 relay, or webhook transport.
 
 ## Product promise
 
-> Rucksack will tell you it is safe to close the lid only after the Mac is on battery, the
-> closed-lid lease is active, the hotspot path still has internet, and the selected agent’s
-> exact live task activation has been observed. Pairing, native trust, and baseline phone
-> visibility are confirmed once during setup and revalidated only after a material change.
+> rucksack says `packed` only after the Mac is on battery, the closed-lid lease is active
+> and bounded, the phone-hotspot route has internet, the exact live task activation has
+> been observed, and phone visibility has been explicitly confirmed by you.
 
 For a strict hotspot or USB session, that promise remains bound to the verified route. A
 confirmed replacement network ends Commute Mode; temporary route loss gets a bounded

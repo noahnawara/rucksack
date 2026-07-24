@@ -24,11 +24,11 @@ enum HelperInstallationState {
 
 pub fn install_helper() -> Result<()> {
     if !cfg!(target_os = "macos") {
-        anyhow::bail!("The Rucksack helper is supported only on macOS");
+        anyhow::bail!("The rucksack helper is supported only on macOS");
     }
     if !cfg!(debug_assertions) {
         anyhow::bail!(
-            "Release builds install the signed helper through the notarized Rucksack package. Reinstall the package from a tagged GitHub release."
+            "Release builds install the signed helper through the notarized rucksack package. Reinstall the package from a tagged GitHub release."
         );
     }
 
@@ -138,14 +138,14 @@ pub fn uninstall_helper() -> Result<()> {
         HelperInstallationState::Complete => {}
         HelperInstallationState::Partial => {
             anyhow::bail!(
-                "A partial helper installation exists. Reinstall the signed package before uninstalling so Rucksack can prove the sleep baseline is restored."
+                "A partial helper installation exists. Reinstall the signed package before uninstalling so rucksack can prove the sleep baseline is restored."
             )
         }
     }
 
     let client = HelperClient::default();
     let recovered = client.recover().context(
-        "The helper is installed but unreachable. Refusing to remove it because Rucksack cannot prove that the saved sleep baseline was restored.",
+        "The helper is installed but unreachable. Refusing to remove it because rucksack cannot prove that the saved sleep baseline was restored.",
     )?;
     if let Some(status) = recovered.as_ref() {
         if status.active {

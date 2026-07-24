@@ -92,7 +92,7 @@ Primary sources:
 Codex hooks include `SessionStart`, `UserPromptSubmit`, `PermissionRequest`, and `Stop`.
 User hooks live in `~/.codex/hooks.json`. `SessionStart` and `UserPromptSubmit` can add
 exact developer context through `hookSpecificOutput.additionalContext`. The latter runs
-before every submitted prompt, which lets a stable hook read the current atomic Rucksack
+before every submitted prompt, which lets a stable hook read the current atomic rucksack
 policy without rewriting the trusted hook definition for each commute. Non-managed hooks
 must be reviewed and trusted in `/hooks`. User skills live in
 `$HOME/.agents/skills/<name>/SKILL.md` and provide the explicit `$commute-mode` path for an
@@ -106,7 +106,7 @@ Primary sources:
 ### Rich state
 
 Codex App Server exposes thread and turn events such as thread-status changes and
-turn completion. Rucksack’s alpha uses hooks; a production adapter should use App Server
+turn completion. rucksack’s alpha uses hooks; a production adapter should use App Server
 for richer, typed state where stable.
 
 Primary source:
@@ -160,7 +160,7 @@ entire job is complete.
 Cursor announced Cursor for iOS in June 2026. It can Remote Control agents on a local
 computer and offers a separate handoff to cloud agents. Cursor also exposes a desktop
 keep-awake setting, but host-side closed-lid/battery reliability remains the concern
-Rucksack addresses.
+rucksack addresses.
 
 Primary sources:
 
@@ -170,7 +170,7 @@ Primary sources:
 ### Rules
 
 Project rules live in `.cursor/rules`. Cursor's file-backed global-home rule path is not
-supported; global User Rules are configured through Cursor itself. Rucksack therefore uses
+supported; global User Rules are configured through Cursor itself. rucksack therefore uses
 a temporary project rule plus a project command, excludes both locally through
 `.git/info/exclude`, and removes them when the lease ends. `AGENTS.md` is not edited because
 Commute Mode is transient host state, not repository policy.
@@ -184,7 +184,7 @@ Primary source:
 
 Cursor’s hook surface includes session, prompt, shell, file-edit, response, stop, and
 subagent events. The surface has changed rapidly across desktop, CLI, queued messages, and
-background agents. Rucksack therefore treats Cursor hooks as telemetry, not as the host
+background agents. rucksack therefore treats Cursor hooks as telemetry, not as the host
 safety boundary or per-prompt policy transport. `beforeSubmitPrompt` can continue or block
 but cannot add equivalent prompt context. `sessionStart` context applies only at creation
 of a new composer conversation. The always-applied project rule is therefore the
@@ -211,7 +211,7 @@ A changelog entry is not enough proof that the installed provider version behave
 expected.
 
 Exact product copy is outside provider compatibility testing. Codex, Claude Code, and
-Cursor receive behavior policy, but Rucksack itself renders all `rucksack is`, `your turn`,
+Cursor receive behavior policy, but rucksack itself renders all `rucksack is`, `your turn`,
 waiting, and measured-result sentences. Model output is never used as a safety instruction
 or completion signal.
 
@@ -220,8 +220,8 @@ or completion signal.
 A public, third-party archive that attributes a prompt to Poke describes a useful
 architectural split: an execution engine returns structured facts to a separate
 user-conversation layer and does not improvise the user-facing framing. The archive is not
-an official Poke source and is not a runtime dependency, so Rucksack uses the pattern only
-as design input. Rucksack makes the boundary stronger by replacing the presentation model
+an official Poke source and is not a runtime dependency, so rucksack uses the pattern only
+as design input. rucksack makes the boundary stronger by replacing the presentation model
 with a deterministic Rust renderer.
 
 Research source:

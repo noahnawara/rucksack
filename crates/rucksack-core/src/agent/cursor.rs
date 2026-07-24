@@ -99,7 +99,7 @@ fn activate_cursor_rule_after_prepare(
 
     let rule_text = format!(
         r#"---
-description: Rucksack Commute Mode for a closed, battery-powered Mac
+description: rucksack Commute Mode for a closed, battery-powered Mac
 alwaysApply: true
 ---
 
@@ -380,7 +380,7 @@ fn preflight_git_exclude(snapshot: &ManagedFileSnapshot) -> Result<()> {
         && existing.find(EXCLUDE_BEGIN) < existing.find(EXCLUDE_END);
     if !valid_block {
         return Err(anyhow!(
-            "Found an incomplete or duplicate Rucksack block in {}; refusing to rewrite it",
+            "Found an incomplete or duplicate rucksack block in {}; refusing to rewrite it",
             snapshot.file.path().display()
         ));
     }
@@ -429,7 +429,7 @@ fn remove_git_excludes(snapshot: Option<&mut ManagedFileSnapshot>) -> Result<()>
     };
     let Some(end_offset) = existing[start..].find(EXCLUDE_END) else {
         return Err(anyhow!(
-            "Found an incomplete Rucksack block in {}; refusing to rewrite it",
+            "Found an incomplete rucksack block in {}; refusing to rewrite it",
             snapshot.file.path().display()
         ));
     };

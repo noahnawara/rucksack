@@ -7,8 +7,8 @@ use uuid::Uuid;
 #[command(
     name = "rucksack",
     version,
-    about = "Pack the Mac. Keep the agent.",
-    long_about = "A safe macOS handoff ritual for local coding agents, closed-lid execution, and mobile hotspots."
+    about = "switch to your hotspot. keep your agent running.",
+    long_about = "switch to your hotspot. keep your agent running.\n\npack your Mac, verify the handoff, and keep working from your phone."
 )]
 pub struct Cli {
     /// Show implementation details and probe output.
@@ -155,7 +155,7 @@ pub enum AdapterCommand {
     Install(AdapterArgs),
     /// Show installed adapter files.
     Status,
-    /// Remove only Rucksack-owned entries.
+    /// Remove only rucksack-owned entries.
     Remove(AdapterArgs),
 }
 

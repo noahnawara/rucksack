@@ -101,7 +101,7 @@ The user should never be asked to remember “start Amphetamine before unpluggin
 ```text
 $ rucksack setup
 
-Rucksack Setup
+rucksack setup
 Four things make the handoff reliable.
 
 1. Hotspot
@@ -113,7 +113,7 @@ Four things make the handoff reliable.
    $ rucksack setup --usb
 
 2. Power helper
-   Lets Rucksack hold a time-limited closed-lid lease.
+   Lets rucksack hold a time-limited closed-lid lease.
    macOS will ask for an administrator password once.
 → Install helper? [Y/n]
 
@@ -125,7 +125,7 @@ Four things make the handoff reliable.
 
 4. Remote Control
 Codex: if needed, run `rucksack pair codex` and finish pairing in ChatGPT.
-Codex: open `/hooks`, review the marked Rucksack entries, and trust them.
+Codex: open `/hooks`, review the marked rucksack entries, and trust them.
 Codex: confirm that ChatGPT on your phone can see a remote session.
 Confirm that Codex pairing, native adapter trust, and baseline phone visibility are complete [y/N]
 ✓ Codex pairing, native trust, and baseline phone visibility were confirmed by you.
@@ -147,27 +147,27 @@ instead of using the debug-only helper installer.
 
 ## Connection modes
 
-With `--hotspot "Max’s iPhone"`, Rucksack first asks macOS to join that saved Wi-Fi
+With `--hotspot "Max’s iPhone"`, rucksack first asks macOS to join that saved Wi-Fi
 network without asking an extra confirmation. It never accepts a hotspot password because
 command arguments are visible to other local processes. If the saved-network request
-fails, or the phone is advertised only through Apple Instant Hotspot, Rucksack prints one
+fails, or the phone is advertised only through Apple Instant Hotspot, rucksack prints one
 `your turn` block that tells the user to select it from the Wi-Fi menu. It then waits for
 the configured route and continues automatically. If the saved-network request succeeds
-but macOS privacy-hides the connected name, Rucksack asks for one exact Wi-Fi-menu
+but macOS privacy-hides the connected name, rucksack asks for one exact Wi-Fi-menu
 confirmation. That explicit confirmation is sufficient evidence.
 `--allow-unverified-ssid` permits a redacted configured SSID after a successful exact
 saved-network join request. `--yes` cannot supply interactive evidence.
 
-With `--usb`, Rucksack waits for the `iPhone USB` network device to become the default
+With `--usb`, rucksack waits for the `iPhone USB` network device to become the default
 route. A connected charging cable is not sufficient evidence: Personal Hotspot must be
 enabled on the phone, and ordinary Wi-Fi must not remain the route being tested.
 
 Both strict modes bind the verified route interface and gateway for the session. If a
-different live SSID, interface, or gateway appears, Rucksack restores normal sleep
+different live SSID, interface, or gateway appears, rucksack restores normal sleep
 immediately. If the route simply disappears, status enters a temporary-offline state and
 the configured reconnect grace begins.
 
-Ordinary Wi-Fi auto-join remains a macOS responsibility in 0.1. Rucksack observes the
+Ordinary Wi-Fi auto-join remains a macOS responsibility in 0.1. rucksack observes the
 result and releases immediately; it does not guess among the user's preferred networks.
 An explicitly configured return-network action is deferred to 0.2.
 
@@ -187,16 +187,16 @@ The choice should show product names and surfaces, not process IDs.
 
 ## Codex command capability
 
-Rucksack first attempts `codex remote-control start`. Some bundled Codex installations do
+rucksack first attempts `codex remote-control start`. Some bundled Codex installations do
 not expose that standalone command even while an existing provider-hosted conversation is
-available. In that case, Rucksack continues only when it detects a running Codex
+available. In that case, rucksack continues only when it detects a running Codex
 conversation, the stored baseline phone onboarding is current, and the fresh token binds
 that exact provider session. With neither automatic startup nor a running conversation,
 the handoff stops.
 
 ## Existing Claude Code session
 
-Rucksack cannot safely inject `/remote-control` into a live terminal. The UI says so
+rucksack cannot safely inject `/remote-control` into a live terminal. The UI says so
 without presenting it as an error:
 
 ```text
@@ -235,7 +235,7 @@ Do not say “Remote Control verified” until Cursor exposes a stable machine-r
 ## Permission inheritance
 
 Commute Mode inherits the active agent session's permission, approval, and sandbox
-configuration exactly. Rucksack does not enable, disable, tighten, bypass, approve, or deny
+configuration exactly. rucksack does not enable, disable, tighten, bypass, approve, or deny
 provider permissions. `PermissionRequest` hooks are passive lifecycle signals only and
 return no decision.
 
@@ -349,18 +349,32 @@ temporary policy and stale state are cleared.
 this mac will sleep normally.
 ```
 
+## public product language
+
+- primary promise: `switch to your hotspot. keep your agent running.`
+- support: `pack your Mac. keep working from your phone.`
+- differentiator: `don’t move the project. move yourself.`
+- route: `office wifi → phone hotspot`
+- outcome: `seamless commute`
+- CTA noun: `setup prompt`; action: `copy setup prompt`
+- verified state: `packed`
+- supported agents: `Codex, Claude Code, and Cursor`
+- brand: always `rucksack`, including sentence starts
+- remote evidence: keep `agent — current task observed` and
+  `phone — access confirmed by you` as separate mandatory facts
+
 ## Copy rules
 
 - State facts, not implementation.
 - Use `this mac`, not `the host`.
 - Use “normal sleep,” not “baseline power configuration.”
-- Begin Rucksack work with `rucksack is`.
+- Begin rucksack work with `rucksack is`.
 - Put `your turn` immediately before every user action.
 - Name the condition and automatic continuation before a bounded wait.
 - Keep measured results literal and deterministic.
 - Never ask an agent model to generate handoff copy.
-- Use lowercase for authored human copy. Preserve paths, SSIDs, commands, and provider values
-  exactly.
+- Write the brand as `rucksack`, including sentence starts. Preserve paths, SSIDs,
+  commands, and provider values exactly.
 - Use periods in story copy. Terminal controls and exact technical values are exempt.
 - Name the exact consequence of a failure.
 - Never say “probably.”

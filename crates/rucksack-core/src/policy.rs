@@ -82,7 +82,7 @@ pub fn render_policy(context: &PolicyContext) -> String {
     };
 
     format!(
-        r#"# Rucksack Commute Mode
+        r#"# rucksack Commute Mode
 
 The host Mac is closed or about to be closed, running on battery, and connected through a potentially unstable mobile network.{project}
 

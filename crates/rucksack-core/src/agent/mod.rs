@@ -778,7 +778,7 @@ pub(crate) fn verify_managed_skill(path: &Path) -> AdapterFileEvidence {
             marker_present: false,
             schema_match: Some(false),
             binary_match: None,
-            detail: "The skill exists but is not owned by Rucksack".to_owned(),
+            detail: "The skill exists but is not owned by rucksack".to_owned(),
         };
     }
     let schema_match = current == managed_skill_text();

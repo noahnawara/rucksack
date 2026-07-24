@@ -9,7 +9,7 @@ battery. A tempting framing is “fake a charger.”
 
 ## Decision
 
-Rucksack will not spoof the system power source. It will control only the sleep decision
+rucksack will not spoof the system power source. It will control only the sleep decision
 through a time-bounded `SleepDisabled` lease and will require the transition to battery
 while the lid is open.
 

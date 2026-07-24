@@ -1,6 +1,6 @@
 # Contributing
 
-Rucksack changes a global macOS power-management setting and may run while a laptop is
+rucksack changes a global macOS power-management setting and may run while a laptop is
 closed in a bag. Reliability and safe rollback matter more than feature count.
 
 ## Ground rules

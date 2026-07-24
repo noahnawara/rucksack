@@ -101,7 +101,7 @@ supervised short smoke test with an iPhone Personal Hotspot:
 - the ordinary Wi-Fi route (`en0`, gateway `192.168.1.1`) changed to the hotspot route
   (`en0`, gateway `192.0.0.1`);
 - macOS returned exit code 0 while printing `Could not find network Noah.` for the
-  command-line join, and Rucksack correctly treated it as a failure before requesting the
+  command-line join, and rucksack correctly treated it as a failure before requesting the
   manual Instant Hotspot selection;
 - internet and Codex provider checks passed both before and after the AC-to-battery
   transition;

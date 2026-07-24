@@ -1,6 +1,6 @@
 # Prior art and attribution
 
-Rucksack is deliberately open about the projects that proved pieces of the design.
+rucksack is deliberately open about the projects that proved pieces of the design.
 
 ## Rucksack (Node implementation)
 
@@ -17,7 +17,7 @@ Amphetamine is the mature general-purpose macOS keep-awake utility. Its Power Pr
 helper documents and handles the Apple-silicon external-power transition by narrowly
 allowing `pmset -a disablesleep 0|1`.
 
-Rucksack is not intended to pretend this mechanism is novel. Its contribution is the
+rucksack is not intended to pretend this mechanism is novel. Its contribution is the
 verified commute handoff, bounded safety lifecycle, agent behavior policy, and open
 root-helper architecture.
 
@@ -29,7 +29,7 @@ control should use a privileged helper rather than repeated administrator prompt
 
 ## Design difference
 
-Rucksack’s differentiator is the system:
+rucksack’s differentiator is the system:
 
 ```text
 agent remote

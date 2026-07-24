@@ -12,8 +12,8 @@ edition = "2021"
 rust-version = "1.86"
 license = "MIT"
 repository = "https://github.com/noahnawara/rucksack"
-homepage = "https://github.com/noahnawara/rucksack"
-authors = ["Rucksack contributors"]
+homepage = "https://rucksack-seven.vercel.app"
+authors = ["rucksack contributors"]
 keywords = ["macos", "codex", "claude-code", "cursor", "remote-control"]
 categories = ["command-line-utilities", "development-tools"]
 

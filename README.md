@@ -1,56 +1,43 @@
-# Rucksack
+# rucksack
 
-**Pack the Mac. Keep the agent.**
+**switch to your hotspot. keep your agent running.**
 
-Rucksack is a macOS-first, Rust-native handoff ritual for local coding agents. It keeps a
-Mac reachable after the lid closes, verifies the iPhone-hotspot transition that normally
-breaks the session, and gives Codex, Claude Code, and Cursor a temporary **Commute Mode**
-policy designed for limited attention, battery power, and unreliable mobile networking.
+pack your Mac. keep working from your phone.
+
+[open the setup prompt](https://rucksack-seven.vercel.app) ·
+[installation details](INSTALL.md) · [security](SECURITY.md)
+
+macOS 14+ · Codex, Claude Code, and Cursor · compiler-verified alpha · no signed package yet
+
+rucksack prepares and verifies the move from office wifi to a phone hotspot so you can
+keep steering the same local coding agent from your phone.
+
+## don’t move the project. move yourself.
+
+cloud agents need another environment. rucksack uses the Mac you already set up.
 
 ```text
-$ rucksack pack
-
-🎒 packing up.
-
-→ rucksack is checking the active agent.
-✓ claude is active in this project.
-✓ claude pairing, native trust, and baseline phone visibility were confirmed by you during setup.
-→ rucksack is arming commute mode for claude.
-✓ commute mode is armed for claude with continue focus.
-
-your turn.
-
-→ in the active claude code conversation run `/remote-control`.
-→ wait until `/rc active` appears.
-→ invoke `/commute-mode rucksack-<16-hex-code>` in that exact conversation.
-
-✓ the exact claude task activation was observed.
-→ rucksack is asking macos to join the saved hotspot Max’s iPhone.
-→ rucksack is waiting for Max’s iPhone to become the verified wifi route.
-↳ packing will continue automatically.
-✓ wifi is connected to Max’s iPhone.
-
-your turn.
-
-→ unplug this mac while the lid is open.
-→ rucksack is waiting for battery power.
-↳ packing will continue automatically.
-✓ this mac is running on battery at 78 percent.
-✓ the network and the claude endpoint survived unplugging.
-✓ the safety watcher is running.
-
-🎒 packed.
-
-your turn.
-
-→ lock this mac.
-→ close the lid and go.
-✓ rucksack will restore normal sleep automatically.
+cloud      clone → configure → add secrets
+rucksack   pack → connect hotspot → go
 ```
 
-## The blunt technical truth
+## packed means you can leave.
 
-Rucksack does **not** fake an AC power connection. macOS obtains AC/battery state from
+rucksack checks the transition before reporting `packed`:
+
+- power — running on battery
+- route — phone hotspot has internet
+- agent — current task observed
+- phone — access confirmed by you
+- sleep — closed-lid lease active and bounded
+
+permissions stay unchanged. rucksack never relays your code.
+
+the full pack and unpack language lives in [docs/UX.md](docs/UX.md).
+
+## the technical truth
+
+rucksack does **not** fake an AC power connection. macOS obtains AC/battery state from
 hardware-backed power-management services. Spoofing that state would require unsupported
 private/kernel behavior and would corrupt assumptions used by the rest of the operating
 system.
@@ -63,17 +50,17 @@ The real failure is usually this:
 4. The Mac sleeps.
 5. Wi-Fi and the iPhone hotspot disappear as a consequence.
 
-Rucksack solves the correct problem. A root-owned helper creates a short-lived
+rucksack solves the correct problem. A root-owned helper creates a short-lived
 `SleepDisabled` lease, re-applies it after power-source changes, and restores a verified
 normal baseline when the lease ends. It refuses to start while another utility already
 owns `SleepDisabled` or while Amphetamine/`caffeinate` holds an active sleep assertion.
-Rucksack never stops those utilities itself. The CLI requires the user to unplug **while
+rucksack never stops those utilities itself. The CLI requires the user to unplug **while
 the lid is still open**, verifies the post-transition network path, and only then says it
 is safe to close the lid.
 
 See [docs/POWER.md](docs/POWER.md) for the complete reasoning.
 
-## Product status
+## product status
 
 This repository is a **compiler-verified alpha**. It includes:
 
@@ -92,28 +79,32 @@ The signed/notarized package pipeline is implemented but has not completed the r
 release gate. The next milestone is a package validated across Apple-silicon machines,
 hotspot modes, and current versions of all three agents.
 
-## Native agent support
+## native agent support
 
-| Agent | Remote handoff | Commute policy | State/approval signals | Current limitation |
-|---|---|---|---|---|
-| Codex | attempts `codex remote-control start`; supports `pair` | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus tokenized `$commute-mode` | hooks; App Server is the next richer adapter | hook definitions require one native trust review; an existing conversation invokes the exact one-time command during pack |
-| Claude Code | capability-tested `/remote-control` in the existing conversation | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus tokenized `/commute-mode` | `Notification`, `PermissionRequest`, and `Stop` hooks | an existing interactive session must enable `/remote-control` itself; unsupported versions stop during preflight |
-| Cursor | Cursor for iOS Remote Control | temporary project rule, tokenized `/commute-mode` command, and Cursor hooks | hook telemetry | Remote Control activation/pairing is currently UI-first; linked Git worktrees and nested project directories fail before mutation until their exclude target can be proven safe |
+- **Codex** — rucksack attempts `codex remote-control start`; hook definitions need one
+  native trust review.
+- **Claude Code** — the existing interactive session must enable `/remote-control`;
+  unsupported versions stop during preflight.
+- **Cursor** — Remote Control activation and pairing remain UI-first; unsafe project
+  layouts fail before mutation.
 
-Rucksack does not enable, disable, tighten, or bypass provider permissions. Commute Mode
+all three adapters use a temporary commute policy and native provider signals. see
+[docs/ADAPTERS.md](docs/ADAPTERS.md) for the complete capability matrix.
+
+rucksack does not enable, disable, tighten, or bypass provider permissions. commute mode
 inherits the active Codex, Claude Code, or Cursor session's permission, approval, and
 sandbox configuration exactly. Codex users complete one native trust step after adapter
-installation: open `/hooks`, review the marked Rucksack entries, and trust them.
+installation: open `/hooks`, review the marked rucksack entries, and trust them.
 Setup stores provider-scoped installation, pairing, native-trust, and baseline
 phone-visibility evidence in a private `remote-onboarding.json`. UI-only facts are labeled
 “confirmed by you.” Unchanged `pack` runs reuse that evidence, but every pack still
 requires and machine-observes the fresh tokenized command in the exact live conversation.
 Adapter repair/removal or an explicit new pairing invalidates only the affected evidence.
 
-Version 0.1 has no Rucksack-operated backend, relay, or webhook transport. Provider-native
+Version 0.1 has no rucksack-operated backend, relay, or webhook transport. Provider-native
 remote products carry the coding conversation.
 
-## Commute Mode behavior
+## commute mode behavior
 
 The temporary policy tells the agent to:
 
@@ -128,7 +119,7 @@ Use `--focus finish`, `--focus investigate`, `--focus review`, or `--focus low-p
 specialize the policy. Only an explicit `--focus low-power` asks the agent to defer heavy
 work.
 
-## Intended command surface
+## command reference
 
 ```text
 rucksack setup
@@ -156,14 +147,14 @@ shows that report immediately, and `rucksack report` retrieves it later. Estimat
 data is the aggregate download/upload delta for the verified commute interface; it can
 include unrelated Mac traffic and is not agent-only attribution or carrier billing.
 
-For Wi-Fi, Rucksack can ask macOS to join a configured network without ever putting a
+For Wi-Fi, rucksack can ask macOS to join a configured network without ever putting a
 password in process arguments. A previously saved hotspot can join automatically; Apple
 Instant Hotspot may still require selecting the phone in the Wi-Fi menu. An interactive
 confirmation that the Wi-Fi menu shows the configured
 Instant Hotspot is sufficient evidence when macOS redacts its SSID; the explicit
 `--allow-unverified-ssid` flag is only needed to accept a redacted SSID after a successful
 exact saved-network join request. `--yes` alone is not interactive evidence. `--usb` is a
-separate strict mode: Rucksack waits until `iPhone USB` is the actual default route and
+separate strict mode: rucksack waits until `iPhone USB` is the actual default route and
 will not mistake ordinary Wi-Fi for wired tethering. Strict hotspot and USB sessions bind
 the verified SSID, route interface, and gateway. A different live network releases the
 lease immediately; temporary route loss uses the configured reconnect grace.
@@ -171,7 +162,7 @@ lease immediately; temporary route loss uses the configured reconnect grace.
 `--allow-unverified-remote` may bypass missing stored phone-onboarding or provider-endpoint
 evidence. It never bypasses the fresh exact-task token and provider-session binding.
 
-## Build
+## development
 
 Requirements:
 
@@ -206,9 +197,9 @@ target/debug/rucksack-helper
 For development without the helper, `doctor` and adapter installation still work; a real
 closed-lid session deliberately refuses to start.
 
-## Safety contract
+## safety contract
 
-Rucksack promises a **bounded lease**, not “your Mac will never sleep.”
+rucksack promises a **bounded lease**, not “your Mac will never sleep.”
 
 The helper restores normal sleep when any of these occur:
 
@@ -221,13 +212,13 @@ The helper restores normal sleep when any of these occur:
 - recovery is requested;
 - helper state is inconsistent.
 
-A closed and active laptop can become hot. Rucksack does not restrict builds, VMs,
+A closed and active laptop can become hot. rucksack does not restrict builds, VMs,
 containers, local models, or other task-required workloads. Independently of the agent
 policy, the hardware monitor releases the sleep lease through the helper when macOS reports
 serious/critical thermal pressure or CPU throttling, or when the configured battery floor is
 reached. CPU utilization alone is not treated as overheating.
 
-## Design documents
+## documentation
 
 - [Product and first principles](docs/PRODUCT.md)
 - [User stories and acceptance criteria](docs/USER_STORIES.md)
@@ -241,8 +232,8 @@ reached. CPU utilization alone is not treated as overheating.
 - [Prior art and attribution](docs/PRIOR_ART.md)
 - [Sustainable open-source support](SUPPORT.md)
 
-## Open source
+## open source
 
-Rucksack is MIT-licensed. The root helper is intentionally small and auditable. Security
+rucksack is MIT-licensed. The root helper is intentionally small and auditable. Security
 reports should follow [SECURITY.md](SECURITY.md); contributions should follow
 [CONTRIBUTING.md](CONTRIBUTING.md).

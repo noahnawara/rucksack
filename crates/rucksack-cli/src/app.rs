@@ -385,7 +385,7 @@ fn show_remote_onboarding_instructions(
     if confirmations.contains(&EvidenceKind::NativeTrust) {
         match agent {
             AgentKind::Codex => output
-                .plain("Codex: open `/hooks`, review the marked Rucksack entries, and trust them."),
+                .plain("Codex: open `/hooks`, review the marked rucksack entries, and trust them."),
             AgentKind::Claude => output.plain(
                 "Claude Code: confirm that the active workspace is trusted and native hooks are allowed.",
             ),
@@ -618,7 +618,7 @@ fn adapters(command: AdapterCommand, output: &Output, paths: &AppPaths) -> Resul
                 output.pass("No managed entries needed removal");
             } else {
                 for path in changed {
-                    output.pass(format!("Removed Rucksack entries from {}", path.display()));
+                    output.pass(format!("Removed rucksack entries from {}", path.display()));
                 }
             }
             Ok(())

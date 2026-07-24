@@ -407,7 +407,7 @@ fn validate_data_dir(path: &Path) -> Result<Option<fs::Metadata>> {
         }
     };
     if !metadata.file_type().is_dir() {
-        anyhow::bail!("Rucksack data path {} is not a directory", path.display());
+        anyhow::bail!("rucksack data path {} is not a directory", path.display());
     }
     Ok(Some(metadata))
 }
@@ -462,7 +462,7 @@ fn validate_private_data_dir(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("Could not inspect data directory {}", path.display()))?;
     if !metadata.file_type().is_dir() {
-        anyhow::bail!("Rucksack data path {} is not a directory", path.display());
+        anyhow::bail!("rucksack data path {} is not a directory", path.display());
     }
     #[cfg(unix)]
     {
@@ -472,7 +472,7 @@ fn validate_private_data_dir(path: &Path) -> Result<()> {
         let mode = metadata.permissions().mode() & 0o777;
         if mode != 0o700 {
             anyhow::bail!(
-                "Rucksack data directory {} has permissions {:o}; expected 700",
+                "rucksack data directory {} has permissions {:o}; expected 700",
                 path.display(),
                 mode
             );
@@ -489,7 +489,7 @@ fn validate_data_dir_owner(path: &Path, metadata: &fs::Metadata) -> Result<()> {
         let current_uid = unsafe { libc::geteuid() };
         if metadata.uid() != current_uid {
             anyhow::bail!(
-                "Rucksack data directory {} is owned by uid {}; expected current uid {}",
+                "rucksack data directory {} is owned by uid {}; expected current uid {}",
                 path.display(),
                 metadata.uid(),
                 current_uid

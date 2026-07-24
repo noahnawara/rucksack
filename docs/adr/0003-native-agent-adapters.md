@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-Rucksack needs to alter agent behavior and observe waiting/completion state.
+rucksack needs to alter agent behavior and observe waiting/completion state.
 
 ## Decision
 

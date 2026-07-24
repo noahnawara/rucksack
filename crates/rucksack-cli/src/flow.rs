@@ -116,7 +116,7 @@ fn acquire_helper_lease(
             if error.acquire_needs_cleanup(lease_id) {
                 cleanup.lease_id = Some(lease_id);
                 return Err(error.into_anyhow()).context(
-                    "The helper may have acquired the lease; Rucksack is restoring normal sleep",
+                    "The helper may have acquired the lease; rucksack is restoring normal sleep",
                 );
             }
             Err(error.into_anyhow())
@@ -133,13 +133,13 @@ fn prepare_session_slot_for_pack(paths: &AppPaths) -> Result<()> {
         SessionPhase::Released | SessionPhase::Failed
     ) {
         anyhow::bail!(
-            "Rucksack is already active for {}. Run `rucksack status` or `rucksack unpack`.",
+            "rucksack is already active for {}. Run `rucksack status` or `rucksack unpack`.",
             existing.agent.display_name()
         );
     }
     if !SessionState::clear_if_current(paths, existing.id)? {
         anyhow::bail!(
-            "Rucksack session state changed while packing. Run `rucksack status` and try again."
+            "rucksack session state changed while packing. Run `rucksack status` and try again."
         );
     }
     Ok(())
@@ -415,7 +415,7 @@ fn pack_inner(
     let previous_sleep_disabled = helper_status.previous_sleep_disabled;
     if previous_sleep_disabled != Some(0) {
         anyhow::bail!(
-            "SleepDisabled was already enabled before Rucksack started. End Amphetamine or any other closed-lid utility first so the safety floor can restore ordinary sleep."
+            "SleepDisabled was already enabled before rucksack started. End Amphetamine or any other closed-lid utility first so the safety floor can restore ordinary sleep."
         );
     }
     if helper_status.sleep_disabled != Some(1) {
@@ -704,10 +704,10 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
                 output.pass("This Mac will sleep normally");
             }
             Some(status) if status.sleep_disabled == Some(1) => {
-                output.warn("SleepDisabled is still enabled, but Rucksack owns no lease.");
+                output.warn("SleepDisabled is still enabled, but rucksack owns no lease.");
                 output.plain("End the other closed-lid utility or run `sudo pmset -a disablesleep 0` only after confirming it is safe.");
             }
-            _ => output.warn("Rucksack could not prove the current sleep state."),
+            _ => output.warn("rucksack could not prove the current sleep state."),
         }
         if let Some(error) = view.helper_error.as_deref() {
             output.warn(format!("Power helper status failed: {error}"));
@@ -884,7 +884,7 @@ fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<(
             .is_some_and(|status| status.sleep_disabled != Some(0))
         {
             anyhow::bail!(
-                "Rucksack owns no lease, but SleepDisabled is not 0. End the utility that owns the setting before claiming normal sleep."
+                "rucksack owns no lease, but SleepDisabled is not 0. End the utility that owns the setting before claiming normal sleep."
             );
         }
         cleanup_orphaned_policy(paths)?;
@@ -1523,7 +1523,7 @@ fn wait_for_confirmed_policy(
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
-                "Rucksack did not observe the exact Commute Mode task activation within {} seconds",
+                "rucksack did not observe the exact Commute Mode task activation within {} seconds",
                 timeout.as_secs()
             );
         }
@@ -1817,7 +1817,7 @@ fn require_no_active_sleep_utilities() -> Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     anyhow::bail!(
-        "Active sleep utility detected: {names}. End that utility's session and rerun `rucksack pack`; Rucksack will not stop it automatically."
+        "Active sleep utility detected: {names}. End that utility's session and rerun `rucksack pack`; rucksack will not stop it automatically."
     )
 }
 
@@ -1918,7 +1918,7 @@ fn spawn_daemon(session_id: Uuid, paths: &AppPaths) -> Result<u32> {
 
     let child = command
         .spawn()
-        .context("Could not start the Rucksack watcher")?;
+        .context("Could not start the rucksack watcher")?;
     Ok(child.id())
 }
 
@@ -1928,7 +1928,7 @@ fn stop_owned_remote(session: &SessionState) -> Result<()> {
             let result = codex_remote_stop()?;
             if !result.success() {
                 anyhow::bail!(
-                    "Could not stop Rucksack-owned Codex Remote Control: {}",
+                    "Could not stop rucksack-owned Codex Remote Control: {}",
                     result.combined_trimmed()
                 );
             }
@@ -1956,7 +1956,7 @@ fn phase_has_stoppable_watcher(phase: SessionPhase) -> bool {
 }
 
 fn terminate_session_watcher(pid: u32, session_id: Uuid) -> Result<bool> {
-    terminate_matching_process(pid, "Rucksack safety watcher", |process| {
+    terminate_matching_process(pid, "rucksack safety watcher", |process| {
         process_matches_session_watcher(process, session_id)
     })
 }
@@ -2072,7 +2072,7 @@ fn confirmed_policy_for_session(paths: &AppPaths, session_id: Uuid) -> Result<Ac
     let policy = active_policy_for_session(paths, session_id)?;
     if !policy.provider_binding_confirmed() {
         anyhow::bail!(
-            "Rucksack did not observe the one-time Commute Mode confirmation. Rucksack will roll back; run `rucksack pack` again and invoke the exact command it shows in the target conversation."
+            "rucksack did not observe the one-time Commute Mode confirmation. rucksack will roll back; run `rucksack pack` again and invoke the exact command it shows in the target conversation."
         );
     }
     Ok(policy)
@@ -2165,11 +2165,11 @@ impl<'a> PackCleanup<'a> {
                 Some(AgentKind::Codex) => match codex_remote_stop() {
                     Ok(result) if result.success() => {}
                     Ok(result) => errors.push(format!(
-                        "could not stop Rucksack-owned Codex Remote Control: {}",
+                        "could not stop rucksack-owned Codex Remote Control: {}",
                         result.combined_trimmed()
                     )),
                     Err(error) => errors.push(format!(
-                        "could not stop Rucksack-owned Codex Remote Control: {error}"
+                        "could not stop rucksack-owned Codex Remote Control: {error}"
                     )),
                 },
                 Some(AgentKind::Claude) => {
@@ -2181,7 +2181,7 @@ impl<'a> PackCleanup<'a> {
                         ) {
                             Ok(_) => {}
                             Err(error) => errors.push(format!(
-                                "could not stop Rucksack-owned Claude Code Remote Control: {error:#}"
+                                "could not stop rucksack-owned Claude Code Remote Control: {error:#}"
                             )),
                         }
                     }
@@ -2203,7 +2203,7 @@ impl Drop for PackCleanup<'_> {
     fn drop(&mut self) {
         if !self.committed {
             for error in self.rollback() {
-                eprintln!("Rucksack rollback warning: {error}");
+                eprintln!("rucksack rollback warning: {error}");
             }
         }
     }
@@ -2754,7 +2754,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("Rucksack is restoring normal sleep"));
+            .contains("rucksack is restoring normal sleep"));
         assert_eq!(cleanup.lease_id, Some(lease_id));
         assert!(cleanup.rollback().is_empty());
         cleanup.committed = true;
