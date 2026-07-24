@@ -8,7 +8,9 @@
   text-rendering: optimizeLegibility;
 
   --night: #080a07;
+  --field: #10150d;
   --pass: #151a12;
+  --footer: #181f14;
   --ink: #f4f5eb;
   --muted: #a9b09f;
   --acid: #ceff39;
@@ -521,7 +523,7 @@ h1 {
       180deg,
       rgb(8 10 7 / 0%) 0%,
       #0b0e09 58%,
-      #10140e 100%
+      var(--field) 100%
     );
 }
 
@@ -606,10 +608,10 @@ h1 {
   background:
     radial-gradient(
       26rem 24rem at 76% 40%,
-      rgb(206 255 57 / 6%),
+      rgb(206 255 57 / 4%),
       transparent 74%
     ),
-    linear-gradient(180deg, #10140e 0%, #0e110d 100%);
+    var(--field);
 }
 
 .handoff-proof-inner {
@@ -712,7 +714,8 @@ h1 {
 }
 
 .site-footer {
-  background: #0e110d;
+  background: var(--footer);
+  box-shadow: 0 -1px 0 rgb(244 245 235 / 8%);
 }
 
 .site-footer-inner {
@@ -839,7 +842,7 @@ h1 {
         180deg,
         rgb(8 10 7 / 0%) 0%,
         #0b0e09 58%,
-        #10140e 100%
+        var(--field) 100%
       );
   }
 
@@ -847,10 +850,10 @@ h1 {
     background:
       radial-gradient(
         42rem 30rem at 74% 36%,
-        rgb(206 255 57 / 6%),
+        rgb(206 255 57 / 4%),
         transparent 74%
       ),
-      linear-gradient(180deg, #10140e 0%, #0e110d 100%);
+      var(--field);
   }
 
   .site-header {
