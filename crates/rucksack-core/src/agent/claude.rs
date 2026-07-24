@@ -8,7 +8,8 @@ use super::{
     ManagedFileKind, Mutation, MANAGED_MARKER,
 };
 use crate::paths::AppPaths;
-use anyhow::Result;
+use crate::system::{run_owned, which, CommandResult};
+use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -92,5 +93,11 @@ pub fn claude_remote_server_command(project_name: Option<&str>) -> Vec<String> {
 }
 
 pub fn claude_remote_user_instruction() -> &'static str {
-    "In the active Claude Code session, run `/remote-control`, then return when `/rc active` appears."
+    "in the active claude code conversation run `/remote-control`"
+}
+
+pub fn claude_remote_preflight() -> Result<CommandResult> {
+    let executable = which("claude").ok_or_else(|| anyhow!("claude is not on PATH"))?;
+    let args = vec!["remote-control".to_owned(), "--help".to_owned()];
+    run_owned(executable, &args)
 }

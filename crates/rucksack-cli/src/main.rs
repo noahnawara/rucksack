@@ -34,7 +34,10 @@ fn main() {
                 }
             }
         } else {
-            eprintln!("× {error:#}");
+            eprintln!();
+            eprintln!("rucksack stopped.");
+            eprintln!();
+            eprintln!("{error:#}");
         }
         std::process::exit(1);
     }

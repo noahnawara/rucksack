@@ -1,6 +1,7 @@
 <!-- rucksack-managed -->
 # Commute Mode
 
-Apply the active Rucksack Commute Mode policy for this workspace. Continue the current task
-under its existing instructions and active Cursor configuration. Rucksack changes only the
-temporary focus and handoff context.
+Apply the following temporary operating policy for this conversation. Acknowledge it briefly,
+then continue the current task under its existing instructions and active Cursor configuration.
+
+{{RUCKSACK_ACTIVE_POLICY}}

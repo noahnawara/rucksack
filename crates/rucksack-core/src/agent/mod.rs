@@ -21,7 +21,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-pub use claude::{claude_remote_server_command, claude_remote_user_instruction};
+pub use claude::{
+    claude_remote_preflight, claude_remote_server_command, claude_remote_user_instruction,
+};
 pub use codex::{codex_pair, codex_remote_start, codex_remote_stop};
 pub use cursor::{activate_cursor_rule, deactivate_cursor_rule};
 

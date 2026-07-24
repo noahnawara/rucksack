@@ -58,8 +58,8 @@ The automated and structural review also verifies:
   reconnect grace for route loss;
 - serious/critical thermal pressure or CPU/scheduler throttling releases the lease and
   records the observed limits, while raw CPU utilization alone does not false-trigger;
-- canonical `pack`, `unpack`, and `report` commands with hidden `leave`/`arrive`
-  compatibility aliases;
+- canonical `pack`, `unpack`, and `report` commands with the former lifecycle names
+  rejected;
 - atomic, user-only completed-session reports with aggregate interface-counter deltas that
   become partial/unavailable rather than fabricating zero, restore sleep before final
   accounting, serialize pack/finalization commands, preserve newer session state, and reject

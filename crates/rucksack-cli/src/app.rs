@@ -109,10 +109,10 @@ fn run_doctor(
     }
     output.blank();
     if report.ready {
-        output.plain("Ready for the handoff.");
+        output.plain("Preflight checks passed.");
         Ok(())
     } else {
-        output.plain("Not ready. Fix the failed checks before closing the lid.");
+        output.plain("Preflight checks failed. Fix them before packing.");
         Err(anyhow!("readiness checks failed"))
     }
 }

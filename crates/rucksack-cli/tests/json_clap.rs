@@ -1,7 +1,8 @@
 use serde_json::Value;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn run_rucksack(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rucksack"))
@@ -21,6 +22,26 @@ fn run_rucksack_in_home(arguments: &[&str], home: &Path) -> Output {
         .expect("rucksack should run")
 }
 
+fn run_rucksack_in_home_with_input(arguments: &[&str], home: &Path, input: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rucksack"))
+        .args(arguments)
+        .env("HOME", home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("rucksack should start");
+    child
+        .stdin
+        .take()
+        .expect("stdin should be piped")
+        .write_all(input.as_bytes())
+        .expect("hook input should be written");
+    child.wait_with_output().expect("rucksack should finish")
+}
+
 fn report_file(home: &Path) -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -30,6 +51,13 @@ fn report_file(home: &Path) -> std::path::PathBuf {
     {
         home.join(".local/share/Rucksack/last-report.json")
     }
+}
+
+fn active_policy_file(home: &Path) -> std::path::PathBuf {
+    report_file(home)
+        .parent()
+        .expect("report path should have a parent")
+        .join("active-policy.json")
 }
 
 #[test]
@@ -76,10 +104,10 @@ fn json_flag_keeps_help_human_readable() {
     assert!(!stdout.contains("\n  arrive "));
     assert!(!stdout.contains("\"type\":\"result\""));
 
-    for alias in ["leave", "arrive"] {
-        let alias_help = run_rucksack(&[alias, "--help"]);
-        assert_eq!(alias_help.status.code(), Some(0));
-        assert!(alias_help.stderr.is_empty());
+    for removed_name in ["leave", "arrive"] {
+        let removed_help = run_rucksack(&[removed_name, "--help"]);
+        assert_eq!(removed_help.status.code(), Some(2));
+        assert!(!removed_help.stderr.is_empty());
     }
 }
 
@@ -168,13 +196,13 @@ fn report_reads_manual_and_automatic_sessions_without_mutating_them() {
         assert_eq!(human.status.code(), Some(0));
         assert!(human.stderr.is_empty());
         let human_stdout = String::from_utf8(human.stdout).unwrap();
-        assert!(human_stdout.contains("Last session report"));
-        assert!(human_stdout.contains("Codex · /workspace/atlas"));
-        assert!(human_stdout.contains("Duration 5m 0s"));
+        assert!(human_stdout.contains("🎒 trip report."));
+        assert!(human_stdout.contains("codex worked in /workspace/atlas."));
+        assert!(human_stdout.contains("the rucksack was packed for 5m 0s."));
         assert!(human_stdout.contains(human_end_kind));
         assert!(human_stdout.contains(release_reason));
-        assert!(human_stdout.contains("3.5 MB total"));
-        assert!(human_stdout.contains("not agent-only usage or carrier billing"));
+        assert!(human_stdout.contains("estimated mobile data was 3.5 MB."));
+        assert!(human_stdout.contains("this is not agent only usage or carrier billing."));
 
         let json = run_rucksack_in_home(&["--json", "report"], home.path());
         assert_eq!(json.status.code(), Some(0));
@@ -226,4 +254,75 @@ fn missing_report_returns_one_actionable_json_error_without_creating_state() {
         .as_str()
         .is_some_and(|message| message.contains("rucksack pack")));
     assert!(!path.exists());
+}
+
+#[test]
+fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
+    let policy_text = "lease nonce rucksack-e2e-42";
+    for agent in ["codex", "claude"] {
+        let home = tempfile::tempdir().expect("temporary home should be created");
+        let path = active_policy_file(home.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "version": 1,
+                "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                "agent": agent,
+                "focus": "continue",
+                "project_dir": "/workspace/atlas",
+                "activated_at": "2026-07-24T10:00:00Z",
+                "expires_at": "2099-07-24T11:00:00Z",
+                "policy": policy_text
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let output = run_rucksack_in_home_with_input(
+            &["hook", agent],
+            home.path(),
+            r#"{"hook_event_name":"UserPromptSubmit"}"#,
+        );
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": policy_text
+                }
+            })
+        );
+    }
+
+    let home = tempfile::tempdir().expect("temporary home should be created");
+    let path = active_policy_file(home.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "agent": "cursor",
+            "focus": "continue",
+            "project_dir": "/workspace/atlas",
+            "activated_at": "2026-07-24T10:00:00Z",
+            "expires_at": "2099-07-24T11:00:00Z",
+            "policy": policy_text
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = run_rucksack_in_home_with_input(
+        &["hook", "cursor"],
+        home.path(),
+        r#"{"event_name":"sessionStart"}"#,
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
 }

@@ -25,7 +25,7 @@ Release gate:
 - 50 supervised desk tests across at least three Apple-silicon models;
 - zero machines left sleep-disabled after injected daemon/helper crashes;
 - configuration uninstall is lossless;
-- every “Ready” session survives a 15-minute lid-closed test;
+- every “Packed” session survives a 15-minute lid-closed test;
 - a production-credential package passes signing, notarization, install, upgrade, and
   uninstall verification.
 

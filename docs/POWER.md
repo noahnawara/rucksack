@@ -78,7 +78,7 @@ The product should enforce this order:
 9. Re-assert `SleepDisabled`.
 10. Re-check the route, internet, and provider endpoint.
 11. Start heartbeat/safety monitoring.
-12. Say “Ready.”
+12. Say “Packed.”
 13. User locks and closes the Mac.
 
 Unplugging with the lid open is a deliberate race-elimination strategy. The power-change

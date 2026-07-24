@@ -30,25 +30,28 @@ pub fn run(agent: AgentKind, paths: &AppPaths) -> Result<()> {
         return Ok(());
     }
 
-    match agent {
-        AgentKind::Codex | AgentKind::Claude
-            if matches!(event.as_str(), "SessionStart" | "UserPromptSubmit") =>
-        {
-            let output = json!({
-                "hookSpecificOutput": {
-                    "hookEventName": event,
-                    "additionalContext": policy.policy
-                }
-            });
-            println!("{}", serde_json::to_string(&output)?);
-        }
-        // Cursor's project rule and `/commute-mode` command are the authoritative policy path.
-        // Its sessionStart additional_context response has varied across Cursor releases, so this
-        // hook records lifecycle state but deliberately does not claim context injection.
-        AgentKind::Cursor if event.eq_ignore_ascii_case("sessionStart") => {}
-        _ => {}
+    if let Some(output) = policy_context_output(agent, &event, &policy.policy) {
+        println!("{}", serde_json::to_string(&output)?);
     }
     Ok(())
+}
+
+fn policy_context_output(agent: AgentKind, event: &str, policy: &str) -> Option<Value> {
+    match agent {
+        AgentKind::Codex | AgentKind::Claude
+            if matches!(event, "SessionStart" | "UserPromptSubmit") =>
+        {
+            Some(json!({
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "additionalContext": policy
+                }
+            }))
+        }
+        // Cursor's always-applied project rule and `/commute-mode` command are authoritative.
+        // Cursor hooks record lifecycle state but do not claim per-prompt context delivery.
+        _ => None,
+    }
 }
 
 fn record_event(agent: AgentKind, event: &str, paths: &AppPaths) -> Result<()> {
@@ -358,5 +361,42 @@ mod tests {
         assert_eq!(persisted.revision, revision);
         assert_eq!(persisted.phase, SessionPhase::Active);
         assert!(persisted.last_event.is_none());
+    }
+
+    #[test]
+    fn codex_and_claude_receive_exact_policy_context() {
+        let policy = "lease nonce rucksack-test-42";
+        for agent in [AgentKind::Codex, AgentKind::Claude] {
+            for event in ["SessionStart", "UserPromptSubmit"] {
+                let output = policy_context_output(agent, event, policy).unwrap();
+                assert_eq!(
+                    output,
+                    json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": event,
+                            "additionalContext": policy
+                        }
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn policy_context_is_never_returned_for_permission_or_cursor_hooks() {
+        assert!(
+            policy_context_output(AgentKind::Codex, "PermissionRequest", "do not return this")
+                .is_none()
+        );
+        assert!(policy_context_output(
+            AgentKind::Claude,
+            "PermissionRequest",
+            "do not return this"
+        )
+        .is_none());
+        assert!(
+            policy_context_output(AgentKind::Cursor, "sessionStart", "do not return this")
+                .is_none()
+        );
     }
 }

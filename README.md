@@ -10,32 +10,42 @@ policy designed for limited attention, battery power, and unreliable mobile netw
 ```text
 $ rucksack pack
 
-Rucksack
-Preparing this Mac for the walk home
+🎒 packing up.
 
-Agent
-✓ Claude Code is running
-✓ Remote Control confirmed
-✓ Commute policy loaded
+→ rucksack is checking the active agent.
+✓ claude is active in this project.
+→ rucksack is arming commute mode for claude.
+✓ commute mode is armed for claude with continue focus.
 
-Connection
-→ Connect “Max’s iPhone”
-✓ Online through iPhone
+your turn.
 
-Power
-→ Unplug this Mac
-✓ Running on battery
-✓ Closed-lid lease re-armed
-✓ Remote route still healthy
+→ in the active claude code conversation run `/remote-control`.
+→ wait until `/rc active` appears.
+→ invoke `/commute-mode` in that exact conversation.
+→ open claude on your phone and find that conversation.
 
-Safety
-✓ Battery 78% · sleep at 15%
-✓ Thermals normal
-✓ Ends in 75 minutes
+✓ commute mode and claude code phone visibility were confirmed by you.
+→ rucksack is asking macos to join the saved hotspot Max’s iPhone.
+→ rucksack is waiting for Max’s iPhone to become the verified wifi route.
+↳ packing will continue automatically.
+✓ wifi is connected to Max’s iPhone.
 
-Ready.
-Lock your Mac, close the lid, and go.
-Normal sleep will be restored automatically.
+your turn.
+
+→ unplug this mac while the lid is open.
+→ rucksack is waiting for battery power.
+↳ packing will continue automatically.
+✓ this mac is running on battery at 78 percent.
+✓ the network and the claude endpoint survived unplugging.
+✓ the safety watcher is running.
+
+🎒 packed.
+
+your turn.
+
+→ lock this mac.
+→ close the lid and go.
+✓ rucksack will restore normal sleep automatically.
 ```
 
 ## The blunt technical truth
@@ -86,8 +96,8 @@ hotspot modes, and current versions of all three agents.
 
 | Agent | Remote handoff | Commute policy | State/approval signals | Current limitation |
 |---|---|---|---|---|
-| Codex | attempts `codex remote-control start`; supports `pair` | user skill plus Codex lifecycle hooks | hooks; App Server is the next richer adapter | when the installed CLI lacks standalone Remote Control, an already-running conversation requires explicit phone confirmation |
-| Claude Code | `claude remote-control`, `--remote-control`, or `/remote-control` | skill plus lifecycle hooks | `Notification`, `PermissionRequest`, and `Stop` hooks | an existing interactive session must enable `/remote-control` itself |
+| Codex | attempts `codex remote-control start`; supports `pair` | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus `$commute-mode` | hooks; App Server is the next richer adapter | hook definitions require one native trust review; an existing conversation invokes `$commute-mode` during pack |
+| Claude Code | capability-tested `/remote-control` in the existing conversation | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus `/commute-mode` | `Notification`, `PermissionRequest`, and `Stop` hooks | an existing interactive session must enable `/remote-control` itself; unsupported versions stop during preflight |
 | Cursor | Cursor for iOS Remote Control | temporary project rule, `/commute-mode` command, and Cursor hooks | hook telemetry | Remote Control activation/pairing is currently UI-first; hooks are treated as best-effort |
 
 Rucksack does not enable, disable, tighten, or bypass provider permissions. Commute Mode
@@ -135,8 +145,6 @@ rucksack adapters remove
 
 rucksack pair codex
 ```
-
-`leave` and `arrive` remain hidden compatibility aliases for `pack` and `unpack`.
 
 Every completed session atomically replaces a private local `last-report.json`. `unpack`
 shows that report immediately, and `rucksack report` retrieves it later. Estimated mobile

@@ -32,14 +32,12 @@ pub enum Command {
     Doctor(DoctorArgs),
 
     /// Prepare the Mac, remote, hotspot, and agent policy.
-    #[command(alias = "leave")]
     Pack(PackArgs),
 
     /// Show the active lease, connection, safety, and agent state.
     Status(StatusArgs),
 
     /// Restore normal sleep and remove Commute Mode.
-    #[command(alias = "arrive")]
     Unpack(UnpackArgs),
 
     /// Show the most recent completed-session report.
@@ -265,16 +263,14 @@ mod tests {
     }
 
     #[test]
-    fn legacy_lifecycle_names_parse_as_hidden_canonical_aliases() {
+    fn pack_and_unpack_are_the_only_lifecycle_names() {
         let pack = Cli::try_parse_from(["rucksack", "pack"]).unwrap();
-        let legacy_pack = Cli::try_parse_from(["rucksack", "leave"]).unwrap();
         let unpack = Cli::try_parse_from(["rucksack", "unpack"]).unwrap();
-        let legacy_unpack = Cli::try_parse_from(["rucksack", "arrive"]).unwrap();
 
         assert!(matches!(pack.command, Some(Command::Pack(_))));
-        assert!(matches!(legacy_pack.command, Some(Command::Pack(_))));
         assert!(matches!(unpack.command, Some(Command::Unpack(_))));
-        assert!(matches!(legacy_unpack.command, Some(Command::Unpack(_))));
+        assert!(Cli::try_parse_from(["rucksack", "leave"]).is_err());
+        assert!(Cli::try_parse_from(["rucksack", "arrive"]).is_err());
 
         let help = Cli::command().render_help().to_string();
         assert!(help.contains("\n  pack "));
