@@ -301,7 +301,7 @@ pub fn run(
     };
     let adapter_agents = selected
         .iter()
-        .filter(|detection| detection.installed)
+        .filter(|detection| detection.installed || detection.running)
         .map(|detection| detection.kind)
         .collect::<Vec<_>>();
     for detection in &selected {

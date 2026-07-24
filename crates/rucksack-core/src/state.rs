@@ -43,6 +43,8 @@ pub struct SessionState {
     pub owner_uid: u32,
     pub agent: AgentKind,
     pub project_dir: PathBuf,
+    #[serde(default)]
+    pub provider_session_id: Option<String>,
     pub focus: Focus,
     pub phase: SessionPhase,
     pub started_at: DateTime<Utc>,
@@ -149,6 +151,12 @@ pub struct ActivePolicy {
     pub agent: AgentKind,
     pub focus: Focus,
     pub project_dir: PathBuf,
+    #[serde(default)]
+    pub provider_session_id: Option<String>,
+    #[serde(default)]
+    pub confirmation_token: Option<String>,
+    #[serde(default)]
+    pub cleanup_pending: bool,
     pub activated_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub policy: String,
@@ -247,6 +255,36 @@ impl SessionState {
     pub fn remaining_minutes(&self, now: DateTime<Utc>) -> i64 {
         (self.expires_at - now).num_minutes().max(0)
     }
+
+    pub fn bind_provider_session(
+        paths: &AppPaths,
+        expected_id: Uuid,
+        provider_session_id: &str,
+    ) -> Result<Option<Self>> {
+        with_advisory_lock(&session_lock_path(paths), || {
+            let Some(current) = load_session_file(&paths.session_file)? else {
+                return Ok(None);
+            };
+            if current.id != expected_id {
+                return Ok(None);
+            }
+            match current.provider_session_id.as_deref() {
+                Some(existing) if existing == provider_session_id => Ok(Some(current)),
+                Some(_) => Ok(None),
+                None => {
+                    let next_revision = current
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| anyhow::anyhow!("Session state revision overflow"))?;
+                    let mut next = current;
+                    next.provider_session_id = Some(provider_session_id.to_owned());
+                    next.revision = next_revision;
+                    atomic_write_json(&paths.session_file, &next)?;
+                    Ok(Some(next))
+                }
+            }
+        })
+    }
 }
 
 impl SessionReport {
@@ -333,6 +371,10 @@ fn session_lock_path(paths: &AppPaths) -> PathBuf {
 
 fn report_lock_path(paths: &AppPaths) -> PathBuf {
     paths.report_file.with_extension("lock")
+}
+
+fn policy_lock_path(paths: &AppPaths) -> PathBuf {
+    paths.policy_file.with_extension("lock")
 }
 
 fn load_session_file(path: &std::path::Path) -> Result<Option<SessionState>> {
@@ -473,15 +515,94 @@ impl ActivePolicy {
                 ACTIVE_POLICY_VERSION
             );
         }
-        atomic_write_json(&paths.policy_file, self)
+        with_advisory_lock(&policy_lock_path(paths), || {
+            atomic_write_json(&paths.policy_file, self)
+        })
     }
 
     pub fn clear(paths: &AppPaths) -> Result<()> {
-        remove_if_exists(&paths.policy_file)
+        with_advisory_lock(&policy_lock_path(paths), || {
+            remove_if_exists(&paths.policy_file)
+        })
+    }
+
+    pub fn clear_if_session(paths: &AppPaths, expected_session_id: Uuid) -> Result<bool> {
+        with_advisory_lock(&policy_lock_path(paths), || {
+            let Some(policy) = ActivePolicy::load(paths)? else {
+                return Ok(false);
+            };
+            if policy.session_id != expected_session_id {
+                return Ok(false);
+            }
+            remove_if_exists(&paths.policy_file)?;
+            Ok(true)
+        })
+    }
+
+    pub fn set_cleanup_pending(
+        paths: &AppPaths,
+        expected_session_id: Uuid,
+        cleanup_pending: bool,
+    ) -> Result<Option<Self>> {
+        with_advisory_lock(&policy_lock_path(paths), || {
+            let Some(mut policy) = ActivePolicy::load(paths)? else {
+                return Ok(None);
+            };
+            if policy.session_id != expected_session_id {
+                return Ok(None);
+            }
+            policy.cleanup_pending = cleanup_pending;
+            if cleanup_pending {
+                policy.provider_session_id = None;
+                policy.confirmation_token = None;
+                policy.expires_at = Utc::now();
+                policy.policy.clear();
+            }
+            atomic_write_json(&paths.policy_file, &policy)?;
+            Ok(Some(policy))
+        })
+    }
+
+    pub fn bind_provider_session(
+        paths: &AppPaths,
+        expected_session_id: Uuid,
+        provider_session_id: &str,
+        confirmation_token: &str,
+    ) -> Result<Option<Self>> {
+        with_advisory_lock(&policy_lock_path(paths), || {
+            let Some(mut policy) = ActivePolicy::load(paths)? else {
+                return Ok(None);
+            };
+            if policy.session_id != expected_session_id {
+                return Ok(None);
+            }
+            if policy.cleanup_pending {
+                return Ok(None);
+            }
+            match policy.provider_session_id.as_deref() {
+                Some(existing) if existing == provider_session_id => Ok(Some(policy)),
+                Some(_) => Ok(None),
+                None => {
+                    if policy.confirmation_token.as_deref() != Some(confirmation_token) {
+                        return Ok(None);
+                    }
+                    policy.provider_session_id = Some(provider_session_id.to_owned());
+                    policy.confirmation_token = None;
+                    atomic_write_json(&paths.policy_file, &policy)?;
+                    Ok(Some(policy))
+                }
+            }
+        })
+    }
+
+    pub fn provider_binding_confirmed(&self) -> bool {
+        !self.cleanup_pending
+            && self.provider_session_id.is_some()
+            && self.confirmation_token.is_none()
     }
 
     pub fn is_active(&self, now: DateTime<Utc>) -> bool {
-        now < self.expires_at
+        !self.cleanup_pending && now < self.expires_at
     }
 }
 
@@ -489,6 +610,9 @@ impl ActivePolicy {
 mod tests {
     use super::*;
     use serde_json::Value;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     fn test_paths(root: &std::path::Path) -> AppPaths {
@@ -522,6 +646,7 @@ mod tests {
             owner_uid: 501,
             agent: AgentKind::Codex,
             project_dir: PathBuf::from("/workspace/project"),
+            provider_session_id: None,
             focus: Focus::Continue,
             phase: SessionPhase::Active,
             started_at: now,
@@ -561,6 +686,9 @@ mod tests {
             agent: session.agent,
             focus: session.focus,
             project_dir: session.project_dir.clone(),
+            provider_session_id: None,
+            confirmation_token: Some("rucksack-test-0123456789abcdef".to_owned()),
+            cleanup_pending: false,
             activated_at: session.started_at,
             expires_at: session.expires_at,
             policy: "Keep work bounded.".to_owned(),
@@ -603,6 +731,8 @@ mod tests {
         let object = value.as_object_mut().unwrap();
         for field in [
             "revision",
+            "provider_session_id",
+            "confirmation_token",
             "start_battery_percent",
             "ended_at",
             "mobile_data_start",
@@ -617,12 +747,32 @@ mod tests {
         let loaded = SessionState::load(&paths).unwrap().unwrap();
 
         assert_eq!(loaded.revision, 0);
+        assert_eq!(loaded.provider_session_id, None);
         assert_eq!(loaded.start_battery_percent, None);
         assert_eq!(loaded.ended_at, None);
         assert_eq!(loaded.mobile_data_start, None);
         assert_eq!(loaded.mobile_data_end, None);
         assert!(!loaded.mobile_data_finalized);
         assert_eq!(loaded.mobile_data_error, None);
+
+        let mut policy_value = serde_json::to_value(sample_policy(&loaded)).unwrap();
+        policy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("provider_session_id");
+        policy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("confirmation_token");
+        policy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("cleanup_pending");
+        atomic_write_json(&paths.policy_file, &policy_value).unwrap();
+        let loaded_policy = ActivePolicy::load(&paths).unwrap().unwrap();
+        assert_eq!(loaded_policy.provider_session_id, None);
+        assert_eq!(loaded_policy.confirmation_token, None);
+        assert!(!loaded_policy.cleanup_pending);
     }
 
     #[test]
@@ -803,5 +953,155 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Unsupported session report version 2"));
+    }
+
+    #[test]
+    fn provider_binding_requires_and_consumes_the_confirmation_token() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let session = sample_session();
+        sample_policy(&session).save(&paths).unwrap();
+
+        assert!(ActivePolicy::bind_provider_session(
+            &paths,
+            session.id,
+            "provider-session-1",
+            "rucksack-wrong-token",
+        )
+        .unwrap()
+        .is_none());
+        let unbound = ActivePolicy::load(&paths).unwrap().unwrap();
+        assert_eq!(unbound.provider_session_id, None);
+        assert_eq!(
+            unbound.confirmation_token.as_deref(),
+            Some("rucksack-test-0123456789abcdef")
+        );
+
+        let bound = ActivePolicy::bind_provider_session(
+            &paths,
+            session.id,
+            "provider-session-1",
+            "rucksack-test-0123456789abcdef",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            bound.provider_session_id.as_deref(),
+            Some("provider-session-1")
+        );
+        assert_eq!(bound.confirmation_token, None);
+        assert!(bound.provider_binding_confirmed());
+    }
+
+    #[test]
+    fn cleanup_pending_policy_is_inactive_and_cannot_bind() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let session = sample_session();
+        sample_policy(&session).save(&paths).unwrap();
+
+        let pending = ActivePolicy::set_cleanup_pending(&paths, session.id, true)
+            .unwrap()
+            .unwrap();
+
+        assert!(pending.cleanup_pending);
+        assert!(!pending.is_active(Utc::now()));
+        assert!(!pending.provider_binding_confirmed());
+        assert_eq!(pending.provider_session_id, None);
+        assert_eq!(pending.confirmation_token, None);
+        assert!(pending.policy.is_empty());
+        assert!(ActivePolicy::bind_provider_session(
+            &paths,
+            session.id,
+            "provider-session-1",
+            "rucksack-test-0123456789abcdef",
+        )
+        .unwrap()
+        .is_none());
+        assert!(!ActivePolicy::clear_if_session(&paths, Uuid::new_v4()).unwrap());
+        assert_eq!(
+            ActivePolicy::load(&paths).unwrap().unwrap().session_id,
+            session.id
+        );
+    }
+
+    #[test]
+    fn policy_clear_cannot_be_undone_by_a_concurrent_provider_binding() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let session = sample_session();
+        sample_policy(&session).save(&paths).unwrap();
+        let binding_paths = paths.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let binding = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            ActivePolicy::bind_provider_session(
+                &binding_paths,
+                session.id,
+                "provider-session-1",
+                "rucksack-test-0123456789abcdef",
+            )
+            .unwrap()
+        });
+
+        started_rx.recv().unwrap();
+        ActivePolicy::clear(&paths).unwrap();
+        binding.join().unwrap();
+
+        assert!(ActivePolicy::load(&paths).unwrap().is_none());
+    }
+
+    #[test]
+    fn policy_save_and_clear_wait_for_the_binding_lock() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let session = sample_session();
+        let policy = sample_policy(&session);
+        policy.save(&paths).unwrap();
+
+        let lock_path = policy_lock_path(&paths);
+        let paths_for_save = paths.clone();
+        let replacement = ActivePolicy {
+            policy: "replacement policy".to_owned(),
+            ..policy.clone()
+        };
+        let (save_started_tx, save_started_rx) = mpsc::channel();
+        let (save_finished_tx, save_finished_rx) = mpsc::channel();
+        let (save, save_finished_rx) = with_advisory_lock(&lock_path, move || {
+            let save = thread::spawn(move || {
+                save_started_tx.send(()).unwrap();
+                replacement.save(&paths_for_save).unwrap();
+                save_finished_tx.send(()).unwrap();
+            });
+            save_started_rx.recv().unwrap();
+            assert!(save_finished_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err());
+            Ok((save, save_finished_rx))
+        })
+        .unwrap();
+        save_finished_rx.recv().unwrap();
+        save.join().unwrap();
+
+        let paths_for_clear = paths.clone();
+        let (clear_started_tx, clear_started_rx) = mpsc::channel();
+        let (clear_finished_tx, clear_finished_rx) = mpsc::channel();
+        let (clear, clear_finished_rx) = with_advisory_lock(&lock_path, move || {
+            let clear = thread::spawn(move || {
+                clear_started_tx.send(()).unwrap();
+                ActivePolicy::clear(&paths_for_clear).unwrap();
+                clear_finished_tx.send(()).unwrap();
+            });
+            clear_started_rx.recv().unwrap();
+            assert!(clear_finished_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err());
+            Ok((clear, clear_finished_rx))
+        })
+        .unwrap();
+        clear_finished_rx.recv().unwrap();
+        clear.join().unwrap();
+
+        assert!(ActivePolicy::load(&paths).unwrap().is_none());
     }
 }

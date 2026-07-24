@@ -78,7 +78,13 @@ The hook command is the absolute Rucksack binary:
 '/usr/local/bin/rucksack' hook codex
 ```
 
-When no active Rucksack policy exists, the hook exits successfully with no output.
+When no active Rucksack policy exists, the hook exits successfully with no output. During
+each pack, Rucksack prints a fresh exact command such as
+`$commute-mode rucksack-0123abcd4567ef89`. Only a matching `UserPromptSubmit` whose
+`prompt` field is exactly that command can atomically bind the canonical project and Codex
+session ID. Project identity alone never binds a provider session. Later hooks emit context
+or lifecycle state only when both values still match; missing, conflicting, or unrelated
+correlation fields produce no output and no state change.
 
 When active, `SessionStart` and `UserPromptSubmit` return:
 
@@ -97,9 +103,12 @@ normal Codex prompt.
 ### Existing session
 
 The explicit `$commute-mode` skill is the reliable way to apply the policy immediately to
-a thread that predates activation. Rucksack asks the user to invoke it and confirm the
-acknowledgement during pack. A trusted `UserPromptSubmit` hook also injects the exact active
-policy before each later prompt.
+a thread that predates activation. Rucksack asks the user to invoke the fresh, displayed
+`$commute-mode rucksack-…` command and confirm the acknowledgement during pack. That exact
+prompt consumes the one-time token and binds the provider session to the current Rucksack
+policy. A trusted `UserPromptSubmit` hook injects the exact active policy before each later
+prompt from that same project and session. Normal packing rolls back before creating a
+durable session if this binding is not observed.
 
 Rucksack attempts `codex remote-control start`. If the installed CLI lacks that standalone
 command or startup fails, Rucksack continues only when a Codex conversation is already
@@ -141,6 +150,12 @@ comparison.
 - `PostToolUse`: update active-work state.
 - `Stop`: record a completed turn, not “the entire job is finished.”
 - `SessionEnd`: record session completion.
+
+The first `UserPromptSubmit` whose prompt exactly matches the fresh
+`/commute-mode rucksack-…` command displayed during packing atomically binds the Claude
+Code session ID. Every later context or lifecycle hook must match both the canonical project
+and that session ID. An unrelated Claude Code conversation therefore cannot receive Commute
+Mode context or advance the packed session.
 
 Claude’s Remote Control process exits after an extended network outage of roughly ten
 minutes. Rucksack probes the link and releases after its configured network grace period.
@@ -186,6 +201,16 @@ Rucksack adds a marked block to `.git/info/exclude`, so neither transient file p
 `unpack`, lease expiry, recovery, or preflight rollback.
 
 An unmarked file at either reserved path is never overwritten or removed.
+Cursor policy state is marked cleanup-pending before the first workspace mutation and
+becomes active only after every mutation succeeds. Cleanup marks it inactive before
+removing files and clears the locator only after every artifact is gone. If removal fails,
+the inactive locator remains for `unpack` or `recover` to retry, and a new pack refuses to
+overwrite it.
+
+For a Git-backed Cursor project, version 0.1 requires the selected project to be the
+worktree root and `.git` to be a real directory. Linked worktrees and nested project
+directories fail before any Cursor file is written because Rucksack cannot yet prove their
+external exclude target safely. Non-Git project directories remain supported.
 
 ### Hooks
 
@@ -202,8 +227,12 @@ Rucksack merges best-effort telemetry handlers for:
 Cursor’s hook surface has changed quickly and has had gaps between desktop, CLI, queued
 messages, and background agents. Host safety must never depend on a Cursor hook firing.
 Cursor hooks are not treated as per-prompt policy injection. The always-applied project
-rule is authoritative for new model context, and `/commute-mode` is the explicit path for
-an already-open conversation.
+rule is authoritative for new model context, and `/commute-mode rucksack-…` is the explicit
+path for an already-open conversation. Rucksack reads only the `prompt` field from the
+installed `beforeSubmitPrompt` hook and binds telemetry only when it exactly matches the
+fresh command displayed during packing. If Cursor omits or changes that field, Rucksack
+does not infer the command from another field: binding, context, and lifecycle updates stay
+inactive. Unrelated hook events are ignored.
 
 ### Security
 

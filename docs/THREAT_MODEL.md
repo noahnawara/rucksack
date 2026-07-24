@@ -79,11 +79,19 @@ clients.
 - backup before first mutation;
 - no symlink following for reserved files;
 - ownership check;
+- Cursor policy state remains inactive during activation and cleanup, and its durable
+  project locator is retained until every managed artifact is removed;
 - clean removal of marked entries only.
 
 ## Hook controls
 
 - permission hooks return no decision and do not alter provider settings;
+- a fresh one-time token in the exact Commute Mode prompt atomically binds the canonical
+  project and provider session; project identity alone is insufficient;
+- later context and lifecycle hooks require both correlation values and otherwise fail closed;
+- normal packing creates no durable session before that binding; the explicit
+  `--allow-unverified-remote` path may start an unbound safety session, but hooks remain inert
+  until the token-bearing prompt binds it;
 - no shell construction from hook input;
 - stdin size limit;
 - output is generated from compiled policy and fixed schemas;
@@ -135,6 +143,10 @@ Default Rucksack state should not contain:
 - credentials;
 - pairing codes after display;
 - repository remote URLs.
+
+The active policy temporarily stores a one-time confirmation token until the matching hook
+consumes it. Rucksack never stores the submitted prompt text; the token is cleared when the
+provider session binds.
 
 The completed-session report may store local operational metadata and aggregate start/end
 byte counters for the verified commute interface. Rucksack does not capture packets,

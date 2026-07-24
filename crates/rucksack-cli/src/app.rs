@@ -41,9 +41,9 @@ pub fn run(cli: Cli) -> Result<()> {
             flow::status(&args, &output, &paths)?;
             "status"
         }
-        Some(Command::Unpack(args)) => {
+        Some(Command::Unpack) => {
             let config = Config::load(&paths)?;
-            flow::unpack(&args, &output, &paths, &config)?;
+            flow::unpack(&output, &paths, &config)?;
             "unpack"
         }
         Some(Command::Report) => {
@@ -463,13 +463,18 @@ fn pair(agent: AgentKind, output: &Output) -> Result<()> {
         AgentKind::Claude => {
             output.title("Claude Code Remote Control");
             output.plain("In the active Claude Code session, run `/remote-control`.");
-            output.plain("Use `/commute-mode` once if the session predates Rucksack activation.");
+            output.plain(
+                "During `rucksack pack`, invoke the exact one-time `/commute-mode rucksack-…` command it prints.",
+            );
             Ok(())
         }
         AgentKind::Cursor => {
             output.title("Cursor Remote Control");
             output.plain("In Cursor, open Agents → Remote Control and pair Cursor on your phone.");
             output.plain("Cursor does not currently expose a stable CLI pairing API.");
+            output.plain(
+                "During `rucksack pack`, invoke the exact one-time `/commute-mode rucksack-…` command it prints.",
+            );
             Ok(())
         }
     }

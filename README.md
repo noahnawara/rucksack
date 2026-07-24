@@ -21,7 +21,7 @@ your turn.
 
 → in the active claude code conversation run `/remote-control`.
 → wait until `/rc active` appears.
-→ invoke `/commute-mode` in that exact conversation.
+→ invoke `/commute-mode rucksack-<16-hex-code>` in that exact conversation.
 → open claude on your phone and find that conversation.
 
 ✓ commute mode and claude code phone visibility were confirmed by you.
@@ -96,9 +96,9 @@ hotspot modes, and current versions of all three agents.
 
 | Agent | Remote handoff | Commute policy | State/approval signals | Current limitation |
 |---|---|---|---|---|
-| Codex | attempts `codex remote-control start`; supports `pair` | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus `$commute-mode` | hooks; App Server is the next richer adapter | hook definitions require one native trust review; an existing conversation invokes `$commute-mode` during pack |
-| Claude Code | capability-tested `/remote-control` in the existing conversation | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus `/commute-mode` | `Notification`, `PermissionRequest`, and `Stop` hooks | an existing interactive session must enable `/remote-control` itself; unsupported versions stop during preflight |
-| Cursor | Cursor for iOS Remote Control | temporary project rule, `/commute-mode` command, and Cursor hooks | hook telemetry | Remote Control activation/pairing is currently UI-first; hooks are treated as best-effort |
+| Codex | attempts `codex remote-control start`; supports `pair` | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus tokenized `$commute-mode` | hooks; App Server is the next richer adapter | hook definitions require one native trust review; an existing conversation invokes the exact one-time command during pack |
+| Claude Code | capability-tested `/remote-control` in the existing conversation | exact active policy from `SessionStart` and `UserPromptSubmit` hooks plus tokenized `/commute-mode` | `Notification`, `PermissionRequest`, and `Stop` hooks | an existing interactive session must enable `/remote-control` itself; unsupported versions stop during preflight |
+| Cursor | Cursor for iOS Remote Control | temporary project rule, tokenized `/commute-mode` command, and Cursor hooks | hook telemetry | Remote Control activation/pairing is currently UI-first; linked Git worktrees and nested project directories fail before mutation until their exclude target can be proven safe |
 
 Rucksack does not enable, disable, tighten, or bypass provider permissions. Commute Mode
 inherits the active Codex, Claude Code, or Cursor session's permission, approval, and
