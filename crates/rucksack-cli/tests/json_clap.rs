@@ -259,8 +259,12 @@ fn missing_report_returns_one_actionable_json_error_without_creating_state() {
 #[test]
 fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
     let policy_text = "lease nonce rucksack-e2e-42";
+    let confirmation_token = "rucksack-e2e-0123456789abcdef";
     for agent in ["codex", "claude"] {
         let home = tempfile::tempdir().expect("temporary home should be created");
+        let project = home.path().join("atlas");
+        fs::create_dir_all(&project).unwrap();
+        let project_path = project.to_string_lossy().into_owned();
         let path = active_policy_file(home.path());
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
@@ -270,7 +274,9 @@ fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
                 "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
                 "agent": agent,
                 "focus": "continue",
-                "project_dir": "/workspace/atlas",
+                "project_dir": project_path.clone(),
+                "provider_session_id": null,
+                "confirmation_token": confirmation_token,
                 "activated_at": "2026-07-24T10:00:00Z",
                 "expires_at": "2099-07-24T11:00:00Z",
                 "policy": policy_text
@@ -279,11 +285,41 @@ fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
         )
         .unwrap();
 
-        let output = run_rucksack_in_home_with_input(
+        let uncorrelated = run_rucksack_in_home_with_input(
             &["hook", agent],
             home.path(),
             r#"{"hook_event_name":"UserPromptSubmit"}"#,
         );
+        assert_eq!(uncorrelated.status.code(), Some(0));
+        assert!(uncorrelated.stdout.is_empty());
+        assert!(uncorrelated.stderr.is_empty());
+
+        let missing_prompt = run_rucksack_in_home_with_input(
+            &["hook", agent],
+            home.path(),
+            &serde_json::to_string(&serde_json::json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": project_path,
+                "session_id": "provider-session-1"
+            }))
+            .unwrap(),
+        );
+        assert_eq!(missing_prompt.status.code(), Some(0));
+        assert!(missing_prompt.stdout.is_empty());
+        assert!(missing_prompt.stderr.is_empty());
+
+        let hook_input = serde_json::to_string(&serde_json::json!({
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": project_path,
+            "session_id": "provider-session-1",
+            "prompt": match agent {
+                "codex" => "$commute-mode rucksack-e2e-0123456789abcdef",
+                "claude" => "/commute-mode rucksack-e2e-0123456789abcdef",
+                _ => unreachable!(),
+            }
+        }))
+        .unwrap();
+        let output = run_rucksack_in_home_with_input(&["hook", agent], home.path(), &hook_input);
         assert_eq!(output.status.code(), Some(0));
         assert!(output.stderr.is_empty());
         let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -296,9 +332,18 @@ fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
                 }
             })
         );
+        let persisted_policy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted_policy["provider_session_id"],
+            "provider-session-1"
+        );
+        assert!(persisted_policy["confirmation_token"].is_null());
     }
 
     let home = tempfile::tempdir().expect("temporary home should be created");
+    let project = home.path().join("atlas");
+    fs::create_dir_all(&project).unwrap();
+    let project_path = project.to_string_lossy().into_owned();
     let path = active_policy_file(home.path());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(
@@ -308,7 +353,9 @@ fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
             "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
             "agent": "cursor",
             "focus": "continue",
-            "project_dir": "/workspace/atlas",
+            "project_dir": project_path.clone(),
+            "provider_session_id": null,
+            "confirmation_token": confirmation_token,
             "activated_at": "2026-07-24T10:00:00Z",
             "expires_at": "2099-07-24T11:00:00Z",
             "policy": policy_text
@@ -320,9 +367,21 @@ fn provider_hooks_deliver_exact_policy_only_on_supported_context_events() {
     let output = run_rucksack_in_home_with_input(
         &["hook", "cursor"],
         home.path(),
-        r#"{"event_name":"sessionStart"}"#,
+        &serde_json::to_string(&serde_json::json!({
+            "event_name": "beforeSubmitPrompt",
+            "workspace_roots": [project_path],
+            "conversation_id": "cursor-conversation-1",
+            "prompt": "/commute-mode rucksack-e2e-0123456789abcdef"
+        }))
+        .unwrap(),
     );
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
+    let persisted_policy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        persisted_policy["provider_session_id"],
+        "cursor-conversation-1"
+    );
+    assert!(persisted_policy["confirmation_token"].is_null());
 }

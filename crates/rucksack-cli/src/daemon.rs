@@ -1,6 +1,6 @@
 use crate::helper_client::HelperClient;
 use crate::report;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use rucksack_core::agent::{deactivate_cursor_rule, AgentKind};
 use rucksack_core::files::{append_line, with_advisory_lock};
@@ -146,7 +146,7 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
                         .context("Power-helper heartbeat failed after session state was removed");
                 };
                 session = updated;
-                cleanup_policy(paths, session.agent, &session.project_dir)?;
+                cleanup_policy(paths, session.id, session.agent, &session.project_dir)?;
                 log(
                     paths,
                     &format!(
@@ -617,42 +617,47 @@ fn release_locked(
     // Final accounting is best-effort and must never delay restoration of normal sleep.
     let released_at = Utc::now();
     report::sample_mobile_data(session, true);
-    let mobile_data_end = session.mobile_data_end.clone();
-    let mobile_data_finalized = session.mobile_data_finalized;
-    let mobile_data_error = session.mobile_data_error.clone();
-    let finalizing = SessionState::update(paths, session.id, |mut current| {
-        current.ended_at = Some(released_at);
-        current.battery_percent = terminal_battery_percent;
-        current.network_reachable = terminal_network_reachable;
-        current.route_interface = terminal_route_interface.clone();
-        current.observed_hotspot_ssid = terminal_observed_hotspot_ssid.clone();
-        current.mobile_data_end = mobile_data_end.clone();
-        current.mobile_data_finalized = mobile_data_finalized;
-        current.mobile_data_error = mobile_data_error.clone();
+    session.ended_at = Some(released_at);
+    session.battery_percent = terminal_battery_percent;
+    session.network_reachable = terminal_network_reachable;
+    session.route_interface = terminal_route_interface;
+    session.observed_hotspot_ssid = terminal_observed_hotspot_ssid;
+    let final_accounting = session.clone();
+    let finalizing_result = SessionState::update(paths, session.id, |mut current| {
+        current.ended_at = final_accounting.ended_at;
+        current.battery_percent = final_accounting.battery_percent;
+        current.network_reachable = final_accounting.network_reachable;
+        current.route_interface = final_accounting.route_interface.clone();
+        current.observed_hotspot_ssid = final_accounting.observed_hotspot_ssid.clone();
+        current.mobile_data_end = final_accounting.mobile_data_end.clone();
+        current.mobile_data_finalized = final_accounting.mobile_data_finalized;
+        current.mobile_data_error = final_accounting.mobile_data_error.clone();
         Ok(current)
-    })?;
-    if let Some(finalizing) = finalizing {
-        *session = finalizing;
-    } else {
-        session.ended_at = Some(released_at);
-        session.battery_percent = terminal_battery_percent;
-        session.network_reachable = terminal_network_reachable;
-        session.route_interface = terminal_route_interface;
-        session.observed_hotspot_ssid = terminal_observed_hotspot_ssid;
-        session.mobile_data_end = mobile_data_end;
-        session.mobile_data_finalized = mobile_data_finalized;
-        session.mobile_data_error = mobile_data_error;
+    });
+    let mut completion_errors = Vec::new();
+    match finalizing_result {
+        Ok(Some(finalizing)) => *session = finalizing,
+        Ok(None) => {}
+        Err(error) => completion_errors.push(format!(
+            "final session accounting could not be persisted: {error:#}"
+        )),
+    }
+    if let Err(error) = cleanup_policy(paths, session.id, session.agent, &session.project_dir) {
+        completion_errors.push(format!("commute mode cleanup failed: {error:#}"));
     }
     if let Err(error) = report::archive_session(paths, session, SessionEndKind::Automatic) {
-        log(
-            paths,
-            &format!("normal sleep restored, but the completed-session report failed: {error:#}"),
-        )?;
-        return Err(error).context(
-            "Normal sleep was restored, but the completed-session report could not be saved",
-        );
+        completion_errors.push(format!(
+            "the completed-session report could not be saved: {error:#}"
+        ));
     }
-    cleanup_policy(paths, session.agent, &session.project_dir)?;
+    if !completion_errors.is_empty() {
+        let message = format!(
+            "normal sleep was restored but {}",
+            completion_errors.join("; ")
+        );
+        log(paths, &message)?;
+        return Err(anyhow!(message));
+    }
     if let Some(released) = SessionState::update(paths, session.id, |mut current| {
         current.phase = SessionPhase::Released;
         current.last_event = Some(format!("normal sleep restored: {reason}"));
@@ -667,11 +672,32 @@ fn release_locked(
     Ok(true)
 }
 
-pub fn cleanup_policy(paths: &AppPaths, agent: AgentKind, project: &std::path::Path) -> Result<()> {
-    if agent == AgentKind::Cursor {
-        deactivate_cursor_rule(project)?;
+pub fn cleanup_policy(
+    paths: &AppPaths,
+    session_id: Uuid,
+    agent: AgentKind,
+    project: &std::path::Path,
+) -> Result<()> {
+    if agent != AgentKind::Cursor {
+        ActivePolicy::clear_if_session(paths, session_id)?;
+        return Ok(());
     }
-    ActivePolicy::clear(paths)
+
+    let pending_result = ActivePolicy::set_cleanup_pending(paths, session_id, true);
+    match deactivate_cursor_rule(project) {
+        Ok(_) => {
+            ActivePolicy::clear_if_session(paths, session_id)?;
+            Ok(())
+        }
+        Err(cursor_error) => match pending_result {
+            Ok(_) => Err(cursor_error).context(
+                "Could not remove Cursor commute files; inactive cleanup state was preserved",
+            ),
+            Err(policy_error) => Err(anyhow!(
+                "Could not preserve inactive Cursor cleanup state: {policy_error:#}; could not remove Cursor commute files: {cursor_error:#}"
+            )),
+        },
+    }
 }
 
 fn log(paths: &AppPaths, message: &str) -> Result<()> {
@@ -684,6 +710,93 @@ fn log(paths: &AppPaths, message: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rucksack_core::agent::activate_cursor_rule;
+    use rucksack_core::protocol::{HelperOperation, HelperRequest, HelperResponse, HelperStatus};
+    use std::fs;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    use std::path::{Path, PathBuf};
+    use tempfile::tempdir;
+
+    fn test_paths(root: &Path) -> AppPaths {
+        let data_dir = root.join("data");
+        let log_dir = root.join("logs");
+        AppPaths {
+            home: root.to_path_buf(),
+            data_dir: data_dir.clone(),
+            config_file: data_dir.join("config.toml"),
+            session_file: data_dir.join("session.json"),
+            report_file: data_dir.join("last-report.json"),
+            policy_file: data_dir.join("active-policy.json"),
+            adapter_manifest_file: data_dir.join("adapters.json"),
+            log_dir: log_dir.clone(),
+            daemon_log: log_dir.join("daemon.log"),
+            codex_hooks: root.join(".codex/hooks.json"),
+            codex_skill: root.join(".agents/skills/commute-mode/SKILL.md"),
+            claude_settings: root.join(".claude/settings.json"),
+            claude_skill: root.join(".claude/skills/commute-mode/SKILL.md"),
+            cursor_hooks: root.join(".cursor/hooks.json"),
+        }
+    }
+
+    fn cursor_session(project_dir: PathBuf) -> SessionState {
+        let now = Utc::now();
+        SessionState {
+            version: 1,
+            revision: 0,
+            id: Uuid::new_v4(),
+            lease_id: Uuid::new_v4(),
+            owner_uid: 501,
+            agent: AgentKind::Cursor,
+            project_dir,
+            provider_session_id: None,
+            focus: rucksack_core::Focus::Continue,
+            phase: SessionPhase::Active,
+            started_at: now,
+            expires_at: now + chrono::Duration::minutes(30),
+            last_heartbeat_at: None,
+            daemon_pid: None,
+            expected_hotspot_ssid: Some("Noah".to_owned()),
+            observed_hotspot_ssid: Some("Noah".to_owned()),
+            commute_route_interface: Some("en0".to_owned()),
+            commute_route_gateway: Some("172.20.10.1".to_owned()),
+            route_interface: Some("en0".to_owned()),
+            start_battery_percent: Some(80),
+            battery_percent: Some(78),
+            network_reachable: Some(true),
+            network_outage_started_at: None,
+            phase_before_offline: None,
+            idle_grace_started_at: None,
+            completed_at: None,
+            ended_at: None,
+            mobile_data_start: None,
+            mobile_data_end: None,
+            mobile_data_finalized: false,
+            mobile_data_error: None,
+            previous_sleep_disabled: Some(0),
+            remote_owned_by_rucksack: false,
+            remote_pid: None,
+            remote_confirmed_by_user: true,
+            last_event: None,
+            release_reason: None,
+        }
+    }
+
+    fn active_policy(session: &SessionState) -> ActivePolicy {
+        ActivePolicy {
+            version: 1,
+            session_id: session.id,
+            agent: session.agent,
+            focus: session.focus,
+            project_dir: session.project_dir.clone(),
+            provider_session_id: None,
+            confirmation_token: Some("rucksack-test-0123456789abcdef".to_owned()),
+            cleanup_pending: false,
+            activated_at: session.started_at,
+            expires_at: session.expires_at,
+            policy: "test policy".to_owned(),
+        }
+    }
 
     #[test]
     fn sensor_failures_are_consecutive_and_bounded() {
@@ -853,5 +966,249 @@ mod tests {
             &missing_route,
         )
         .is_none());
+    }
+
+    #[test]
+    fn automatic_release_attempts_cleanup_and_report_after_final_accounting_fails() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut session = cursor_session(project.clone());
+        session.save(&paths).unwrap();
+        let policy = active_policy(&session);
+        policy.save(&paths).unwrap();
+        activate_cursor_rule(&project, &policy).unwrap();
+
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let lease_id = session.lease_id;
+        let session_file = paths.session_file.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request_line)
+                .unwrap();
+            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+            assert!(matches!(
+                &request.operation,
+                HelperOperation::Release {
+                    lease_id: requested_lease_id,
+                    ..
+                } if *requested_lease_id == lease_id
+            ));
+            fs::remove_file(&session_file).unwrap();
+            fs::create_dir(&session_file).unwrap();
+            let response = HelperResponse::success(
+                request.request_id,
+                Some(HelperStatus {
+                    active: false,
+                    lease_id: None,
+                    owner_uid: None,
+                    created_at: None,
+                    expires_at: None,
+                    hard_expires_at: None,
+                    previous_sleep_disabled: None,
+                    sleep_disabled: Some(0),
+                    reason: None,
+                    last_reasserted_at: None,
+                }),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let error = release_locked(
+            &HelperClient::new(&socket),
+            &paths,
+            &mut session,
+            "test release",
+            |_| true,
+        )
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("final session accounting could not be persisted"));
+        assert!(message.contains("the completed-session report could not be saved"));
+        assert!(ActivePolicy::load(&paths).unwrap().is_none());
+        assert!(!project.join(".cursor/rules/rucksack-commute.mdc").exists());
+        assert!(!project.join(".cursor/commands/commute-mode.md").exists());
+        assert!(rucksack_core::SessionReport::load(&paths)
+            .unwrap()
+            .is_none());
+        assert!(paths.session_file.is_dir());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn automatic_release_removes_policy_and_cursor_files_when_report_archival_fails() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let mut session = cursor_session(project.clone());
+        session.save(&paths).unwrap();
+        let policy = active_policy(&session);
+        policy.save(&paths).unwrap();
+        activate_cursor_rule(&project, &policy).unwrap();
+        assert!(project.join(".cursor/rules/rucksack-commute.mdc").exists());
+        assert!(project.join(".cursor/commands/commute-mode.md").exists());
+
+        fs::create_dir_all(&paths.report_file).unwrap();
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let lease_id = session.lease_id;
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request_line)
+                .unwrap();
+            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+            assert!(matches!(
+                &request.operation,
+                HelperOperation::Release {
+                    lease_id: requested_lease_id,
+                    ..
+                } if *requested_lease_id == lease_id
+            ));
+            let response = HelperResponse::success(
+                request.request_id,
+                Some(HelperStatus {
+                    active: false,
+                    lease_id: None,
+                    owner_uid: None,
+                    created_at: None,
+                    expires_at: None,
+                    hard_expires_at: None,
+                    previous_sleep_disabled: None,
+                    sleep_disabled: Some(0),
+                    reason: None,
+                    last_reasserted_at: None,
+                }),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let result = release_locked(
+            &HelperClient::new(&socket),
+            &paths,
+            &mut session,
+            "test release",
+            |_| true,
+        );
+
+        assert!(result.is_err());
+        assert!(ActivePolicy::load(&paths).unwrap().is_none());
+        assert!(!project.join(".cursor/rules/rucksack-commute.mdc").exists());
+        assert!(!project.join(".cursor/commands/commute-mode.md").exists());
+        assert_eq!(
+            SessionState::load(&paths).unwrap().unwrap().phase,
+            SessionPhase::Releasing
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn automatic_release_archives_the_report_when_cursor_cleanup_fails() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        let mut session = cursor_session(project.clone());
+        session.save(&paths).unwrap();
+        active_policy(&session).save(&paths).unwrap();
+        let rule = project.join(".cursor/rules/rucksack-commute.mdc");
+        fs::create_dir_all(rule.parent().unwrap()).unwrap();
+        fs::write(&rule, "unowned rule").unwrap();
+
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let lease_id = session.lease_id;
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request_line)
+                .unwrap();
+            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+            assert!(matches!(
+                &request.operation,
+                HelperOperation::Release {
+                    lease_id: requested_lease_id,
+                    ..
+                } if *requested_lease_id == lease_id
+            ));
+            let response = HelperResponse::success(
+                request.request_id,
+                Some(HelperStatus {
+                    active: false,
+                    lease_id: None,
+                    owner_uid: None,
+                    created_at: None,
+                    expires_at: None,
+                    hard_expires_at: None,
+                    previous_sleep_disabled: None,
+                    sleep_disabled: Some(0),
+                    reason: None,
+                    last_reasserted_at: None,
+                }),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let result = release_locked(
+            &HelperClient::new(&socket),
+            &paths,
+            &mut session,
+            "test release",
+            |_| true,
+        );
+
+        assert!(result.is_err());
+        let retained_policy = ActivePolicy::load(&paths).unwrap().unwrap();
+        assert_eq!(retained_policy.session_id, session.id);
+        assert!(retained_policy.cleanup_pending);
+        assert!(!retained_policy.is_active(Utc::now()));
+        assert!(rule.exists());
+        assert_eq!(
+            rucksack_core::SessionReport::load(&paths)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            session.id
+        );
+        assert_eq!(
+            SessionState::load(&paths).unwrap().unwrap().phase,
+            SessionPhase::Releasing
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn cleanup_policy_retains_inactive_locator_after_cursor_cleanup_fails() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        let session = cursor_session(project.clone());
+        active_policy(&session).save(&paths).unwrap();
+        let rule = project.join(".cursor/rules/rucksack-commute.mdc");
+        fs::create_dir_all(rule.parent().unwrap()).unwrap();
+        fs::write(&rule, "unowned rule").unwrap();
+
+        assert!(cleanup_policy(&paths, session.id, AgentKind::Cursor, &project).is_err());
+        let retained_policy = ActivePolicy::load(&paths).unwrap().unwrap();
+        assert_eq!(retained_policy.session_id, session.id);
+        assert!(retained_policy.cleanup_pending);
+        assert!(!retained_policy.is_active(Utc::now()));
+        assert!(rule.exists());
     }
 }

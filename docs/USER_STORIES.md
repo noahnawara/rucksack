@@ -64,7 +64,8 @@ Acceptance criteria:
   user can explicitly confirm that conversation on the phone;
 - startup failure with no running Codex conversation blocks readiness;
 - first-time pairing is available through `rucksack pair codex`;
-- user-level Codex hooks inject the policy only while a Rucksack session is active;
+- user-level Codex hooks inject the policy only for the canonical project and provider
+  session bound by the fresh `$commute-mode rucksack-…` prompt during packing;
 - a `$commute-mode` skill exists for explicit activation in an existing thread;
 - permission requests may be observed as passive status, but the hook returns no decision
   and the active provider permission configuration remains unchanged;
@@ -81,7 +82,8 @@ Acceptance criteria:
 - the CLI recognizes that an existing interactive session needs `/remote-control`;
 - the current CLI does not start a separate server-mode session and pretend it preserved
   an existing conversation;
-- hooks inject context at session start and prompt submission;
+- hooks inject context only for the canonical project and provider session bound during
+  packing by the fresh `/commute-mode rucksack-…` prompt;
 - `Notification` and `PermissionRequest` update Rucksack’s operational state;
 - a `/commute-mode` skill is installed;
 - Rucksack neither enables nor disables bypass-permission mode and inherits the active
@@ -97,9 +99,12 @@ Acceptance criteria:
 - Cursor process and current workspace are detected;
 - the CLI tells the user where to enable Remote Control;
 - a temporary project rule and `/commute-mode` command are created only for the active Rucksack session;
-- Cursor hooks provide best-effort telemetry;
+- Cursor hooks provide best-effort telemetry only after the exact `/commute-mode rucksack-…`
+  prompt binds the project and provider session;
 - temporary Cursor files and their local `.git/info/exclude` block are removed on `unpack`,
   timeout, recovery, or preflight rollback;
+- failed Cursor cleanup leaves no active policy but retains a durable project locator for
+  the next `unpack` or `recover`, and a new pack cannot overwrite that locator;
 - the CLI labels remote readiness “user confirmed” rather than “verified” when no stable
   API exists.
 

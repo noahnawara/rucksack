@@ -1,6 +1,7 @@
-use crate::cli::{PackArgs, RecoverArgs, StatusArgs, UnpackArgs};
+use crate::cli::{PackArgs, RecoverArgs, StatusArgs};
 use crate::daemon::cleanup_policy;
 use crate::helper_client::HelperClient;
+use crate::hooks::commute_mode_confirmation_command;
 use crate::output::{HumanEvent, Output};
 use crate::report;
 use anyhow::{anyhow, Context, Result};
@@ -21,6 +22,7 @@ use rucksack_core::power::{
     read_active_sleep_utilities, read_power_status, read_sleep_disabled, read_thermal_status,
     PowerSource, ThermalLevel, ThermalStatus,
 };
+use rucksack_core::protocol::HelperStatus;
 use rucksack_core::state::{
     ActivePolicy, SessionEndKind, SessionPhase, SessionReport, SessionState,
 };
@@ -36,6 +38,8 @@ use uuid::Uuid;
 
 const PREFLIGHT_PROBE_ATTEMPTS: u8 = 3;
 const PREFLIGHT_PROBE_RETRY_DELAY: Duration = Duration::from_millis(500);
+const CONFIRMATION_TOKEN_PREFIX: &str = "rucksack-";
+const CONFIRMATION_TOKEN_HEX_LENGTH: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RedactedWifiEvidence {
@@ -89,6 +93,52 @@ fn pack_transaction(
     }
 }
 
+fn acquire_helper_lease(
+    helper: &HelperClient,
+    cleanup: &mut PackCleanup<'_>,
+    lease_id: Uuid,
+    ttl_seconds: u64,
+    hard_expires_at: chrono::DateTime<Utc>,
+    reason: String,
+) -> Result<HelperStatus> {
+    match helper.acquire(lease_id, ttl_seconds, hard_expires_at, reason) {
+        Ok(status) => {
+            cleanup.lease_id = Some(lease_id);
+            Ok(status)
+        }
+        Err(error) => {
+            if error.acquire_needs_cleanup(lease_id) {
+                cleanup.lease_id = Some(lease_id);
+                return Err(error.into_anyhow()).context(
+                    "The helper may have acquired the lease; Rucksack is restoring normal sleep",
+                );
+            }
+            Err(error.into_anyhow())
+        }
+    }
+}
+
+fn prepare_session_slot_for_pack(paths: &AppPaths) -> Result<()> {
+    let Some(existing) = SessionState::load(paths)? else {
+        return Ok(());
+    };
+    if !matches!(
+        existing.phase,
+        SessionPhase::Released | SessionPhase::Failed
+    ) {
+        anyhow::bail!(
+            "Rucksack is already active for {}. Run `rucksack status` or `rucksack unpack`.",
+            existing.agent.display_name()
+        );
+    }
+    if !SessionState::clear_if_current(paths, existing.id)? {
+        anyhow::bail!(
+            "Rucksack session state changed while packing. Run `rucksack status` and try again."
+        );
+    }
+    Ok(())
+}
+
 fn pack_inner(
     args: &PackArgs,
     output: &Output,
@@ -99,16 +149,10 @@ fn pack_inner(
     if !cfg!(target_os = "macos") {
         anyhow::bail!("Closed-lid Commute Mode currently requires macOS");
     }
-    if let Some(existing) = SessionState::load(paths)? {
-        if !matches!(
-            existing.phase,
-            SessionPhase::Released | SessionPhase::Failed
-        ) {
-            anyhow::bail!(
-                "Rucksack is already active for {}. Run `rucksack status` or `rucksack unpack`.",
-                existing.agent.display_name()
-            );
-        }
+    prepare_session_slot_for_pack(paths)?;
+    if ActivePolicy::load(paths)?.is_some() {
+        cleanup_orphaned_policy(paths)
+            .context("Could not finish cleanup from the previous Commute Mode session")?;
     }
 
     let mut config = base_config.clone();
@@ -143,7 +187,7 @@ fn pack_inner(
     }
     require_no_active_sleep_utilities()?;
 
-    let helper = HelperClient::default();
+    let helper = cleanup.helper.clone();
     helper
         .status()
         .context("Power helper unavailable. Run `rucksack helper install` first.")?;
@@ -189,12 +233,17 @@ fn pack_inner(
 
     let now = Utc::now();
     let expires_at = now + ChronoDuration::minutes(config.session.duration_minutes as i64);
-    let policy = ActivePolicy {
+    let confirmation_token = new_confirmation_token();
+    let confirmation_command = commute_mode_confirmation_command(agent, &confirmation_token);
+    let mut policy = ActivePolicy {
         version: 1,
         session_id: Uuid::new_v4(),
         agent,
         focus: config.session.focus,
         project_dir: project_dir.clone(),
+        provider_session_id: None,
+        confirmation_token: Some(confirmation_token),
+        cleanup_pending: agent == AgentKind::Cursor,
         activated_at: now,
         expires_at,
         policy: render_policy(&PolicyContext {
@@ -208,20 +257,26 @@ fn pack_inner(
         "arming commute mode for {agent}"
     )));
     policy.save(paths)?;
-    cleanup.policy_active = true;
+    cleanup.policy_saved = true;
+    cleanup.policy_session_id = Some(policy.session_id);
     if agent == AgentKind::Cursor {
-        activate_cursor_rule(&project_dir, &policy)?;
         cleanup.cursor_project = Some(project_dir.clone());
+        activate_cursor_rule(&project_dir, &policy)?;
+        policy = ActivePolicy::set_cleanup_pending(paths, policy.session_id, false)?
+            .context("Commute Mode policy disappeared during Cursor activation")?;
     }
     output.story(HumanEvent::Fact(format!(
         "commute mode is armed for {agent} with {} focus",
         config.session.focus
     )));
 
-    let remote = prepare_remote(agent, &detection, args, output)?;
+    let remote = prepare_remote(agent, &detection, args, &confirmation_command, output)?;
     cleanup.remote_agent = Some(agent);
     cleanup.remote_owned = remote.owned;
     cleanup.remote_pid = remote.pid;
+    if !args.allow_unverified_remote {
+        confirmed_policy_for_session(paths, policy.session_id)?;
+    }
 
     output.story(HumanEvent::RucksackAction(
         "checking the commute connection".to_owned(),
@@ -316,13 +371,14 @@ fn pack_inner(
     output.story(HumanEvent::RucksackAction(
         "securing the closed lid safety lease".to_owned(),
     ));
-    let helper_status = helper.acquire(
+    let helper_status = acquire_helper_lease(
+        &helper,
+        cleanup,
         lease_id,
         config.session.helper_ttl_seconds,
         expires_at,
         format!("{} commute", agent.display_name()),
     )?;
-    cleanup.lease_id = Some(lease_id);
     let previous_sleep_disabled = helper_status.previous_sleep_disabled;
     if previous_sleep_disabled != Some(0) {
         anyhow::bail!(
@@ -470,6 +526,11 @@ fn pack_inner(
     } else {
         None
     };
+    let policy = if args.allow_unverified_remote {
+        active_policy_for_session(paths, policy.session_id)?
+    } else {
+        confirmed_policy_for_session(paths, policy.session_id)?
+    };
     let mut session = SessionState {
         version: 1,
         revision: 0,
@@ -478,6 +539,7 @@ fn pack_inner(
         owner_uid: current_uid(),
         agent,
         project_dir: project_dir.clone(),
+        provider_session_id: policy.provider_session_id.clone(),
         focus: config.session.focus,
         phase: SessionPhase::Ready,
         started_at: now,
@@ -697,12 +759,7 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
     Ok(())
 }
 
-pub fn unpack(
-    _args: &UnpackArgs,
-    output: &Output,
-    paths: &AppPaths,
-    config: &Config,
-) -> Result<()> {
+pub fn unpack(output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
     with_terminal_operation(paths, || unpack_locked(output, paths, config))
 }
 
@@ -763,7 +820,7 @@ fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<(
         output.story(HumanEvent::RucksackAction(
             "removing commute mode".to_owned(),
         ));
-        cleanup_policy(paths, session.agent, &session.project_dir)?;
+        cleanup_policy(paths, session.id, session.agent, &session.project_dir)?;
         output.story(HumanEvent::Fact("commute mode is removed".to_owned()));
 
         if config.session.stop_owned_remote_on_unpack && session.remote_owned_by_rucksack {
@@ -944,41 +1001,45 @@ fn recover_locked(output: &Output, paths: &AppPaths) -> Result<()> {
         }
     };
 
-    let cursor_project = session
-        .as_ref()
-        .filter(|session| session.agent == AgentKind::Cursor)
-        .map(|session| session.project_dir.as_path())
-        .or_else(|| {
-            policy
-                .as_ref()
-                .filter(|policy| policy.agent == AgentKind::Cursor)
-                .map(|policy| policy.project_dir.as_path())
-        });
-    if let Some(project) = cursor_project {
-        if let Err(error) = rucksack_core::agent::deactivate_cursor_rule(project) {
+    let mut retain_session_for_cursor_cleanup = false;
+    if let Some(policy) = policy.as_ref() {
+        if let Err(error) =
+            cleanup_policy(paths, policy.session_id, policy.agent, &policy.project_dir)
+        {
+            retain_session_for_cursor_cleanup = policy.agent == AgentKind::Cursor;
             cleanup_errors.push(format!(
-                "could not remove the Cursor commute rule from {}: {error}",
-                project.display()
+                "could not remove Commute Mode from {}: {error}",
+                policy.project_dir.display()
             ));
         }
-    }
-    if policy.is_some() {
-        if let Err(error) = ActivePolicy::clear(paths) {
-            cleanup_errors.push(format!("could not clear policy state: {error}"));
+    } else if let Some(cursor_session) = session
+        .as_ref()
+        .filter(|session| session.agent == AgentKind::Cursor)
+    {
+        if let Err(error) =
+            rucksack_core::agent::deactivate_cursor_rule(&cursor_session.project_dir)
+        {
+            retain_session_for_cursor_cleanup = true;
+            cleanup_errors.push(format!(
+                "could not remove the Cursor commute rule from {}: {error}",
+                cursor_session.project_dir.display()
+            ));
         }
     }
     if let Some(session) = session.as_ref() {
         match archive_session_for_recovery(paths, session, output) {
             Ok(report) => {
                 completed_report = Some(report);
-                match SessionState::clear_if_current(paths, session.id) {
-                    Ok(true) => {}
-                    Ok(false) => cleanup_errors.push(
-                        "session state changed during recovery; refusing to clear a newer session"
-                            .to_owned(),
-                    ),
-                    Err(error) => {
-                        cleanup_errors.push(format!("could not clear session state: {error}"))
+                if !retain_session_for_cursor_cleanup {
+                    match SessionState::clear_if_current(paths, session.id) {
+                        Ok(true) => {}
+                        Ok(false) => cleanup_errors.push(
+                            "session state changed during recovery; refusing to clear a newer session"
+                                .to_owned(),
+                        ),
+                        Err(error) => {
+                            cleanup_errors.push(format!("could not clear session state: {error}"))
+                        }
                     }
                 }
             }
@@ -1124,12 +1185,10 @@ fn quarantine_corrupt_file(path: &Path, label: &str) -> Result<PathBuf> {
 }
 
 fn cleanup_orphaned_policy(paths: &AppPaths) -> Result<()> {
-    if let Some(policy) = ActivePolicy::load(paths)? {
-        if policy.agent == AgentKind::Cursor {
-            rucksack_core::agent::deactivate_cursor_rule(&policy.project_dir)?;
-        }
-    }
-    ActivePolicy::clear(paths)
+    let Some(policy) = ActivePolicy::load(paths)? else {
+        return Ok(());
+    };
+    cleanup_policy(paths, policy.session_id, policy.agent, &policy.project_dir)
 }
 
 fn select_agent(
@@ -1277,6 +1336,7 @@ fn prepare_remote(
     agent: AgentKind,
     detection: &AgentDetection,
     args: &PackArgs,
+    confirmation_command: &str,
     output: &Output,
 ) -> Result<RemotePreparation> {
     match agent {
@@ -1312,7 +1372,7 @@ fn prepare_remote(
                 );
             }
             output.story(HumanEvent::UserAction(vec![
-                "in the open codex conversation invoke `$commute-mode`".to_owned(),
+                format!("in the open codex conversation invoke `{confirmation_command}`"),
                 "wait for codex to acknowledge commute mode".to_owned(),
                 "open chatgpt on your phone and find this codex session".to_owned(),
             ]));
@@ -1367,7 +1427,7 @@ fn prepare_remote(
             output.story(HumanEvent::UserAction(vec![
                 claude_remote_user_instruction().to_owned(),
                 "wait until `/rc active` appears".to_owned(),
-                "invoke `/commute-mode` in that exact conversation".to_owned(),
+                format!("invoke `{confirmation_command}` in that exact conversation"),
                 "open claude on your phone and find that conversation".to_owned(),
             ]));
             let confirmed = confirm_remote(
@@ -1388,7 +1448,7 @@ fn prepare_remote(
         }
         AgentKind::Cursor => {
             output.story(HumanEvent::UserAction(vec![
-                "in the open cursor conversation invoke `/commute-mode`".to_owned(),
+                format!("in the open cursor conversation invoke `{confirmation_command}`"),
                 "wait for cursor to acknowledge commute mode".to_owned(),
                 "in cursor open agents and then remote control".to_owned(),
                 "open cursor on your phone and find this local agent".to_owned(),
@@ -1954,10 +2014,36 @@ fn project_name(project: &Path) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn new_confirmation_token() -> String {
+    let token = Uuid::new_v4().simple().to_string();
+    format!(
+        "{CONFIRMATION_TOKEN_PREFIX}{}",
+        &token[..CONFIRMATION_TOKEN_HEX_LENGTH]
+    )
+}
+
+fn active_policy_for_session(paths: &AppPaths, session_id: Uuid) -> Result<ActivePolicy> {
+    ActivePolicy::load(paths)?
+        .filter(|policy| policy.session_id == session_id)
+        .context("Commute Mode policy disappeared before the session could start")
+}
+
+fn confirmed_policy_for_session(paths: &AppPaths, session_id: Uuid) -> Result<ActivePolicy> {
+    let policy = active_policy_for_session(paths, session_id)?;
+    if !policy.provider_binding_confirmed() {
+        anyhow::bail!(
+            "Rucksack did not observe the one-time Commute Mode confirmation. Rucksack will roll back; run `rucksack pack` again and invoke the exact command it shows in the target conversation."
+        );
+    }
+    Ok(policy)
+}
+
 struct PackCleanup<'a> {
     paths: &'a AppPaths,
+    helper: HelperClient,
     lease_id: Option<Uuid>,
-    policy_active: bool,
+    policy_saved: bool,
+    policy_session_id: Option<Uuid>,
     cursor_project: Option<std::path::PathBuf>,
     remote_agent: Option<AgentKind>,
     remote_owned: bool,
@@ -1971,8 +2057,10 @@ impl<'a> PackCleanup<'a> {
     fn new(paths: &'a AppPaths) -> Self {
         Self {
             paths,
+            helper: HelperClient::default(),
             lease_id: None,
-            policy_active: false,
+            policy_saved: false,
+            policy_session_id: None,
             cursor_project: None,
             remote_agent: None,
             remote_owned: false,
@@ -1981,6 +2069,13 @@ impl<'a> PackCleanup<'a> {
             daemon_pid: None,
             committed: false,
         }
+    }
+
+    #[cfg(test)]
+    fn with_helper(paths: &'a AppPaths, helper: HelperClient) -> Self {
+        let mut cleanup = Self::new(paths);
+        cleanup.helper = helper;
+        cleanup
     }
 
     fn rollback(&mut self) -> Vec<String> {
@@ -1994,7 +2089,7 @@ impl<'a> PackCleanup<'a> {
             }
         }
         if let Some(lease_id) = self.lease_id {
-            match HelperClient::default().release(lease_id, "preflight failed") {
+            match self.helper.release(lease_id, "preflight failed") {
                 Ok(status) if !status.active && status.sleep_disabled == Some(0) => {}
                 Ok(status) => errors.push(format!(
                     "power helper did not prove normal sleep was restored: {status:?}"
@@ -2002,17 +2097,27 @@ impl<'a> PackCleanup<'a> {
                 Err(error) => errors.push(format!("could not release power-helper lease: {error}")),
             }
         }
-        if let Some(project) = &self.cursor_project {
-            if let Err(error) = rucksack_core::agent::deactivate_cursor_rule(project) {
-                errors.push(format!(
-                    "could not remove Cursor commute files from {}: {error}",
-                    project.display()
-                ));
-            }
-        }
-        if self.policy_active {
-            if let Err(error) = ActivePolicy::clear(self.paths) {
-                errors.push(format!("could not clear the active policy: {error}"));
+        if self.policy_saved {
+            match (self.policy_session_id, self.cursor_project.as_deref()) {
+                (Some(session_id), Some(project)) => {
+                    if let Err(error) =
+                        cleanup_policy(self.paths, session_id, AgentKind::Cursor, project)
+                    {
+                        errors.push(format!(
+                            "could not remove Cursor commute files from {}: {error}",
+                            project.display()
+                        ));
+                    }
+                }
+                (Some(session_id), None) => {
+                    if let Err(error) = ActivePolicy::clear_if_session(self.paths, session_id) {
+                        errors.push(format!("could not clear the active policy: {error}"));
+                    }
+                }
+                (None, _) => errors.push(
+                    "could not clear the active policy because its session identity was not recorded"
+                        .to_owned(),
+                ),
             }
         }
         if self.remote_owned {
@@ -2067,6 +2172,9 @@ impl Drop for PackCleanup<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rucksack_core::protocol::{HelperOperation, HelperRequest, HelperResponse};
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
     use tempfile::tempdir;
 
     fn test_paths(root: &Path) -> AppPaths {
@@ -2099,6 +2207,7 @@ mod tests {
             owner_uid: 501,
             agent: AgentKind::Codex,
             project_dir: PathBuf::from("/workspace/atlas"),
+            provider_session_id: None,
             focus: rucksack_core::Focus::Continue,
             phase: SessionPhase::Active,
             started_at,
@@ -2374,5 +2483,225 @@ mod tests {
         cleanup.committed = true;
 
         assert!(SessionState::load(&paths).unwrap().is_none());
+    }
+
+    #[test]
+    fn failed_cursor_pack_rollback_retains_an_inactive_cleanup_locator() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        let now = Utc::now();
+        let policy = ActivePolicy {
+            version: 1,
+            session_id: Uuid::new_v4(),
+            agent: AgentKind::Cursor,
+            focus: rucksack_core::Focus::Continue,
+            project_dir: project.clone(),
+            provider_session_id: None,
+            confirmation_token: Some("rucksack-test-0123456789abcdef".to_owned()),
+            cleanup_pending: true,
+            activated_at: now,
+            expires_at: now + ChronoDuration::minutes(30),
+            policy: "test policy".to_owned(),
+        };
+        policy.save(&paths).unwrap();
+        let rule = project.join(".cursor/rules/rucksack-commute.mdc");
+        fs::create_dir_all(rule.parent().unwrap()).unwrap();
+        fs::write(&rule, "unowned rule").unwrap();
+
+        let mut cleanup = PackCleanup::new(&paths);
+        cleanup.policy_saved = true;
+        cleanup.policy_session_id = Some(policy.session_id);
+        cleanup.cursor_project = Some(project);
+        let errors = cleanup.rollback();
+        cleanup.committed = true;
+
+        assert!(!errors.is_empty());
+        let retained_policy = ActivePolicy::load(&paths).unwrap().unwrap();
+        assert_eq!(retained_policy.session_id, policy.session_id);
+        assert!(retained_policy.cleanup_pending);
+        assert!(!retained_policy.is_active(Utc::now()));
+        assert!(rule.exists());
+    }
+
+    #[test]
+    fn completed_session_does_not_block_the_next_pack_confirmation() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let mut completed = session(Utc::now());
+        completed.phase = SessionPhase::Released;
+        completed.save(&paths).unwrap();
+
+        prepare_session_slot_for_pack(&paths).unwrap();
+
+        assert!(SessionState::load(&paths).unwrap().is_none());
+    }
+
+    #[test]
+    fn normal_pack_requires_a_confirmed_provider_binding_before_session_creation() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let now = Utc::now();
+        let token = "rucksack-test-0123456789abcdef";
+        let policy = ActivePolicy {
+            version: 1,
+            session_id: Uuid::new_v4(),
+            agent: AgentKind::Codex,
+            focus: rucksack_core::Focus::Continue,
+            project_dir: directory.path().join("project"),
+            provider_session_id: None,
+            confirmation_token: Some(token.to_owned()),
+            cleanup_pending: false,
+            activated_at: now,
+            expires_at: now + ChronoDuration::minutes(30),
+            policy: "test policy".to_owned(),
+        };
+        policy.save(&paths).unwrap();
+
+        assert!(confirmed_policy_for_session(&paths, policy.session_id).is_err());
+        assert_eq!(
+            active_policy_for_session(&paths, policy.session_id)
+                .unwrap()
+                .provider_session_id,
+            None
+        );
+
+        ActivePolicy::bind_provider_session(&paths, policy.session_id, "provider-session-1", token)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            confirmed_policy_for_session(&paths, policy.session_id)
+                .unwrap()
+                .provider_session_id
+                .as_deref(),
+            Some("provider-session-1")
+        );
+    }
+
+    #[test]
+    fn confirmation_tokens_are_short_and_prefixed_for_copy_paste() {
+        let token = new_confirmation_token();
+
+        assert!(token.starts_with(CONFIRMATION_TOKEN_PREFIX));
+        assert_eq!(
+            token.len(),
+            CONFIRMATION_TOKEN_PREFIX.len() + CONFIRMATION_TOKEN_HEX_LENGTH
+        );
+        assert!(token[CONFIRMATION_TOKEN_PREFIX.len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn orphaned_cursor_policy_retains_inactive_locator_when_rule_is_unowned() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let project = directory.path().join("project");
+        let now = Utc::now();
+        let policy = ActivePolicy {
+            version: 1,
+            session_id: Uuid::new_v4(),
+            agent: AgentKind::Cursor,
+            focus: rucksack_core::Focus::Continue,
+            project_dir: project.clone(),
+            provider_session_id: None,
+            confirmation_token: Some("rucksack-test-0123456789abcdef".to_owned()),
+            cleanup_pending: false,
+            activated_at: now,
+            expires_at: now + ChronoDuration::minutes(30),
+            policy: "test policy".to_owned(),
+        };
+        policy.save(&paths).unwrap();
+
+        let rule = project.join(".cursor/rules/rucksack-commute.mdc");
+        fs::create_dir_all(rule.parent().unwrap()).unwrap();
+        fs::write(&rule, "unowned rule").unwrap();
+
+        let error = cleanup_orphaned_policy(&paths).unwrap_err();
+
+        assert!(format!("{error:#}").contains("unowned Cursor rule"));
+        let retained_policy = ActivePolicy::load(&paths).unwrap().unwrap();
+        assert_eq!(retained_policy.session_id, policy.session_id);
+        assert!(retained_policy.cleanup_pending);
+        assert!(!retained_policy.is_active(Utc::now()));
+        assert!(rule.exists());
+    }
+
+    #[test]
+    fn lost_acquire_response_releases_the_ambiguous_lease_during_rollback() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let lease_id = Uuid::new_v4();
+        let server = thread::spawn(move || {
+            {
+                let (stream, _) = listener.accept().unwrap();
+                let mut request_line = String::new();
+                BufReader::new(stream).read_line(&mut request_line).unwrap();
+                let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+                assert!(matches!(
+                    request.operation,
+                    HelperOperation::Acquire {
+                        lease_id: requested_lease_id,
+                        ..
+                    } if requested_lease_id == lease_id
+                ));
+            }
+
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request_line)
+                .unwrap();
+            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
+            assert!(matches!(
+                request.operation,
+                HelperOperation::Release {
+                    lease_id: requested_lease_id,
+                    ..
+                } if requested_lease_id == lease_id
+            ));
+            let response = HelperResponse::success(
+                request.request_id,
+                Some(HelperStatus {
+                    active: false,
+                    lease_id: None,
+                    owner_uid: None,
+                    created_at: None,
+                    expires_at: None,
+                    hard_expires_at: None,
+                    previous_sleep_disabled: None,
+                    sleep_disabled: Some(0),
+                    reason: None,
+                    last_reasserted_at: None,
+                }),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let helper = HelperClient::new(&socket);
+        let mut cleanup = PackCleanup::with_helper(&paths, helper.clone());
+        let error = acquire_helper_lease(
+            &helper,
+            &mut cleanup,
+            lease_id,
+            60,
+            Utc::now() + ChronoDuration::minutes(5),
+            "test".to_owned(),
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Rucksack is restoring normal sleep"));
+        assert_eq!(cleanup.lease_id, Some(lease_id));
+        assert!(cleanup.rollback().is_empty());
+        cleanup.committed = true;
+        server.join().unwrap();
     }
 }

@@ -110,5 +110,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: 1.86.0
+          components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo build --workspace --release --locked
+
+      - name: Release clippy
+        run: cargo clippy --workspace --all-targets --release --locked -- -D warnings
+
+      - name: Release tests
+        run: cargo test --workspace --release --locked
+
+      - name: Release build
+        run: cargo build --workspace --release --locked

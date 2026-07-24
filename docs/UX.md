@@ -41,7 +41,7 @@ $ rucksack pack
 
 your turn.
 
-→ in the open codex conversation invoke `$commute-mode`.
+→ in the open codex conversation invoke `$commute-mode rucksack-<16-hex-code>`.
 → wait for codex to acknowledge commute mode.
 → open chatgpt on your phone and find this codex session.
 confirm that codex acknowledged commute mode and your phone can see this session [Y/n]
@@ -200,7 +200,7 @@ your turn.
 
 in the active claude code conversation run `/remote-control`.
 wait until `/rc active` appears.
-invoke `/commute-mode` in that exact conversation.
+invoke `/commute-mode rucksack-<16-hex-code>` in that exact conversation.
 open claude on your phone and find that conversation.
 ```
 
@@ -211,7 +211,7 @@ Cursor Remote Control currently requires a UI action:
 ```text
 your turn.
 
-in the open cursor conversation invoke `/commute-mode`.
+in the open cursor conversation invoke `/commute-mode rucksack-<16-hex-code>`.
 wait for cursor to acknowledge commute mode.
 in cursor open agents and then remote control.
 open cursor on your phone and find this local agent.
