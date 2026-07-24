@@ -1,0 +1,125 @@
+# Validation status
+
+Validation date: **2026-07-24**.
+
+This source tree has been compiled and tested on macOS. The compiler gate below passes,
+including strict Clippy and release-helper checks with a dummy CI Team ID. The signed
+package, real privileged power mutation, closed-lid behavior, and hardware/provider matrix
+remain release gates. The project must not be described as production-ready until those
+checks pass.
+
+## Current source inventory
+
+Counts include repository dotfiles and exclude `.git` and `target`:
+
+- 30 Rust source files;
+- 8 TOML files;
+- 3 JSON fixtures/configuration files;
+- 1 launchd plist;
+- 3 YAML workflow/configuration files, including 2 GitHub Actions workflows;
+- 21 Markdown files.
+
+## Completed automated checks
+
+The current tree passes:
+
+```sh
+cargo fmt --all -- --check
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+RUCKSACK_TEAM_ID=CI00000000 \
+  cargo clippy -p rucksack-helper --all-targets --release --locked -- -D warnings
+RUCKSACK_TEAM_ID=CI00000000 \
+  cargo test -p rucksack-helper --release --locked
+```
+
+Test results:
+
+- 93 debug tests: CLI 25, core 57, helper 11;
+- 12 release-helper tests with the dummy CI Team ID;
+- 0 failures.
+
+The automated and structural review also verifies:
+
+- helper protocol version 2 and a persisted non-renewable hard deadline;
+- baseline persistence before mutation and refusal to acquire over an existing
+  `SleepDisabled` owner;
+- owner/root authorization for active lease mutation and recovery;
+- release-build client identifier, Developer ID chain, and Team ID requirements;
+- fixed absolute `pmset -a disablesleep 0|1` execution with cleared environment and
+  bounded time/output;
+- bounded helper connections and request I/O;
+- stale/corrupt helper-state recovery to ordinary sleep;
+- rollback of helper lease, temporary policy, Cursor files, and watcher state;
+- atomic, ownership-aware configuration merges that preserve unrelated entries;
+- bounded captive-portal and provider probes that contain no repository data;
+- strict hotspot/USB route binding, immediate release on confirmed route replacement, and
+  reconnect grace for route loss;
+- a stable `rucksack-universal.pkg` release asset plus checksum, signature, and Gatekeeper
+  validation in `scripts/install.sh`;
+- repository-relative Markdown links.
+
+`CI00000000` exercises release-only authorization code paths; it is not a production
+signing identity and does not validate a signed package.
+
+## Supervised hardware observation
+
+On 2026-07-24, a MacBook Air (`Mac17,4`, Apple M5) running macOS 26.5.2 completed a
+supervised short smoke test with an iPhone Personal Hotspot:
+
+- the ordinary Wi-Fi route (`en0`, gateway `192.168.1.1`) changed to the hotspot route
+  (`en0`, gateway `192.0.0.1`);
+- macOS returned exit code 0 while printing `Could not find network Noah.` for the
+  command-line join, and Rucksack correctly treated it as a failure before requesting the
+  manual Instant Hotspot selection;
+- internet and Codex provider checks passed both before and after the AC-to-battery
+  transition;
+- the helper reported the saved baseline `SleepDisabled=0`, active
+  `SleepDisabled=1`, and a non-renewable hard deadline;
+- with `AppleClamshellState=Yes`, local daemon revisions, helper renewals, the pinned route,
+  and provider health advanced for approximately three minutes;
+- after the lid was reopened for an unrelated call, `rucksack arrive` stopped the watcher
+  and restored `SleepDisabled=0`; the Mac then returned to the ordinary Wi-Fi route.
+
+This is positive smoke-test evidence, not the required 15-minute hardware gate. The run
+was intentionally ended early, so automatic release on ordinary-Wi-Fi return also remains
+to be exercised in a later uninterrupted test.
+
+## Required package gate
+
+Before publishing a tag:
+
+1. build universal binaries with the production Apple Team ID;
+2. sign the CLI, helper, and installer with the intended Developer ID identities;
+3. notarize, staple, and assess the package;
+4. publish `rucksack-universal.pkg` and its checksum under the stable GitHub Release names;
+5. install through `scripts/install.sh`, then upgrade and uninstall on a clean supported
+   Mac;
+6. verify the live helper accepts only the signed CLI and restores normal sleep.
+
+## Required hardware gate
+
+Complete the matrix in `docs/POWER.md` on at least:
+
+- one current Apple-silicon MacBook on the oldest supported macOS release;
+- one current Apple-silicon MacBook on the newest supported macOS release;
+- Wi-Fi Personal Hotspot and USB tethering;
+- Codex, Claude Code, and Cursor at their current stable versions.
+
+The test must include:
+
+1. AC power connected, hotspot connected, remote visible on the phone;
+2. AC→battery transition **with the lid open**;
+3. post-transition `SleepDisabled`, route, captive-network, and provider verification;
+4. lid closure and at least a 15-minute remote session;
+5. battery-floor release;
+6. thermal release or a controlled thermal-state fixture;
+7. user-daemon termination;
+8. helper termination/restart;
+9. reboot with persisted helper state;
+10. `arrive`, `recover`, helper upgrade, and helper uninstall;
+11. exact restoration of normal sleep after every case.
+
+No release should claim production readiness until package, integration, and real-hardware
+checks all pass.

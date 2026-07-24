@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+helper_label=io.rucksack.helper
+plist_path=/Library/LaunchDaemons/io.rucksack.helper.plist
+
+/usr/bin/install -d -o root -g wheel -m 0700 /var/db/rucksack
+/usr/sbin/chown root:wheel \
+    /usr/local/bin/rucksack \
+    /Library/PrivilegedHelperTools/io.rucksack.helper \
+    "$plist_path"
+/bin/chmod 0755 \
+    /usr/local/bin/rucksack \
+    /Library/PrivilegedHelperTools/io.rucksack.helper
+/bin/chmod 0644 "$plist_path"
+
+/bin/launchctl bootstrap system "$plist_path"
+/bin/launchctl kickstart -k "system/$helper_label"

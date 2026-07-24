@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+state_path=/var/db/rucksack/helper-state.json
+helper_label=io.rucksack.helper
+
+if [ -s "$state_path" ]; then
+    echo "Rucksack has an active or interrupted lease. Run 'rucksack arrive' or 'rucksack recover' before installing this update." >&2
+    exit 1
+fi
+
+if /bin/launchctl print "system/$helper_label" >/dev/null 2>&1; then
+    /bin/launchctl bootout "system/$helper_label"
+fi

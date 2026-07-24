@@ -1,0 +1,25 @@
+[package]
+name = "rucksack-helper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Minimal privileged sleep-lease helper for Rucksack"
+publish = false
+
+[[bin]]
+name = "rucksack-helper"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+libc.workspace = true
+rucksack-core = { path = "../rucksack-core", version = "=0.1.0-alpha.1" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"

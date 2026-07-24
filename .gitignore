@@ -1,0 +1,9 @@
+/target
+/dist
+.DS_Store
+*.log
+*.pid
+*.sock
+.env
+.idea/
+.vscode/
