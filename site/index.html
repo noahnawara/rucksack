@@ -68,55 +68,31 @@
           example rucksack commute pass
         </figcaption>
         <p class="visually-hidden" id="pass-summary">
-          rucksack is keeping your Mac awake while its connection moves from
-          wifi to your hotspot. The agent keeps running. rucksack is unpacking
-          automatically when regular wifi returns.
+          The connection moves from wifi to your hotspot while the agent keeps
+          running.
         </p>
 
         <article class="pass">
           <header class="pass-head">
-            <span class="pass-brand">
-              <span class="pass-brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path d="M6 19V5h6c3 0 5 1.5 5 4s-2 4-5 4H6" />
-                  <path d="m12 13 6 6" />
-                </svg>
-              </span>
-              <span class="pass-title">commute pass</span>
-            </span>
-            <span class="pass-code">example</span>
+            <span class="pass-title">commute pass</span>
+            <span class="pass-state">packed</span>
           </header>
 
           <div class="pass-body">
-            <span class="scan-line" aria-hidden="true"></span>
+            <div class="route" role="img" aria-label="wifi to hotspot">
+              <span class="route-point">wifi</span>
 
-            <div class="route-story">
-              <span class="pass-owner">rucksack is</span>
-              <strong class="pass-action">keeping your Mac awake</strong>
+              <span class="route-transfer" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M4 12h15" />
+                  <path d="m14 7 5 5-5 5" />
+                </svg>
+              </span>
 
-              <div class="route" aria-label="wifi to hotspot">
-                <span class="route-point">wifi</span>
-
-                <span class="route-transfer" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M4 12h15" />
-                    <path d="m14 7 5 5-5 5" />
-                  </svg>
-                </span>
-
-                <span class="route-point">hotspot</span>
-              </div>
-
-              <strong class="route-result">agent keeps running</strong>
+              <span class="route-point">hotspot</span>
             </div>
 
-            <div class="validation-row">
-              <span class="validation-stamp">PACKED</span>
-            </div>
-          </div>
-
-          <div class="return-watch">
-            <span class="return-result">wifi back → rucksack is unpacking</span>
+            <strong class="route-result">agent keeps running</strong>
           </div>
 
           <button

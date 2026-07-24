@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }): Promise<void> => {
   );
 });
 
-test("shows one promise, one commute pass, one action, and the live star count", async ({
+test("shows one promise, one distilled commute pass, one action, and the live star count", async ({
   page,
 }): Promise<void> => {
   await page.goto("/");
@@ -44,7 +44,13 @@ test("shows one promise, one commute pass, one action, and the live star count",
   await expect(
     page.getByRole("button", { name: "copy agent prompt" }),
   ).toBeVisible();
-  await expect(page.getByText("example", { exact: true })).toBeVisible();
+  await expect(page.getByText("packed", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("img", { name: "wifi to hotspot" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("agent keeps running", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", {
       level: 2,
@@ -192,12 +198,9 @@ test("keeps every pass phrase on one line at 320 pixels", async ({
 
   const phraseSelectors = [
     ".pass-title",
-    ".pass-code",
-    ".pass-owner",
-    ".pass-action",
+    ".pass-state",
     ".route-point",
     ".route-result",
-    ".return-result",
     ".copy-text",
   ] as const;
 
@@ -221,7 +224,7 @@ test("keeps every pass phrase on one line at 320 pixels", async ({
   );
 });
 
-test("keeps the desktop pass smaller and to the right of the headline", async ({
+test("keeps wide-screen content on one centered two-column grid", async ({
   page,
 }): Promise<void> => {
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -230,37 +233,95 @@ test("keeps the desktop pass smaller and to the right of the headline", async ({
   const hierarchy = await page.evaluate(
     (): {
       readonly headlineFontSize: number;
+      readonly headlineLineHeight: number;
       readonly headlineWidth: number;
+      readonly introLeft: number;
+      readonly outerLeft: number;
+      readonly outerRight: number;
+      readonly passLeft: number;
       readonly passRight: number;
       readonly passWidth: number;
       readonly routeFontSize: number;
+      readonly setupCopyLeft: number;
+      readonly setupHeadlineFontSize: number;
+      readonly setupHeadlineLineHeight: number;
+      readonly setupPathsLeft: number;
+      readonly setupPathsRight: number;
     } => {
+      const header = document.querySelector<HTMLElement>(".site-header");
       const headline = document.querySelector<HTMLElement>("#headline");
+      const intro = document.querySelector<HTMLElement>(".intro");
       const pass = document.querySelector<HTMLElement>("#pass-stage");
       const routeName = document.querySelector<HTMLElement>(".route");
-      if (headline === null || pass === null || routeName === null) {
+      const setupCopy = document.querySelector<HTMLElement>(".setup-copy");
+      const setupHeadline = document.querySelector<HTMLElement>("#setup-title");
+      const setupPaths = document.querySelector<HTMLElement>(".setup-paths");
+      if (
+        header === null ||
+        headline === null ||
+        intro === null ||
+        pass === null ||
+        routeName === null ||
+        setupCopy === null ||
+        setupHeadline === null ||
+        setupPaths === null
+      ) {
         throw new Error("Desktop hierarchy elements are missing");
       }
 
+      const headerBounds = header.getBoundingClientRect();
       const headlineBounds = headline.getBoundingClientRect();
+      const headlineStyle = window.getComputedStyle(headline);
+      const introBounds = intro.getBoundingClientRect();
       const passBounds = pass.getBoundingClientRect();
+      const setupCopyBounds = setupCopy.getBoundingClientRect();
+      const setupHeadlineStyle = window.getComputedStyle(setupHeadline);
+      const setupPathsBounds = setupPaths.getBoundingClientRect();
       return {
-        headlineFontSize: Number.parseFloat(
-          window.getComputedStyle(headline).fontSize,
-        ),
+        headlineFontSize: Number.parseFloat(headlineStyle.fontSize),
+        headlineLineHeight: Number.parseFloat(headlineStyle.lineHeight),
         headlineWidth: headlineBounds.width,
+        introLeft: introBounds.left,
+        outerLeft: headerBounds.left,
+        outerRight: window.innerWidth - headerBounds.right,
+        passLeft: passBounds.left,
         passRight: passBounds.right,
         passWidth: passBounds.width,
         routeFontSize: Number.parseFloat(
           window.getComputedStyle(routeName).fontSize,
         ),
+        setupCopyLeft: setupCopyBounds.left,
+        setupHeadlineFontSize: Number.parseFloat(
+          setupHeadlineStyle.fontSize,
+        ),
+        setupHeadlineLineHeight: Number.parseFloat(
+          setupHeadlineStyle.lineHeight,
+        ),
+        setupPathsLeft: setupPathsBounds.left,
+        setupPathsRight: setupPathsBounds.right,
       };
     },
   );
 
   expect(hierarchy.passWidth).toBeLessThan(hierarchy.headlineWidth);
   expect(hierarchy.routeFontSize).toBeLessThan(hierarchy.headlineFontSize);
-  expect(hierarchy.passRight).toBeGreaterThan(1_300);
+  expect(
+    hierarchy.headlineLineHeight / hierarchy.headlineFontSize,
+  ).toBeCloseTo(1.2, 2);
+  expect(
+    hierarchy.setupHeadlineLineHeight / hierarchy.setupHeadlineFontSize,
+  ).toBeCloseTo(1.2, 2);
+  expect(hierarchy.outerLeft).toBeGreaterThanOrEqual(150);
+  expect(Math.abs(hierarchy.outerLeft - hierarchy.outerRight)).toBeLessThan(1);
+  expect(Math.abs(hierarchy.introLeft - hierarchy.setupCopyLeft)).toBeLessThan(
+    1,
+  );
+  expect(Math.abs(hierarchy.passLeft - hierarchy.setupPathsLeft)).toBeLessThan(
+    1,
+  );
+  expect(Math.abs(hierarchy.passRight - hierarchy.setupPathsRight)).toBeLessThan(
+    1,
+  );
 });
 
 test("shows the final pass state without motion when reduced motion is requested", async ({
@@ -270,8 +331,7 @@ test("shows the final pass state without motion when reduced motion is requested
   await page.goto("/");
 
   await expect(page.locator("#pass-stage")).not.toHaveClass(/is-running/);
-  await expect(page.locator(".scan-line")).toBeHidden();
-  await expect(page.getByText("PACKED", { exact: true })).toBeVisible();
+  await expect(page.getByText("packed", { exact: true })).toBeVisible();
   await expect(
     page.getByText("agent keeps running", { exact: true }),
   ).toBeVisible();

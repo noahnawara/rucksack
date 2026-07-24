@@ -15,7 +15,6 @@ type CopyElements = {
 };
 
 type PassElements = {
-  readonly pass: HTMLElement;
   readonly stage: HTMLElement;
 };
 
@@ -54,7 +53,6 @@ const getCopyElements = (): CopyElements => ({
 });
 
 const getPassElements = (): PassElements => ({
-  pass: requireElement<HTMLElement>(".pass"),
   stage: requireElement<HTMLElement>("#pass-stage"),
 });
 
@@ -120,18 +118,10 @@ const copyPrompt = async (elements: CopyElements): Promise<void> => {
   }
 };
 
-const setScanDistance = (elements: PassElements): void => {
-  elements.pass.style.setProperty(
-    "--scan-distance",
-    `${elements.pass.clientWidth + 4}px`,
-  );
-};
-
 const playPass = (
   elements: PassElements,
   reduceMotion: MediaQueryList,
 ): void => {
-  setScanDistance(elements);
   elements.stage.classList.remove("is-running");
 
   if (reduceMotion.matches) {
@@ -276,9 +266,6 @@ copyElements.button.addEventListener("click", (): void => {
 });
 reduceMotion.addEventListener("change", (): void => {
   playPass(passElements, reduceMotion);
-});
-window.addEventListener("resize", (): void => {
-  setScanDistance(passElements);
 });
 window.addEventListener(
   "load",
