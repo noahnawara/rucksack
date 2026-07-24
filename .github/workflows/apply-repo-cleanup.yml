@@ -23,9 +23,7 @@ jobs:
           set -euo pipefail
           git rm -r -- .agents/skills/impeccable
           if ! grep -qxF '/.agents/' .gitignore; then
-            printf '
-/.agents/
-' >> .gitignore
+            echo '/.agents/' >> .gitignore
           fi
           printf '%s' "$INSTALL_MD_B64" | base64 --decode > INSTALL.md
           printf '%s' "$SETUP_PROMPT_B64" | base64 --decode > site/src/content/install-agent-prompt.txt
