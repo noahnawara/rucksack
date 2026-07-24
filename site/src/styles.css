@@ -10,7 +10,6 @@
   --night: #080a07;
   --field: #10150d;
   --pass: #151a12;
-  --footer: #181f14;
   --ink: #f4f5eb;
   --muted: #a9b09f;
   --acid: #ceff39;
@@ -311,7 +310,7 @@ h1 {
 }
 
 .pass-stage.is-running .pass-body::after {
-  animation: verify-handoff 930ms 520ms cubic-bezier(0.16, 1, 0.3, 1)
+  animation: verify-handoff 1450ms 520ms cubic-bezier(0.65, 0, 0.35, 1)
     both;
 }
 
@@ -605,13 +604,7 @@ h1 {
 }
 
 .handoff-proof {
-  background:
-    radial-gradient(
-      26rem 24rem at 76% 40%,
-      rgb(206 255 57 / 4%),
-      transparent 74%
-    ),
-    var(--field);
+  background: var(--field);
 }
 
 .handoff-proof-inner {
@@ -714,8 +707,7 @@ h1 {
 }
 
 .site-footer {
-  background: var(--footer);
-  box-shadow: 0 -1px 0 rgb(244 245 235 / 8%);
+  background: linear-gradient(180deg, var(--field) 0%, #131810 100%);
 }
 
 .site-footer-inner {
@@ -793,14 +785,19 @@ h1 {
     transform: translateY(-2px);
   }
 
-  16%,
-  70% {
+  12%,
+  88% {
     opacity: 0.8;
+  }
+
+  50% {
+    opacity: 0.8;
+    transform: translateY(13.5rem);
   }
 
   100% {
     opacity: 0;
-    transform: translateY(13.5rem);
+    transform: translateY(-2px);
   }
 }
 
@@ -844,16 +841,6 @@ h1 {
         #0b0e09 58%,
         var(--field) 100%
       );
-  }
-
-  .handoff-proof {
-    background:
-      radial-gradient(
-        42rem 30rem at 74% 36%,
-        rgb(206 255 57 / 4%),
-        transparent 74%
-      ),
-      var(--field);
   }
 
   .site-header {
