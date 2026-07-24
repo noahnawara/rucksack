@@ -38,22 +38,17 @@
     <main id="main">
       <section class="hero" aria-labelledby="hero-title">
         <div class="page-shell">
-          <h1 id="hero-title">
-            <span>keep your agent running</span>
-            <span>on your commute</span>
-          </h1>
+          <div class="hero-content">
+            <h1 id="hero-title">
+              <span>keep your agent running</span>
+              <span>on your commute</span>
+            </h1>
 
-          <div class="hero-intro">
-            <div class="hero-copy">
-              <p>
-                Pack your Mac, close the lid, and keep steering from your phone. rucksack
-                verifies the hotspot, battery transition, closed-lid lease, and safe return to
-                normal sleep.
-              </p>
-              <p class="hero-detail">
-                Built for live Codex, Claude Code, and Cursor sessions on a Mac.
-              </p>
-            </div>
+            <p class="hero-copy">
+              Pack your Mac, close the lid, and keep steering the same Codex,
+              Claude Code, or Cursor session from your phone. rucksack checks the
+              hotspot, power handoff, and safe return to normal sleep.
+            </p>
 
             <div class="action-group action-group--hero">
               <button class="button button--primary" type="button" data-copy-prompt>
@@ -64,76 +59,57 @@
 
           <figure class="handoff" aria-labelledby="handoff-caption">
             <figcaption id="handoff-caption">
-              <span>what packing looks like</span>
+              <code>rucksack pack</code> looks like this
             </figcaption>
-
-            <div class="handoff-owners" aria-hidden="true">
-              <span>rucksack</span>
-              <span>you</span>
-            </div>
 
             <ol class="handoff-route">
               <li class="route-step route-step--rucksack">
-                <span class="route-marker" aria-hidden="true"></span>
                 <div>
-                  <p class="route-action">rucksack is checking the active agent.</p>
-                  <p>codex is active.</p>
-                </div>
-              </li>
-
-              <li class="route-step route-step--rucksack">
-                <span class="route-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="route-action">rucksack is checking the commute connection.</p>
-                  <p>hotspot connected. internet is reachable.</p>
-                </div>
-              </li>
-
-              <li class="route-step route-step--rucksack">
-                <span class="route-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="route-action">rucksack is checking power.</p>
-                  <p>power is connected.</p>
+                  <p class="route-action">
+                    rucksack is checking the active agent, connection, and power.
+                  </p>
+                  <p>
+                    codex remote control is running. hotspot connected. internet
+                    is reachable. power is connected.
+                  </p>
+                  <p class="route-action route-action--continued">
+                    rucksack is securing closed-lid protection.
+                  </p>
+                  <p>closed-lid protection active.</p>
                 </div>
               </li>
 
               <li class="route-step route-step--user">
-                <span class="route-marker" aria-hidden="true"></span>
                 <div>
-                  <p class="route-action">
-                    <span class="route-owner">you</span>
-                    unplug this mac while the lid is open.
-                  </p>
+                  <p class="route-owner">you</p>
+                  <p class="route-action">unplug this mac while the lid is open.</p>
                 </div>
               </li>
 
               <li class="route-step route-step--rucksack route-step--waiting">
-                <span class="route-marker" aria-hidden="true"></span>
                 <div>
                   <p class="route-action">rucksack is waiting for battery power.</p>
                   <p>packing will continue automatically.</p>
-                  <p>this mac is running on battery.</p>
+                  <p>
+                    this mac is running on battery. internet and the codex endpoint
+                    are reachable after unplugging.
+                  </p>
                 </div>
               </li>
 
               <li class="route-step route-step--rucksack">
-                <span class="route-marker" aria-hidden="true"></span>
                 <div>
-                  <p class="route-action">
-                    rucksack is securing the closed lid safety lease.
-                  </p>
-                  <p>the lease is active. the safety watcher is running.</p>
+                  <p class="route-action">rucksack is rechecking closed-lid protection.</p>
+                  <p>closed-lid protection active. the safety watcher is running.</p>
                   <p class="route-complete">packed.</p>
                 </div>
               </li>
 
               <li class="route-step route-step--user">
-                <span class="route-marker" aria-hidden="true"></span>
                 <div>
-                  <p class="route-action">
-                    <span class="route-owner">you</span>
-                    close the lid and go.
-                  </p>
+                  <p class="route-owner">you</p>
+                  <p class="route-action">lock this mac.</p>
+                  <p class="route-action">close the lid and go.</p>
                 </div>
               </li>
             </ol>
@@ -142,128 +118,118 @@
       </section>
 
       <section class="section" aria-labelledby="agents-title">
-        <div class="page-shell section-layout">
+        <div class="page-shell">
           <header class="section-heading">
-            <p class="eyebrow">supported agents</p>
-            <h2 id="agents-title">works with the agents you already use</h2>
+            <h2 id="agents-title">works with Codex, Claude Code, and Cursor</h2>
             <p>
-              rucksack connects through each agent’s own remote tools. It never changes
-              permissions, approvals, or sandbox settings.
+              rucksack uses each agent’s own remote tools. The session’s permissions,
+              approvals, and sandbox settings stay exactly as you set them.
             </p>
           </header>
 
           <ul class="agent-list" aria-label="Supported coding agents">
             <li>
               <h3>Codex</h3>
-              <div>
-                <p>Starts Remote Control when the installed CLI supports it</p>
-                <p class="agent-handoff">
-                  Review rucksack in <code>/hooks</code> and trust it once
-                </p>
-              </div>
+              <p>
+                Attempts to start Remote Control when supported. Review and trust
+                rucksack once in <code>/hooks</code>.
+              </p>
             </li>
             <li>
               <h3>Claude Code</h3>
-              <div>
-                <p>Keeps the existing conversation through <code>/remote-control</code></p>
-                <p class="agent-handoff">
-                  Enable it inside that exact conversation
-                </p>
-              </div>
+              <p>
+                Keeps the current conversation through <code>/remote-control</code>.
+                Enable it in that conversation.
+              </p>
             </li>
             <li>
               <h3>Cursor</h3>
-              <div>
-                <p>Uses Cursor for iOS Remote Control and temporary project rules</p>
-                <p class="agent-handoff">
-                  Open Agents → Remote Control and confirm the phone sees it
-                </p>
-              </div>
+              <p>
+                Uses Cursor for iOS Remote Control and adds a temporary project
+                rule. Open Agents → Remote Control and confirm the session on your
+                phone.
+              </p>
             </li>
           </ul>
         </div>
       </section>
 
       <section class="section safety" aria-labelledby="safety-title">
-        <div class="page-shell section-layout">
+        <div class="page-shell">
           <header class="section-heading">
-            <p class="eyebrow">safe failure unpacks</p>
             <h2 id="safety-title">packed for the commute, not forever</h2>
             <p>
-              rucksack unpacks automatically when the session ends or the Mac can no
-              longer prove it is safe, restoring normal sleep.
+              rucksack unpacks when you run <code>rucksack unpack</code>, the
+              deadline arrives, the battery reaches its floor, macOS reports serious
+              or critical thermal pressure or CPU throttling, or a different live
+              commute route is confirmed. If the watcher stops checking in, its
+              helper lease still restores normal sleep, but the interrupted session
+              may need recovery before a trip report is available.
             </p>
           </header>
 
           <div class="safety-content">
-            <ul class="release-list" aria-label="Normal sleep restoration conditions">
-              <li>rucksack unpack</li>
-              <li>the hard deadline</li>
-              <li>a missing watcher heartbeat</li>
-              <li>the battery floor</li>
-              <li>thermal pressure or cpu throttling</li>
-              <li>a confirmed route replacement</li>
-            </ul>
-
             <div class="automatic-unpack">
               <p class="owner owner--rucksack">
                 rucksack is unpacking automatically.
               </p>
               <p>normal sleep restored.</p>
-              <p>the safety watcher has stopped.</p>
-              <p>commute mode is removed.</p>
               <p>trip report saved.</p>
             </div>
 
-            <p class="local-note">
-              No rucksack backend, relay, or webhook carries your code or conversation.
-              Provider-native remote products do that work.
-            </p>
+            <div class="trust-notes">
+              <p>
+                <strong>your settings stay yours</strong>
+                reversible adapters remove only rucksack-owned configuration.
+              </p>
+              <p>
+                <strong>your code stays with your agent</strong>
+                no rucksack backend, relay, or webhook carries your code or
+                conversation.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
       <section class="section install" id="install" aria-labelledby="install-title">
-        <div class="page-shell section-layout">
+        <div class="page-shell">
           <header class="section-heading">
-            <p class="eyebrow">get started</p>
-            <h2 id="install-title">install it with the agent you already use</h2>
+            <h2 id="install-title">copy one prompt into your agent</h2>
             <p>
-              The prompt checks this Mac, finds supported agents, verifies the release,
-              and stops before unsafe fallbacks.
+              It requires macOS 14 or newer, checks this Mac, and verifies the
+              latest release before changing anything.
             </p>
           </header>
 
           <div class="install-content">
             <p class="alpha-note">
               <strong>compiler-verified alpha</strong>
-              No signed package is published yet. Source installation requires your
-              explicit approval.
+              <span>
+                No signed package is published and hardware release testing is
+                not complete. The prompt stops and asks before using the unsigned
+                development build.
+              </span>
             </p>
 
             <div class="action-group action-group--install">
               <button class="button button--primary" type="button" data-copy-prompt>
                 copy the agent prompt
               </button>
-              <p class="action-note">
-                Paste it into Codex, Claude Code, or Cursor on the Mac you want to prepare.
-              </p>
             </div>
 
             <p class="no-js-message">
               open the prompt below, select it, and copy it manually
             </p>
 
-            <div class="prompt-inspector">
-              <details id="install-prompt-details">
-                <summary>read the complete agent prompt</summary>
-                <pre
-                  id="install-prompt-container"
-                  tabindex="0"
-                  aria-label="Complete rucksack installation agent prompt"
-                ><code id="install-prompt">%%rucksack_install_agent_prompt%%</code></pre>
-              </details>
-            </div>
+            <details id="install-prompt-details">
+              <summary>read the complete agent prompt</summary>
+              <pre
+                id="install-prompt-container"
+                tabindex="0"
+                aria-label="Complete rucksack installation agent prompt"
+              ><code id="install-prompt">%%rucksack_install_agent_prompt%%</code></pre>
+            </details>
           </div>
         </div>
       </section>
@@ -276,7 +242,6 @@
             <span aria-hidden="true">🎒</span>
             <span>rucksack</span>
           </p>
-          <p>keep your agent running on your commute</p>
         </div>
         <div class="owned-link owned-link--footer">
           <a href="https://github.com/noahnawara/rucksack">read source</a>

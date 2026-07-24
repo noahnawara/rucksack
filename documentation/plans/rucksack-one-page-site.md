@@ -89,20 +89,21 @@ The page contains four content blocks and a footer.
 
 A single chronological handoff demonstrates:
 
-1. rucksack checks the active agent.
-2. rucksack checks the commute connection.
-3. rucksack checks power.
-4. you unplug the Mac while the lid is open.
-5. rucksack waits for battery power and continues automatically.
-6. rucksack secures the closed-lid safety lease and reports `packed`.
-7. you close the lid and go.
+1. rucksack checks the active agent remote, connection, and power.
+2. rucksack secures closed-lid protection.
+3. you unplug the Mac while the lid is open.
+4. rucksack waits for battery power, then rechecks internet and the agent endpoint.
+5. rucksack rechecks closed-lid protection and reports `packed`.
+6. you lock the Mac, close the lid, and go.
 
-Desktop uses two lanes around one center line. Mobile uses one chronological line. The two
-human steps include a visible `you` label so ownership does not depend on orange color.
+Every viewport uses the same compact linear log. It has no lane header, center rail,
+markers, or step dividers. The two human steps include a visible `you` label so ownership
+does not depend on orange color.
 
 ### 3. supported agents
 
-Three plain rows describe only the current integration boundary:
+Three unruled columns on desktop and spaced text groups on mobile describe only the current
+integration boundary:
 
 - Codex: starts Remote Control when the installed CLI supports it; the user reviews
   rucksack in `/hooks` and trusts it once.
@@ -116,18 +117,18 @@ unchanged.
 
 ### 4. automatic unpack and install
 
-The safety section explains that packing is bounded. Normal sleep returns on:
-
-- `rucksack unpack`;
-- the hard deadline;
-- a missing watcher heartbeat;
-- the battery floor;
-- thermal pressure or CPU throttling;
-- a confirmed route replacement.
+The safety section explains that packing is bounded. The live watcher restores normal sleep
+and archives the report after `rucksack unpack`, the hard deadline, the battery floor,
+serious or critical thermal pressure or CPU throttling, or a confirmed route replacement.
+If the watcher heartbeat fails, the helper lease still restores normal sleep without
+promising a trip report. A three-line unpack example states the healthy automatic-release
+outcome. Two short trust notes keep configuration cleanup and the no-backend boundary
+visible.
 
 The install section:
 
-- repeats the compiler-verified alpha limitation;
+- repeats the compiler-verified alpha, unsigned-build, and incomplete hardware-gate
+  limitations;
 - exposes the same copy action;
 - keeps the complete prompt readable in the page;
 - remains readable when JavaScript is disabled;
@@ -136,7 +137,6 @@ The install section:
 ### footer
 
 - lowercase wordmark
-- exact value proposition
 - GitHub source and security links
 
 ## language system
@@ -171,6 +171,8 @@ The design is a quiet field manual, not a generic SaaS landing page.
 - No gradients, glass panels, floating cards, fake dashboards, glow effects, stock
   illustrations, testimonial strips, or decorative metrics.
 - No shadows or rounded-card collection.
+- No generic section dividers, timeline rails, list rules, or decorative markers.
+- Whitespace, proximity, and two meaningful background shifts carry the hierarchy.
 - One shell width and one horizontal inset system align the entire page.
 
 ## responsive behavior
@@ -190,17 +192,17 @@ The CSS is mobile-first.
 
 ### 768–1023 px
 
-- two-column hero introduction
-- two-lane packing handoff
-- two-column section layout
+- the same single-column hero and linear packing log
+- three concise agent columns
+- a two-column automatic-unpack and trust group
 - headline begins at 68px and stays left aligned
 
 ### 1024 px and wider
 
-- 64px page inset
-- headline capped at 88px
-- maximum content width of 82rem
-- section headings and content share the same 4/8 column split
+- 56px maximum page inset
+- headline capped at 76px
+- maximum content width of 72rem
+- every major section begins on the same left edge
 - footer and header align to the same shell
 
 ## installation prompt requirements
@@ -253,7 +255,8 @@ site/
 - Vite builds static files.
 - Strict TypeScript handles clipboard success and failure only.
 - Fonts are self-hosted.
-- There are no runtime package dependencies.
+- Vercel Analytics and Speed Insights are installed but not initialized; no telemetry
+  script runs under the current content security policy.
 - Vercel headers set a restrictive content security policy.
 - npm Dependabot is scoped to `/site`.
 - GitHub Actions installs Chromium and runs the complete site test command.
@@ -266,7 +269,7 @@ site/
 - Minimum 44px mobile primary action.
 - Page and full prompt remain readable without JavaScript.
 - Clipboard denial opens and selects the canonical prompt.
-- Forced-colors and reduced-motion support.
+- Reduced-motion support.
 - No ownership meaning carried by color alone.
 - No external runtime assets or scripts.
 
@@ -313,7 +316,7 @@ account and domain.
 - Supabase
 - authentication
 - forms or email capture
-- analytics
+- active analytics collection
 - serverless functions
 - CMS
 - blog
