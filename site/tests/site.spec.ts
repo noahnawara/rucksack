@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, URL } from "node:url";
 
+const GITHUB_REPOSITORY_API =
+  "https://api.github.com/repos/noahnawara/rucksack";
 const promptPath = fileURLToPath(
   new URL("../src/content/install-agent-prompt.txt", import.meta.url),
 );
@@ -10,7 +12,20 @@ const promptPath = fileURLToPath(
 const readCanonicalPrompt = async (): Promise<string> =>
   readFile(promptPath, "utf8");
 
-test("shows the product, main action, source, and honest release state", async ({
+test.beforeEach(async ({ page }): Promise<void> => {
+  await page.route(
+    GITHUB_REPOSITORY_API,
+    async (route): Promise<void> => {
+      await route.fulfill({
+        json: {
+          stargazers_count: 1_234,
+        },
+      });
+    },
+  );
+});
+
+test("shows one promise, one commute pass, one action, and the live star count", async ({
   page,
 }): Promise<void> => {
   await page.goto("/");
@@ -22,14 +37,20 @@ test("shows the product, main action, source, and honest release state", async (
     }),
   ).toBeVisible();
   await expect(
-    page.locator("#install").getByText("compiler-verified alpha", { exact: true }),
+    page.getByRole("figure", {
+      name: "rucksack digital commute pass",
+    }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "copy the agent prompt" }).first(),
+    page.getByRole("button", { name: "copy agent prompt" }),
   ).toBeVisible();
+  await expect(page.getByText("preview", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "read source" }).first(),
+    page.getByRole("link", {
+      name: "rucksack on GitHub; 1,234 stars",
+    }),
   ).toHaveAttribute("href", "https://github.com/noahnawara/rucksack");
+  await expect(page.locator("[data-github-star-count]")).toHaveText("1.2K");
 });
 
 test("renders and copies the canonical prompt byte for byte", async ({
@@ -41,19 +62,19 @@ test("renders and copies the canonical prompt byte for byte", async ({
   const canonicalPrompt = await readCanonicalPrompt();
 
   await expect(page.locator("#install-prompt")).toHaveText(canonicalPrompt);
-  await page
-    .getByRole("button", { name: "copy the agent prompt" })
-    .first()
-    .click();
+  await page.getByRole("button", { name: "copy agent prompt" }).click();
 
   const clipboardText = await page.evaluate(
     async (): Promise<string> => navigator.clipboard.readText(),
   );
   expect(clipboardText).toBe(canonicalPrompt);
-  await expect(page.locator("#copy-status")).toContainText("agent prompt copied.");
-  await expect(page.locator("#copy-status")).toContainText(
-    "paste it into codex, claude code, or cursor on this mac.",
+  await expect(
+    page.getByRole("button", { name: "agent prompt copied" }),
+  ).toBeVisible();
+  await expect(page.locator("#copy-status")).toHaveText(
+    "agent prompt copied.",
   );
+  await expect(page.locator("#manual-copy")).not.toBeVisible();
 });
 
 test("gives a direct manual-copy handoff when clipboard access fails", async ({
@@ -64,22 +85,34 @@ test("gives a direct manual-copy handoff when clipboard access fails", async ({
       configurable: true,
       value: {
         writeText: (): Promise<never> =>
-          Promise.reject(new DOMException("Clipboard access was blocked", "NotAllowedError")),
+          Promise.reject(
+            new DOMException(
+              "Clipboard access was blocked",
+              "NotAllowedError",
+            ),
+          ),
       },
     });
   });
   await page.goto("/");
 
-  await page
-    .getByRole("button", { name: "copy the agent prompt" })
-    .first()
-    .click();
+  await page.getByRole("button", { name: "copy agent prompt" }).click();
 
   const status = page.locator("#copy-status");
-  await expect(status).toContainText("rucksack stopped copying the agent prompt.");
-  await expect(status).toContainText("clipboard access was blocked.");
-  await expect(status).toContainText("select the prompt and copy it.");
-  await expect(page.locator("#install-prompt-details")).toHaveAttribute("open", "");
+  await expect(status).toContainText(
+    "rucksack stopped copying the agent prompt.",
+  );
+  await expect(status).toContainText(
+    "your browser blocked clipboard access.",
+  );
+  await expect(status).toContainText(
+    "you — select the prompt and copy it.",
+  );
+  await expect(page.locator("#manual-copy")).toBeVisible();
+  await expect(page.locator("#install-prompt-details")).toHaveAttribute(
+    "open",
+    "",
+  );
   await expect(page.locator("#install-prompt")).not.toBeEmpty();
   const selectedText = await page.evaluate(
     (): string => window.getSelection()?.toString() ?? "",
@@ -87,45 +120,124 @@ test("gives a direct manual-copy handoff when clipboard access fails", async ({
   expect(selectedText).toBe((await readCanonicalPrompt()).trimEnd());
 });
 
-test("has no automated accessibility violations", async ({ page }): Promise<void> => {
+test("has no automated accessibility violations", async ({
+  page,
+}): Promise<void> => {
   await page.goto("/");
 
   const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
   expect(accessibilityScanResults.violations).toEqual([]);
 });
 
-test("does not create page-level horizontal overflow at 320 pixels", async ({
+test("does not create page-level horizontal overflow at narrow and tablet widths", async ({
   page,
 }): Promise<void> => {
-  await page.setViewportSize({ width: 320, height: 900 });
-  await page.goto("/");
+  for (const width of [320, 800, 959, 960]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
 
-  const widths = await page.evaluate(
-    (): { readonly clientWidth: number; readonly scrollWidth: number } => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-    }),
-  );
+    const widths = await page.evaluate(
+      (): { readonly clientWidth: number; readonly scrollWidth: number } => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }),
+    );
 
-  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth);
+    expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth);
+  }
 });
 
-test("keeps the primary mobile action large and inside the first viewport", async ({
+test("keeps the mobile action large while the pass stays subordinate", async ({
   page,
 }): Promise<void> => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
-  const button = page.locator(".action-group--hero [data-copy-prompt]");
-  const bounds = await button.boundingBox();
-  expect(bounds).not.toBeNull();
-  if (bounds === null) {
-    throw new Error("The primary mobile copy action has no rendered bounds");
+  const button = page.locator("[data-copy-prompt]");
+  const pass = page.locator("#pass-stage");
+  const headline = page.locator("#headline");
+  const buttonBounds = await button.boundingBox();
+  const passBounds = await pass.boundingBox();
+  const headlineBounds = await headline.boundingBox();
+
+  expect(buttonBounds).not.toBeNull();
+  expect(passBounds).not.toBeNull();
+  expect(headlineBounds).not.toBeNull();
+  if (
+    buttonBounds === null ||
+    passBounds === null ||
+    headlineBounds === null
+  ) {
+    throw new Error("The mobile hierarchy has missing rendered bounds");
   }
 
-  expect(bounds.height).toBeGreaterThanOrEqual(44);
-  expect(bounds.width).toBeGreaterThanOrEqual(300);
-  expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
+  expect(buttonBounds.height).toBeGreaterThanOrEqual(44);
+  expect(buttonBounds.width).toBeGreaterThanOrEqual(300);
+  expect(buttonBounds.y + buttonBounds.height).toBeLessThanOrEqual(844);
+  expect(passBounds.width).toBeLessThan(headlineBounds.width);
+});
+
+test("keeps the desktop pass smaller and to the right of the headline", async ({
+  page,
+}): Promise<void> => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+
+  const hierarchy = await page.evaluate(
+    (): {
+      readonly headlineFontSize: number;
+      readonly headlineWidth: number;
+      readonly passRight: number;
+      readonly passWidth: number;
+      readonly routeFontSize: number;
+    } => {
+      const headline = document.querySelector<HTMLElement>("#headline");
+      const pass = document.querySelector<HTMLElement>("#pass-stage");
+      const routeName = document.querySelector<HTMLElement>(".stop-name");
+      if (headline === null || pass === null || routeName === null) {
+        throw new Error("Desktop hierarchy elements are missing");
+      }
+
+      const headlineBounds = headline.getBoundingClientRect();
+      const passBounds = pass.getBoundingClientRect();
+      return {
+        headlineFontSize: Number.parseFloat(
+          window.getComputedStyle(headline).fontSize,
+        ),
+        headlineWidth: headlineBounds.width,
+        passRight: passBounds.right,
+        passWidth: passBounds.width,
+        routeFontSize: Number.parseFloat(
+          window.getComputedStyle(routeName).fontSize,
+        ),
+      };
+    },
+  );
+
+  expect(hierarchy.passWidth).toBeLessThan(hierarchy.headlineWidth);
+  expect(hierarchy.routeFontSize).toBeLessThan(hierarchy.headlineFontSize);
+  expect(hierarchy.passRight).toBeGreaterThan(1_300);
+});
+
+test("shows the final pass state without motion when reduced motion is requested", async ({
+  page,
+}): Promise<void> => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  await expect(page.locator("#pass-stage")).not.toHaveClass(/is-running/);
+  await expect(page.locator(".scan-line")).toBeHidden();
+  await expect(page.getByText("PACKED", { exact: true })).toBeVisible();
+  await expect(page.getByText("still live", { exact: true })).toBeVisible();
+
+  const runningAnimations = await page.evaluate(
+    (): number =>
+      document
+        .getAnimations()
+        .filter((animation: Animation): boolean => animation.playState === "running")
+        .length,
+  );
+  expect(runningAnimations).toBe(0);
 });
 
 test("keeps the page and prompt readable without JavaScript", async ({
@@ -142,9 +254,11 @@ test("keeps the page and prompt readable without JavaScript", async ({
     }),
   ).toBeVisible();
   await expect(page.locator("#install-prompt")).not.toBeEmpty();
-  await expect(page.getByText("open the prompt below")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "copy the agent prompt" }),
+    page.getByText("open the prompt below and copy it into your agent."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "copy agent prompt" }),
   ).toHaveCount(0);
 
   await context.close();

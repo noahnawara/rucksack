@@ -1,11 +1,11 @@
 This site bundles two self-hosted fonts under the SIL Open Font License 1.1.
 
-Atkinson Hyperlegible Next
-Copyright 2020–2024 The Atkinson Hyperlegible Next Project Authors
-https://github.com/googlefonts/atkinson-hyperlegible-next
+DM Sans
+Copyright 2014 The DM Sans Project Authors
+https://github.com/googlefonts/dm-fonts
 
-Commit Mono
-Copyright Eigil Nikolajsen
-https://github.com/eigilnikolajsen/commit-mono
+Doto
+Copyright 2024 The Doto Project Authors
+https://github.com/oliverlalan/Doto
 
 The complete license appears in OFL-1.1.txt in this directory.
