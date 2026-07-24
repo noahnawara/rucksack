@@ -38,7 +38,7 @@ pub enum Command {
     Status(StatusArgs),
 
     /// Restore normal sleep and remove Commute Mode.
-    Unpack(UnpackArgs),
+    Unpack,
 
     /// Show the most recent completed-session report.
     Report,
@@ -140,13 +140,6 @@ pub struct StatusArgs {
     /// Print the complete session and helper records.
     #[arg(long)]
     pub full: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct UnpackArgs {
-    /// Clear state even if no active session is found.
-    #[arg(long)]
-    pub force: bool,
 }
 
 #[derive(Debug, Args)]
@@ -268,7 +261,8 @@ mod tests {
         let unpack = Cli::try_parse_from(["rucksack", "unpack"]).unwrap();
 
         assert!(matches!(pack.command, Some(Command::Pack(_))));
-        assert!(matches!(unpack.command, Some(Command::Unpack(_))));
+        assert!(matches!(unpack.command, Some(Command::Unpack)));
+        assert!(Cli::try_parse_from(["rucksack", "unpack", "--force"]).is_err());
         assert!(Cli::try_parse_from(["rucksack", "leave"]).is_err());
         assert!(Cli::try_parse_from(["rucksack", "arrive"]).is_err());
 

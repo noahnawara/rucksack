@@ -24,8 +24,17 @@ jobs:
         with:
           toolchain: 1.86.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Validate release candidate
+        env:
+          RUCKSACK_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --release --locked -- -D warnings
+          cargo test --workspace --release --locked
 
       - name: Import Developer ID certificates
         env:

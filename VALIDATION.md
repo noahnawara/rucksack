@@ -27,17 +27,20 @@ The current tree passes:
 cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
+cargo test --workspace --locked
 RUCKSACK_TEAM_ID=CI00000000 \
-  cargo clippy -p rucksack-helper --all-targets --release --locked -- -D warnings
+  cargo clippy --workspace --all-targets --release --locked -- -D warnings
 RUCKSACK_TEAM_ID=CI00000000 \
-  cargo test -p rucksack-helper --release --locked
+  cargo test --workspace --release --locked
+RUCKSACK_TEAM_ID=CI00000000 \
+  cargo build --workspace --release --locked
 ```
 
 Test results:
 
-- 116 debug tests: CLI 37, core 68, helper 11;
-- 12 release-helper tests with the dummy CI Team ID;
+- 169 debug tests: CLI 69, CLI JSON E2E 8, core 81, helper 11;
+- 170 release tests with the dummy CI Team ID: CLI 69, CLI JSON E2E 8, core 81,
+  helper 12;
 - 0 failures.
 
 The automated and structural review also verifies:
@@ -50,8 +53,15 @@ The automated and structural review also verifies:
 - fixed absolute `pmset -a disablesleep 0|1` execution with cleared environment and
   bounded time/output;
 - bounded helper connections and request I/O;
+- ambiguous helper-acquire responses trigger lease cleanup unless an authoritative status
+  proves that cleanup is unnecessary;
 - stale/corrupt helper-state recovery to ordinary sleep;
 - rollback of helper lease, temporary policy, Cursor files, and watcher state;
+- one-time provider confirmation tokens bind policy delivery to the exact active agent,
+  project, and provider session;
+- inactive cleanup locators survive Cursor cleanup failures without exposing policy text;
+- Cursor activation, rollback, and cleanup use held directory descriptors, bounded reads,
+  and transactional writes so path or symlink swaps cannot redirect managed operations;
 - atomic, ownership-aware configuration merges that preserve unrelated entries;
 - bounded captive-portal and provider probes that contain no repository data;
 - strict hotspot/USB route binding, immediate release on confirmed route replacement, and
