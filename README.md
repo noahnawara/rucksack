@@ -1,6 +1,6 @@
 # Rucksack
 
-**Leave the desk. Keep the agent.**
+**Pack the Mac. Keep the agent.**
 
 Rucksack is a macOS-first, Rust-native handoff ritual for local coding agents. It keeps a
 Mac reachable after the lid closes, verifies the iPhone-hotspot transition that normally
@@ -8,7 +8,7 @@ breaks the session, and gives Codex, Claude Code, and Cursor a temporary **Commu
 policy designed for limited attention, battery power, and unreliable mobile networking.
 
 ```text
-$ rucksack leave
+$ rucksack pack
 
 Rucksack
 Preparing this Mac for the walk home
@@ -73,7 +73,7 @@ This repository is a **compiler-verified alpha**. It includes:
 - power, battery, thermal, Wi-Fi, route, and internet preflight code;
 - native adapter installers for Codex, Claude Code, and Cursor;
 - a shared Commute Mode policy with tool-specific hook output;
-- an interactive `leave` flow plus `doctor`, `status`, `arrive`, `recover`, and adapter
+- an interactive `pack` flow plus `doctor`, `status`, `unpack`, `report`, `recover`, and adapter
   commands;
 - macOS/Linux CI, a release-packaging workflow, and a complete product, UX, architecture,
   and threat-model package.
@@ -90,9 +90,10 @@ hotspot modes, and current versions of all three agents.
 | Claude Code | `claude remote-control`, `--remote-control`, or `/remote-control` | skill plus lifecycle hooks | `Notification`, `PermissionRequest`, and `Stop` hooks | an existing interactive session must enable `/remote-control` itself |
 | Cursor | Cursor for iOS Remote Control | temporary project rule, `/commute-mode` command, and Cursor hooks | hook telemetry | Remote Control activation/pairing is currently UI-first; hooks are treated as best-effort |
 
-Rucksack never auto-approves permissions and never launches an agent in bypass-permission
-mode. Codex users complete one native trust step after adapter installation: open `/hooks`,
-review the marked Rucksack entries, and trust them.
+Rucksack does not enable, disable, tighten, or bypass provider permissions. Commute Mode
+inherits the active Codex, Claude Code, or Cursor session's permission, approval, and
+sandbox configuration exactly. Codex users complete one native trust step after adapter
+installation: open `/hooks`, review the marked Rucksack entries, and trust them.
 
 Version 0.1 has no Rucksack-operated backend, relay, or webhook transport. Provider-native
 remote products carry the coding conversation.
@@ -101,18 +102,16 @@ remote products carry the coding conversation.
 
 The temporary policy tells the agent to:
 
-- keep pursuing the current acceptance criteria without expanding scope;
-- prefer reversible edits and targeted validation;
-- make a documented, least-destructive assumption only when a question is not truly
-  blocking;
+- keep pursuing the current acceptance criteria under the task's existing instructions;
+- ask only questions that are truly blocking and state reasonable non-blocking assumptions;
+- run every workload the task requires, including full builds, broad test suites, Docker,
+  VMs, browser automation, and indexing;
 - stop and report one clear next action when blocked;
-- avoid deployments, merges, releases, production changes, credential changes, destructive
-  database/infra actions, and permission broadening;
-- avoid heat-heavy work in a closed bag unless explicitly requested;
 - use bounded retries and surface approval/input waits immediately.
 
 Use `--focus finish`, `--focus investigate`, `--focus review`, or `--focus low-power` to
-specialize the policy.
+specialize the policy. Only an explicit `--focus low-power` asks the agent to defer heavy
+work.
 
 ## Intended command surface
 
@@ -120,12 +119,13 @@ specialize the policy.
 rucksack setup
 rucksack setup --hotspot "Max’s iPhone"
 rucksack setup --usb
-rucksack leave
-rucksack leave --agent codex --for 90m --focus finish
-rucksack leave --hotspot "Max’s iPhone"
-rucksack leave --usb
+rucksack pack
+rucksack pack --agent codex --for 90m --focus finish
+rucksack pack --hotspot "Max’s iPhone"
+rucksack pack --usb
 rucksack status
-rucksack arrive
+rucksack unpack
+rucksack report
 rucksack doctor
 rucksack recover
 
@@ -136,18 +136,24 @@ rucksack adapters remove
 rucksack pair codex
 ```
 
-`pack` and `unpack` are compatibility aliases for `leave` and `arrive`.
+`leave` and `arrive` remain hidden compatibility aliases for `pack` and `unpack`.
+
+Every completed session atomically replaces a private local `last-report.json`. `unpack`
+shows that report immediately, and `rucksack report` retrieves it later. Estimated mobile
+data is the aggregate download/upload delta for the verified commute interface; it can
+include unrelated Mac traffic and is not agent-only attribution or carrier billing.
 
 For Wi-Fi, Rucksack can ask macOS to join a configured network without ever putting a
 password in process arguments. A previously saved hotspot can join automatically; Apple
-Instant Hotspot may still require selecting the phone in the Wi-Fi menu. With explicit
-`--allow-unverified-ssid`, a privacy-redacted configured SSID still requires either a
-successful exact saved-network join request or interactive confirmation from the Wi-Fi
-menu; `--yes` alone is not evidence. `--usb` is a separate strict mode: Rucksack waits
-until `iPhone USB` is the actual default route and will not mistake ordinary Wi-Fi for
-wired tethering. Strict hotspot and USB sessions bind the verified SSID, route interface,
-and gateway. A different live network releases the lease immediately; temporary route
-loss uses the configured reconnect grace.
+Instant Hotspot may still require selecting the phone in the Wi-Fi menu. An interactive
+confirmation that the Wi-Fi menu shows the configured
+Instant Hotspot is sufficient evidence when macOS redacts its SSID; the explicit
+`--allow-unverified-ssid` flag is only needed to accept a redacted SSID after a successful
+exact saved-network join request. `--yes` alone is not interactive evidence. `--usb` is a
+separate strict mode: Rucksack waits until `iPhone USB` is the actual default route and
+will not mistake ordinary Wi-Fi for wired tethering. Strict hotspot and USB sessions bind
+the verified SSID, route interface, and gateway. A different live network releases the
+lease immediately; temporary route loss uses the configured reconnect grace.
 
 ## Build
 
@@ -190,18 +196,20 @@ Rucksack promises a **bounded lease**, not “your Mac will never sleep.”
 
 The helper restores normal sleep when any of these occur:
 
-- the user runs `rucksack arrive`;
+- the user runs `rucksack unpack`;
 - the hard session deadline is reached;
 - the user daemon stops heartbeating;
 - the configured battery floor is reached;
-- thermal pressure crosses the configured release threshold;
+- macOS reports serious/critical thermal pressure or CPU throttling;
 - a strict commute route is replaced by a different live SSID, interface, or gateway;
 - recovery is requested;
 - helper state is inconsistent.
 
-A closed and active laptop can become hot. Rucksack lowers risk; it cannot make an
-insulated bag a suitable environment for arbitrary builds, VMs, containers, or local
-models.
+A closed and active laptop can become hot. Rucksack does not restrict builds, VMs,
+containers, local models, or other task-required workloads. Independently of the agent
+policy, the hardware monitor releases the sleep lease through the helper when macOS reports
+serious/critical thermal pressure or CPU throttling, or when the configured battery floor is
+reached. CPU utilization alone is not treated as overheating.
 
 ## Design documents
 

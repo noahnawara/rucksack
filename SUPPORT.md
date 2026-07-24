@@ -10,8 +10,8 @@ and security review.
 - Core safety, recovery, and all agent adapters stay open source.
 - No feature is withheld to manufacture a subscription.
 - No telemetry is added merely to optimize fundraising.
-- The CLI never interrupts `rucksack leave` with a donation prompt.
-- A support message may appear only after a successful `arrive`, at most once per installed major
+- The CLI never interrupts `rucksack pack` with a donation prompt.
+- A support message may appear only after a successful `unpack`, at most once per installed major
   version, and must be permanently dismissible.
 - Sponsor links are configured by the maintainers in release metadata rather than hard-coded into
   privileged code.

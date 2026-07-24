@@ -158,11 +158,12 @@ root helper.
 Default behavior:
 
 - nominal: continue;
-- fair: warn and reduce recommended workload;
-- serious: release the lease;
-- critical: release immediately.
+- fair without throttling: continue;
+- serious or critical: release the lease;
+- any reported CPU speed or scheduler throttling: release the lease.
 
-Thermal state is a stop condition, not a notification-only feature.
+High CPU utilization alone is not a thermal signal. Rucksack allows task-required work and
+uses macOS thermal pressure and throttling telemetry as the stop condition.
 
 ## Display and screen lock
 

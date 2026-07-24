@@ -46,7 +46,7 @@ pub fn install_helper() -> Result<()> {
         let status = status.context("The installed helper returned no status")?;
         if status.active {
             anyhow::bail!(
-                "A closed-lid lease is active. Run `rucksack arrive` before replacing the helper."
+                "A closed-lid lease is active. Run `rucksack unpack` before replacing the helper."
             );
         }
         if status.sleep_disabled != Some(0) {

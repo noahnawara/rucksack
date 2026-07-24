@@ -1,4 +1,4 @@
-use crate::cli::{AdapterCommand, Cli, Command, HelperCommand, LeaveArgs, SetupArgs};
+use crate::cli::{AdapterCommand, Cli, Command, HelperCommand, PackArgs, SetupArgs};
 use crate::doctor::{self, CheckLevel};
 use crate::flow;
 use crate::helper_client::HelperClient;
@@ -19,8 +19,8 @@ pub fn run(cli: Cli) -> Result<()> {
     let command = match cli.command {
         None => {
             let config = Config::load(&paths)?;
-            flow::leave(&default_leave_args(), &output, &paths, &config)?;
-            "leave"
+            flow::pack(&default_pack_args(), &output, &paths, &config)?;
+            "pack"
         }
         Some(Command::Setup(args)) => {
             let config = Config::load(&paths)?;
@@ -32,29 +32,23 @@ pub fn run(cli: Cli) -> Result<()> {
             run_doctor(&args, &output, &paths, &config)?;
             "doctor"
         }
-        Some(Command::Leave(args)) => {
-            let config = Config::load(&paths)?;
-            flow::leave(&args, &output, &paths, &config)?;
-            "leave"
-        }
         Some(Command::Pack(args)) => {
             let config = Config::load(&paths)?;
-            flow::leave(&args, &output, &paths, &config)?;
+            flow::pack(&args, &output, &paths, &config)?;
             "pack"
         }
         Some(Command::Status(args)) => {
             flow::status(&args, &output, &paths)?;
             "status"
         }
-        Some(Command::Arrive(args)) => {
-            let config = Config::load(&paths)?;
-            flow::arrive(&args, &output, &paths, &config)?;
-            "arrive"
-        }
         Some(Command::Unpack(args)) => {
             let config = Config::load(&paths)?;
-            flow::arrive(&args, &output, &paths, &config)?;
+            flow::unpack(&args, &output, &paths, &config)?;
             "unpack"
+        }
+        Some(Command::Report) => {
+            crate::report::run(&output, &paths)?;
+            "report"
         }
         Some(Command::Recover(args)) => {
             flow::recover(&args, &output, &paths)?;
@@ -209,7 +203,7 @@ fn setup(args: &SetupArgs, output: &Output, paths: &AppPaths, mut config: Config
         "Configuration saved to {}",
         paths.config_file.display()
     ));
-    output.plain("Setup complete. Run `rucksack leave` when you walk out.");
+    output.plain("Setup complete. Run `rucksack pack` when you walk out.");
     Ok(())
 }
 
@@ -378,7 +372,7 @@ fn adapters(command: AdapterCommand, output: &Output, paths: &AppPaths) -> Resul
         AdapterCommand::Remove(args) => {
             if SessionState::load(paths)?.is_some() {
                 anyhow::bail!(
-                    "A Commute Mode session is active. Run `rucksack arrive` before removing adapters."
+                    "A Commute Mode session is active. Run `rucksack unpack` before removing adapters."
                 );
             }
             let agents = args
@@ -521,8 +515,8 @@ fn helper(command: HelperCommand, output: &Output) -> Result<()> {
     }
 }
 
-fn default_leave_args() -> LeaveArgs {
-    LeaveArgs {
+fn default_pack_args() -> PackArgs {
+    PackArgs {
         agent: None,
         hotspot: None,
         usb: false,

@@ -107,7 +107,7 @@ alwaysApply: true
 # Commute Mode
 
 Apply the following temporary operating policy for this conversation. Acknowledge it briefly,
-then continue the current bounded task without widening scope.
+then continue the current task under its existing instructions and active Cursor configuration.
 
 {policy}
 "#,
@@ -303,7 +303,7 @@ mod tests {
             project_dir: project.to_path_buf(),
             activated_at,
             expires_at: activated_at + Duration::minutes(30),
-            policy: "Keep the current task bounded.".to_owned(),
+            policy: "Run every workload required by the current task.".to_owned(),
         }
     }
 
@@ -331,6 +331,10 @@ mod tests {
 
         assert!(cursor_rule_path(project).exists());
         assert!(cursor_command_path(project).exists());
+        let installed_command = fs::read_to_string(cursor_command_path(project)).unwrap();
+        assert!(installed_command.contains("under its existing instructions"));
+        assert!(!installed_command.contains("bounded task"));
+        assert!(!installed_command.contains("without widening scope"));
         let installed_exclude = fs::read_to_string(&exclude).unwrap();
         assert_eq!(installed_exclude.matches(EXCLUDE_BEGIN).count(), 1);
         assert!(installed_exclude.contains("# keep-this-entry"));

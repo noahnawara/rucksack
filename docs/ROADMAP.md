@@ -6,13 +6,14 @@ Implemented in source:
 
 - Rust workspace and typed helper protocol;
 - one-time development helper install;
-- `leave`, `status`, `arrive`, `doctor`, `recover`;
+- `pack`, `status`, `unpack`, `report`, `doctor`, `recover`;
 - hotspot/unplug handshake;
 - battery floor and thermal signal;
 - Codex, Claude Code, and Cursor adapter installers;
 - temporary policy and hook telemetry;
 - waiting/input/approval lifecycle state;
 - machine-readable JSON progress;
+- private completed-session reports with aggregate commute-interface data estimates;
 - strict hotspot/USB route identity with reconnect grace for temporary loss;
 - macOS/Linux CI and parser/merge tests;
 - release-gated universal packaging, signing/notarization workflow, and signed-client
@@ -33,7 +34,7 @@ Release gate:
 - public `ProcessInfo.thermalState` FFI;
 - IOKit battery data instead of command parsing;
 - provider/version capability detection;
-- optional explicitly configured return Wi-Fi for `arrive`; never guess from the user's
+- optional explicitly configured return Wi-Fi for `unpack`; never guess from the user's
   preferred-network list;
 - Homebrew cask after the first signed release;
 - migration path from the Node implementation.

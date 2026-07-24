@@ -18,8 +18,8 @@ Adapters never:
 
 - inject terminal keystrokes;
 - scrape UI pixels;
-- broaden permissions;
-- auto-approve;
+- change the active provider session's permission, approval, or sandbox configuration;
+- return an approve/deny decision from a permission lifecycle hook;
 - edit repository-owned instructions without explicit opt-in;
 - claim a UI-only remote is machine-verified.
 
@@ -27,24 +27,20 @@ Adapters never:
 
 The same behavioral intent is rendered into each native system:
 
-- continue the current acceptance criteria;
-- avoid scope expansion;
-- prefer reversible work;
+- continue the current acceptance criteria under the task's existing instructions;
 - ask only truly blocking questions;
+- state reasonable non-blocking assumptions and concise checkpoints;
 - use bounded retries;
-- preserve normal approval/sandbox behavior;
-- avoid high-heat work;
-- never deploy, publish, merge, release, rotate credentials, modify production, destroy
-  data, or apply irreversible infrastructure/database changes without a new explicit
-  authorization.
+- run every workload the task requires, including builds, broad test suites, Docker, VMs,
+  browser automation, and indexing.
 
 The policy is parameterized by focus:
 
 - `continue`: safely continue the current task;
-- `finish`: close the current unit of work and run targeted checks;
+- `finish`: close the current unit of work and run the checks it requires;
 - `investigate`: prefer read-only analysis and produce a decision-ready report;
 - `review`: inspect current changes for defects, tests, and risks;
-- `low-power`: prioritize low-CPU work and defer heavy validation.
+- `low-power`: explicitly prioritize low-CPU work and defer heavy validation.
 
 ## Codex
 
@@ -105,7 +101,7 @@ condition is available.
 ### Remote ownership
 
 The current Codex start result does not prove whether the daemon predated Rucksack.
-Session state therefore records no ownership, and `arrive` never stops that daemon.
+Session state therefore records no ownership, and `unpack` never stops that daemon.
 
 ## Claude Code
 
@@ -135,11 +131,12 @@ Claude’s Remote Control process exits after an extended network outage of roug
 minutes. Rucksack probes the link and releases after its configured network grace period.
 Version 0.1 has no Rucksack notification or webhook transport.
 
-### Permission policy
+### Provider configuration
 
-Rucksack never uses `--dangerously-skip-permissions`, `bypassPermissions`, or a broad
-PermissionRequest matcher. “More autonomous” means fewer unnecessary questions inside the
-existing permission envelope.
+Rucksack does not set, clear, or override `--dangerously-skip-permissions`,
+`bypassPermissions`, or any provider permission setting. It inherits the active CLI/session
+configuration exactly. The `PermissionRequest` hook is passive status telemetry and returns
+no approval or denial.
 
 ## Cursor
 
@@ -171,7 +168,7 @@ The rule uses `alwaysApply: true` for new turns. The `/commute-mode` command is 
 path for a conversation that was already open when Rucksack activated. In Git worktrees,
 Rucksack adds a marked block to `.git/info/exclude`, so neither transient file pollutes
 `git status` and no tracked ignore file is changed. All three mutations are removed on
-`arrive`, lease expiry, recovery, or preflight rollback.
+`unpack`, lease expiry, recovery, or preflight rollback.
 
 An unmarked file at either reserved path is never overwritten or removed.
 
@@ -189,10 +186,9 @@ messages, and background agents. Host safety must never depend on a Cursor hook 
 
 ### Security
 
-The alpha does not use `beforeShellExecution` to build a regex firewall. Normal provider
-permissions and the model policy remain the primary safety controls. A later strict mode
-may add narrow, auditable deny rules, but it must fail closed and ship with extensive
-false-positive tests.
+Rucksack does not use `beforeShellExecution` to build a regex firewall or add permission
+rules. The active Cursor session's existing instructions and permission configuration remain
+in effect unchanged.
 
 ## Configuration merge strategy
 

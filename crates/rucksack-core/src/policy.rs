@@ -57,7 +57,7 @@ pub fn render_policy(context: &PolicyContext) -> String {
             "Continue the current task and its stated acceptance criteria. Do not expand scope."
         }
         Focus::Finish => {
-            "Prioritize finishing the current coherent unit of work and targeted validation. Do not start a new workstream."
+            "Prioritize finishing the current coherent unit of work and run all validation it requires. Do not start a new workstream."
         }
         Focus::Investigate => {
             "Prefer read-only investigation, evidence gathering, and a decision-ready recommendation. Make edits only when essential."
@@ -75,6 +75,11 @@ pub fn render_policy(context: &PolicyContext) -> String {
         .as_deref()
         .map(|name| format!(" Project: {name}."))
         .unwrap_or_default();
+    let workload = if context.focus == Focus::LowPower {
+        "The user explicitly selected low-power focus. Prefer reading, reasoning, small edits, and targeted checks; defer heavy builds, Docker/VM work, broad suites, and large indexing."
+    } else {
+        "Run every workload required by the current task, including builds, broad test suites, Docker/VM work, browser automation, and indexing. Commute Mode adds no workload restriction."
+    };
 
     format!(
         r#"# Rucksack Commute Mode
@@ -88,13 +93,11 @@ The host Mac is closed or about to be closed, running on battery, and connected 
 ## Working behavior
 
 - Preserve momentum, but ask only questions that are truly blocking.
-- For a non-blocking ambiguity, choose the least-destructive reversible assumption, state it briefly, and continue.
-- Prefer small, reviewable, reversible changes. Keep a concise checkpoint in the conversation.
+- For a non-blocking ambiguity, make a reasonable assumption, state it briefly, and continue.
+- Keep a concise checkpoint in the conversation.
 - Use bounded retries. If the same operation fails twice for the same reason, stop and report one clear next action.
 - Surface immediately when waiting for approval, credentials, user input, or an external dependency.
-- Run targeted tests first. Defer broad monorepo suites, Docker/VM workloads, local models, browser-heavy automation, large indexing jobs, and other heat-intensive work unless the user explicitly asks for them during this remote session.
-- Do not broaden permissions, disable sandboxing, bypass approvals, or auto-approve tools.
-- Do not deploy, publish, merge, release, rotate credentials, modify production, delete data, apply destructive database or infrastructure changes, or perform another irreversible action without explicit authorization in the current remote conversation.
+- {workload}
 - Do not create work merely to remain busy. When the useful bounded task is complete, summarize changes, validation, residual risk, and the next decision.
 
 ## Safety envelope
@@ -103,6 +106,7 @@ This commute lease has roughly {minutes} minutes remaining. The host will restor
 "#,
         project = project,
         focus = focus,
+        workload = workload,
         minutes = context.minutes_remaining,
         floor = context.battery_floor_percent,
     )
@@ -119,12 +123,10 @@ description: Continue the current coding task safely while the host Mac is close
 Adopt Rucksack's active Commute Mode policy. First read
 `~/Library/Application Support/Rucksack/active-policy.json`; if it exists, follow the `policy`
 field exactly. The Rucksack hook may also supply the same policy as session context. If neither
-source contains an active policy, tell the user to run `rucksack leave`.
+source contains an active policy, tell the user to run `rucksack pack`.
 
-Keep normal permissions and sandboxing. Prefer reversible progress, targeted validation,
-bounded retries, low thermal load, and explicit blocking-state reports. Do not perform
-irreversible or production actions without explicit authorization in the current remote
-conversation.
+Continue the current task under its existing instructions and active agent configuration.
+Rucksack changes only the temporary focus and handoff context.
 "#
 }
 
@@ -133,15 +135,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn policy_includes_safety_boundary() {
+    fn policy_preserves_full_workload() {
+        for focus in [
+            Focus::Continue,
+            Focus::Finish,
+            Focus::Investigate,
+            Focus::Review,
+        ] {
+            let text = render_policy(&PolicyContext {
+                focus,
+                minutes_remaining: 42,
+                battery_floor_percent: 15,
+                project_name: Some("atlas".to_owned()),
+            });
+            assert!(text.contains("42 minutes"), "focus={focus}");
+            assert!(text.contains("15%"), "focus={focus}");
+            assert!(text.contains("Docker/VM work"), "focus={focus}");
+            assert!(
+                text.contains("Commute Mode adds no workload restriction"),
+                "focus={focus}"
+            );
+            assert!(!text.contains("defer heavy"), "focus={focus}");
+            for removed_clause in [
+                "broaden permissions",
+                "disable sandboxing",
+                "bypass approvals",
+                "auto-approve tools",
+                "Do not deploy",
+                "modify production",
+                "irreversible action",
+                "least-destructive",
+                "Prefer small, reviewable, reversible",
+            ] {
+                assert!(!text.contains(removed_clause), "focus={focus}");
+            }
+        }
+
+        let skill = skill_document();
+        assert!(!skill.contains("permission"));
+        assert!(!skill.contains("irreversible"));
+    }
+
+    #[test]
+    fn low_power_focus_is_the_only_workload_restriction() {
         let text = render_policy(&PolicyContext {
-            focus: Focus::Finish,
+            focus: Focus::LowPower,
             minutes_remaining: 42,
             battery_floor_percent: 15,
-            project_name: Some("atlas".to_owned()),
+            project_name: None,
         });
-        assert!(text.contains("42 minutes"));
-        assert!(text.contains("15%"));
-        assert!(text.contains("Do not broaden permissions"));
+
+        assert!(text.contains("explicitly selected low-power focus"));
+        assert!(text.contains("defer heavy builds"));
+        assert!(!text.contains("Commute Mode adds no workload restriction"));
     }
 }

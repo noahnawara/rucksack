@@ -1,14 +1,19 @@
 use crate::helper_client::HelperClient;
+use crate::report;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rucksack_core::agent::{deactivate_cursor_rule, AgentKind};
-use rucksack_core::files::append_line;
+use rucksack_core::files::{append_line, with_advisory_lock};
 use rucksack_core::network::{
     internet_probe, probe, provider_probe_url, read_default_route, read_wifi_status, RouteStatus,
     WifiStatus, DEFAULT_INTERNET_PROBE_URL,
 };
-use rucksack_core::power::{read_power_status, read_thermal_status, PowerSource, ThermalLevel};
-use rucksack_core::state::{ActivePolicy, SessionPhase, SessionState, SessionStateWriteConflict};
+use rucksack_core::power::{
+    read_power_status, read_thermal_status, PowerSource, ThermalLevel, ThermalStatus,
+};
+use rucksack_core::state::{
+    ActivePolicy, SessionEndKind, SessionPhase, SessionState, SessionStateWriteConflict,
+};
 use rucksack_core::{AppPaths, Config};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -25,6 +30,20 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
     let mut thermal_sensor_failures: u8 = 0;
     let mut network_outage_started: Option<Instant> = None;
     log(paths, &format!("daemon started for session {session_id}"))?;
+    let daemon_pid = std::process::id();
+    let Some(started) = SessionState::update(paths, session_id, |session| {
+        establish_watcher_state(session, daemon_pid, Utc::now())
+    })?
+    else {
+        anyhow::bail!("Session state was removed before the safety watcher started");
+    };
+    log(
+        paths,
+        &format!(
+            "safety watcher established at revision {}",
+            started.revision
+        ),
+    )?;
 
     loop {
         let Some(mut session) = SessionState::load(paths)? else {
@@ -45,7 +64,6 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
             log(paths, "session already released; daemon exiting")?;
             return Ok(());
         }
-        session.daemon_pid = Some(std::process::id());
 
         let now = Utc::now();
         if now >= session.expires_at {
@@ -196,14 +214,8 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
                 Some("thermal pressure is unknown".to_owned())
             }
             Ok(thermal) => {
-                if thermal.throttled {
-                    release(
-                        &helper,
-                        paths,
-                        &mut session,
-                        "thermal pressure detected",
-                        |_| true,
-                    )?;
+                if let Some(reason) = thermal_release_reason(&thermal) {
+                    release(&helper, paths, &mut session, &reason, |_| true)?;
                     return Ok(());
                 }
                 None
@@ -247,6 +259,7 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
                     release(&helper, paths, &mut session, &reason, |_| true)?;
                     return Ok(());
                 }
+                report::sample_mobile_data(&mut session, false);
                 let reachable = route.interface.is_some();
                 session.route_interface = route.interface;
                 (reachable, route.detail)
@@ -376,6 +389,38 @@ fn effective_phase(session: &SessionState) -> SessionPhase {
     }
 }
 
+fn establish_watcher_state(
+    mut session: SessionState,
+    daemon_pid: u32,
+    established_at: DateTime<Utc>,
+) -> Result<SessionState> {
+    let initial_phase = session.phase;
+    session.phase = watcher_start_phase(initial_phase)?;
+    session.daemon_pid = Some(daemon_pid);
+    session.last_heartbeat_at = Some(established_at);
+    if initial_phase == SessionPhase::Ready {
+        session.last_event = Some("safety watcher established".to_owned());
+    }
+    Ok(session)
+}
+
+fn watcher_start_phase(phase: SessionPhase) -> Result<SessionPhase> {
+    if matches!(
+        phase,
+        SessionPhase::Releasing | SessionPhase::Released | SessionPhase::Failed
+    ) {
+        anyhow::bail!(
+            "Cannot establish the safety watcher while session state is {:?}",
+            phase
+        );
+    }
+    if phase == SessionPhase::Ready {
+        Ok(SessionPhase::Active)
+    } else {
+        Ok(phase)
+    }
+}
+
 fn commute_network_change(
     expected_ssid: Option<&str>,
     expected_interface: Option<&str>,
@@ -426,6 +471,34 @@ fn next_sensor_failure_count(current: u8, successful: bool) -> u8 {
     } else {
         current.saturating_add(1)
     }
+}
+
+fn thermal_release_reason(thermal: &ThermalStatus) -> Option<String> {
+    if !thermal.throttled
+        && !matches!(
+            thermal.level,
+            ThermalLevel::Serious | ThermalLevel::Critical
+        )
+    {
+        return None;
+    }
+
+    let cpu_speed = thermal
+        .cpu_speed_limit_percent
+        .map(|percent| format!("{percent}%"))
+        .unwrap_or_else(|| "unknown".to_owned());
+    let scheduler = thermal
+        .scheduler_limit_percent
+        .map(|percent| format!("{percent}%"))
+        .unwrap_or_else(|| "unknown".to_owned());
+    let available_cpus = thermal
+        .available_cpus
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "unknown".to_owned());
+    Some(format!(
+        "thermal safety release: level={:?}, CPU speed limit={cpu_speed}, scheduler limit={scheduler}, available CPUs={available_cpus}",
+        thermal.level
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,8 +560,27 @@ fn release(
     reason: &str,
     should_release: impl FnOnce(&SessionState) -> bool,
 ) -> Result<bool> {
+    let terminal_lock = paths.terminal_lock_file();
+    with_advisory_lock(&terminal_lock, || {
+        release_locked(helper, paths, session, reason, should_release)
+    })
+}
+
+fn release_locked(
+    helper: &HelperClient,
+    paths: &AppPaths,
+    session: &mut SessionState,
+    reason: &str,
+    should_release: impl FnOnce(&SessionState) -> bool,
+) -> Result<bool> {
+    let terminal_battery_percent = session.battery_percent;
+    let terminal_network_reachable = session.network_reachable;
+    let terminal_route_interface = session.route_interface.clone();
+    let terminal_observed_hotspot_ssid = session.observed_hotspot_ssid.clone();
+    let mut release_selected = false;
     let Some(releasing) = SessionState::update(paths, session.id, |mut current| {
         if should_release(&current) {
+            release_selected = true;
             current.phase = SessionPhase::Releasing;
             current.release_reason = Some(reason.to_owned());
         }
@@ -497,7 +589,7 @@ fn release(
     else {
         return Ok(false);
     };
-    if releasing.phase != SessionPhase::Releasing {
+    if !release_selected {
         *session = releasing;
         return Ok(false);
     }
@@ -506,10 +598,7 @@ fn release(
     let result = helper.release(session.lease_id, reason);
     match result {
         Ok(status)
-            if !status.active && status.sleep_disabled == session.previous_sleep_disabled =>
-        {
-            log(paths, &format!("lease released: {reason}"))?;
-        }
+            if !status.active && status.sleep_disabled == session.previous_sleep_disabled => {}
         Ok(status) => {
             log(
                 paths,
@@ -525,6 +614,44 @@ fn release(
         }
     }
 
+    // Final accounting is best-effort and must never delay restoration of normal sleep.
+    let released_at = Utc::now();
+    report::sample_mobile_data(session, true);
+    let mobile_data_end = session.mobile_data_end.clone();
+    let mobile_data_finalized = session.mobile_data_finalized;
+    let mobile_data_error = session.mobile_data_error.clone();
+    let finalizing = SessionState::update(paths, session.id, |mut current| {
+        current.ended_at = Some(released_at);
+        current.battery_percent = terminal_battery_percent;
+        current.network_reachable = terminal_network_reachable;
+        current.route_interface = terminal_route_interface.clone();
+        current.observed_hotspot_ssid = terminal_observed_hotspot_ssid.clone();
+        current.mobile_data_end = mobile_data_end.clone();
+        current.mobile_data_finalized = mobile_data_finalized;
+        current.mobile_data_error = mobile_data_error.clone();
+        Ok(current)
+    })?;
+    if let Some(finalizing) = finalizing {
+        *session = finalizing;
+    } else {
+        session.ended_at = Some(released_at);
+        session.battery_percent = terminal_battery_percent;
+        session.network_reachable = terminal_network_reachable;
+        session.route_interface = terminal_route_interface;
+        session.observed_hotspot_ssid = terminal_observed_hotspot_ssid;
+        session.mobile_data_end = mobile_data_end;
+        session.mobile_data_finalized = mobile_data_finalized;
+        session.mobile_data_error = mobile_data_error;
+    }
+    if let Err(error) = report::archive_session(paths, session, SessionEndKind::Automatic) {
+        log(
+            paths,
+            &format!("normal sleep restored, but the completed-session report failed: {error:#}"),
+        )?;
+        return Err(error).context(
+            "Normal sleep was restored, but the completed-session report could not be saved",
+        );
+    }
     cleanup_policy(paths, session.agent, &session.project_dir)?;
     if let Some(released) = SessionState::update(paths, session.id, |mut current| {
         current.phase = SessionPhase::Released;
@@ -533,6 +660,10 @@ fn release(
     })? {
         *session = released;
     }
+    log(
+        paths,
+        &format!("lease released and completed-session report saved: {reason}"),
+    )?;
     Ok(true)
 }
 
@@ -560,6 +691,69 @@ mod tests {
         assert_eq!(next_sensor_failure_count(1, false), 2);
         assert_eq!(next_sensor_failure_count(2, false), 3);
         assert_eq!(next_sensor_failure_count(2, true), 0);
+    }
+
+    #[test]
+    fn watcher_handshake_precedes_terminal_release_paths() {
+        assert_eq!(
+            watcher_start_phase(SessionPhase::Ready).unwrap(),
+            SessionPhase::Active
+        );
+        assert_eq!(
+            watcher_start_phase(SessionPhase::Completed).unwrap(),
+            SessionPhase::Completed
+        );
+        assert!(watcher_start_phase(SessionPhase::Releasing).is_err());
+        assert!(watcher_start_phase(SessionPhase::Released).is_err());
+        assert!(watcher_start_phase(SessionPhase::Failed).is_err());
+    }
+
+    #[test]
+    fn thermal_pressure_or_cpu_throttling_releases_the_lease() {
+        let nominal = ThermalStatus {
+            level: ThermalLevel::Nominal,
+            cpu_speed_limit_percent: Some(100),
+            scheduler_limit_percent: Some(100),
+            available_cpus: Some(10),
+            throttled: false,
+            raw: String::new(),
+        };
+        assert!(thermal_release_reason(&nominal).is_none());
+
+        let fair = ThermalStatus {
+            level: ThermalLevel::Fair,
+            ..nominal.clone()
+        };
+        assert!(thermal_release_reason(&fair).is_none());
+
+        let serious = ThermalStatus {
+            level: ThermalLevel::Serious,
+            ..nominal.clone()
+        };
+        assert!(thermal_release_reason(&serious)
+            .unwrap()
+            .contains("level=Serious"));
+
+        let critical = ThermalStatus {
+            level: ThermalLevel::Critical,
+            ..nominal.clone()
+        };
+        assert!(thermal_release_reason(&critical)
+            .unwrap()
+            .contains("level=Critical"));
+
+        let throttled = ThermalStatus {
+            level: ThermalLevel::Nominal,
+            cpu_speed_limit_percent: Some(80),
+            scheduler_limit_percent: Some(70),
+            available_cpus: Some(8),
+            throttled: true,
+            raw: String::new(),
+        };
+        let reason = thermal_release_reason(&throttled).unwrap();
+        assert!(reason.contains("level=Nominal"));
+        assert!(reason.contains("CPU speed limit=80%"));
+        assert!(reason.contains("scheduler limit=70%"));
     }
 
     #[test]
@@ -644,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_route_uses_the_reconnect_grace_instead_of_auto_arrival() {
+    fn a_missing_route_uses_the_reconnect_grace_instead_of_automatic_unpack() {
         let missing_route = RouteStatus {
             interface: None,
             gateway: None,

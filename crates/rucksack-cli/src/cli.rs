@@ -7,7 +7,7 @@ use uuid::Uuid;
 #[command(
     name = "rucksack",
     version,
-    about = "Leave the desk. Keep the agent.",
+    about = "Pack the Mac. Keep the agent.",
     long_about = "A safe macOS handoff ritual for local coding agents, closed-lid execution, and mobile hotspots."
 )]
 pub struct Cli {
@@ -32,19 +32,18 @@ pub enum Command {
     Doctor(DoctorArgs),
 
     /// Prepare the Mac, remote, hotspot, and agent policy.
-    Leave(LeaveArgs),
-
-    /// Compatibility alias for `leave`.
-    Pack(LeaveArgs),
+    #[command(alias = "leave")]
+    Pack(PackArgs),
 
     /// Show the active lease, connection, safety, and agent state.
     Status(StatusArgs),
 
     /// Restore normal sleep and remove Commute Mode.
-    Arrive(ArriveArgs),
+    #[command(alias = "arrive")]
+    Unpack(UnpackArgs),
 
-    /// Compatibility alias for `arrive`.
-    Unpack(ArriveArgs),
+    /// Show the most recent completed-session report.
+    Report,
 
     /// Restore normal sleep after an interrupted session.
     Recover(RecoverArgs),
@@ -104,7 +103,7 @@ pub struct DoctorArgs {
 }
 
 #[derive(Debug, Clone, Args)]
-pub struct LeaveArgs {
+pub struct PackArgs {
     /// Agent to hand off. Auto-detected when omitted.
     #[arg(long)]
     pub agent: Option<AgentKind>,
@@ -129,7 +128,7 @@ pub struct LeaveArgs {
     #[arg(long)]
     pub yes: bool,
 
-    /// Accept a privacy-redacted SSID after an exact join request or your Wi-Fi-menu confirmation.
+    /// Accept a privacy-redacted SSID after an exact saved-network join request.
     #[arg(long)]
     pub allow_unverified_ssid: bool,
 
@@ -146,7 +145,7 @@ pub struct StatusArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct ArriveArgs {
+pub struct UnpackArgs {
     /// Clear state even if no active session is found.
     #[arg(long)]
     pub force: bool,
@@ -256,11 +255,31 @@ pub fn canonical_config_path(value: Option<PathBuf>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
     fn parses_duration() {
         assert_eq!(parse_duration_minutes("75m").unwrap(), 75);
         assert_eq!(parse_duration_minutes("1h30m").unwrap(), 90);
         assert_eq!(parse_duration_minutes("45").unwrap(), 45);
+    }
+
+    #[test]
+    fn legacy_lifecycle_names_parse_as_hidden_canonical_aliases() {
+        let pack = Cli::try_parse_from(["rucksack", "pack"]).unwrap();
+        let legacy_pack = Cli::try_parse_from(["rucksack", "leave"]).unwrap();
+        let unpack = Cli::try_parse_from(["rucksack", "unpack"]).unwrap();
+        let legacy_unpack = Cli::try_parse_from(["rucksack", "arrive"]).unwrap();
+
+        assert!(matches!(pack.command, Some(Command::Pack(_))));
+        assert!(matches!(legacy_pack.command, Some(Command::Pack(_))));
+        assert!(matches!(unpack.command, Some(Command::Unpack(_))));
+        assert!(matches!(legacy_unpack.command, Some(Command::Unpack(_))));
+
+        let help = Cli::command().render_help().to_string();
+        assert!(help.contains("\n  pack "));
+        assert!(help.contains("\n  unpack "));
+        assert!(!help.contains("\n  leave "));
+        assert!(!help.contains("\n  arrive "));
     }
 }

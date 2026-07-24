@@ -37,7 +37,8 @@ pub struct SessionConfig {
     pub helper_ttl_seconds: u64,
     pub network_outage_grace_seconds: u64,
     pub idle_grace_seconds: u64,
-    pub stop_owned_remote_on_arrive: bool,
+    #[serde(alias = "stop_owned_remote_on_arrive")]
+    pub stop_owned_remote_on_unpack: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +90,7 @@ impl Default for SessionConfig {
             helper_ttl_seconds: 90,
             network_outage_grace_seconds: 5 * 60,
             idle_grace_seconds: 15 * 60,
-            stop_owned_remote_on_arrive: false,
+            stop_owned_remote_on_unpack: false,
         }
     }
 }
@@ -219,6 +220,19 @@ mod tests {
     #[test]
     fn default_config_is_valid() {
         assert!(Config::default().validate().is_ok());
+    }
+
+    #[test]
+    fn legacy_arrive_config_key_loads_and_serializes_as_unpack() {
+        let current = toml::to_string_pretty(&Config::default()).unwrap();
+        let legacy = current.replace("stop_owned_remote_on_unpack", "stop_owned_remote_on_arrive");
+
+        let parsed = toml::from_str::<Config>(&legacy).unwrap();
+        let serialized = toml::to_string_pretty(&parsed).unwrap();
+
+        assert!(!parsed.session.stop_owned_remote_on_unpack);
+        assert!(serialized.contains("stop_owned_remote_on_unpack"));
+        assert!(!serialized.contains("stop_owned_remote_on_arrive"));
     }
 
     #[test]

@@ -1,10 +1,10 @@
 # User stories and acceptance criteria
 
-## Epic A: leave with a live agent
+## Epic A: pack a live agent
 
 ### A1. One-command handoff
 
-As a developer with a live coding agent, I run `rucksack leave` and receive a guided
+As a developer with a live coding agent, I run `rucksack pack` and receive a guided
 handoff without needing to remember power-management commands.
 
 Acceptance criteria:
@@ -25,9 +25,9 @@ Acceptance criteria:
 
 - Rucksack observes the active Wi-Fi interface;
 - configured SSID is verified when macOS exposes it;
-- with `--allow-unverified-ssid`, a configured privacy-redacted SSID is accepted only after
-  an exact saved-network join request succeeds or the user explicitly confirms the Wi-Fi
-  menu;
+- a configured privacy-redacted SSID is accepted after the user explicitly confirms the
+  Wi-Fi menu, or after an exact saved-network join request succeeds together with
+  `--allow-unverified-ssid`;
 - `--yes` alone cannot confirm a privacy-redacted configured SSID;
 - default route and real HTTP connectivity are checked;
 - Rucksack asks the user to unplug while the lid remains open;
@@ -39,7 +39,7 @@ Acceptance criteria:
 ### A3. Close the lid with confidence
 
 As a developer, I see a final readiness summary with the lease expiry, battery floor, and
-thermal policy.
+thermal release conditions.
 
 Acceptance criteria:
 
@@ -66,7 +66,8 @@ Acceptance criteria:
 - first-time pairing is available through `rucksack pair codex`;
 - user-level Codex hooks inject the policy only while a Rucksack session is active;
 - a `$commute-mode` skill exists for explicit activation in an existing thread;
-- permission requests are observed but never auto-approved;
+- permission requests may be observed as passive status, but the hook returns no decision
+  and the active provider permission configuration remains unchanged;
 - setup tells the user to review and trust the marked entries once through Codex `/hooks`;
 - uninstall preserves unrelated `~/.codex/hooks.json` entries.
 
@@ -83,7 +84,8 @@ Acceptance criteria:
 - hooks inject context at session start and prompt submission;
 - `Notification` and `PermissionRequest` update Rucksack’s operational state;
 - a `/commute-mode` skill is installed;
-- bypass-permission mode is never enabled.
+- Rucksack neither enables nor disables bypass-permission mode and inherits the active
+  session configuration exactly.
 
 ### B3. Cursor Commute Mode
 
@@ -96,7 +98,8 @@ Acceptance criteria:
 - the CLI tells the user where to enable Remote Control;
 - a temporary project rule and `/commute-mode` command are created only for the active Rucksack session;
 - Cursor hooks provide best-effort telemetry;
-- temporary Cursor files and their local `.git/info/exclude` block are removed on `arrive`, timeout, recovery, or preflight rollback;
+- temporary Cursor files and their local `.git/info/exclude` block are removed on `unpack`,
+  timeout, recovery, or preflight rollback;
 - the CLI labels remote readiness “user confirmed” rather than “verified” when no stable
   API exists.
 
@@ -120,7 +123,9 @@ As a commuter, I want the Mac to stop working if the closed environment becomes 
 Acceptance criteria:
 
 - thermal pressure is sampled;
-- the default policy releases at serious/critical pressure or clear CPU throttling;
+- the hardware safety monitor independently releases the sleep lease at serious/critical
+  pressure or clear CPU throttling;
+- CPU utilization alone does not trigger a false overheating release;
 - no “override forever” option exists in the normal flow;
 - an expert override, if ever added, requires an explicit time-bound value and warning.
 
@@ -150,11 +155,11 @@ Acceptance criteria:
 - invalid JSON aborts with a clear path and no overwrite;
 - file permissions are user-only where operational state is stored.
 
-## Epic D: arrival
+## Epic D: unpack and report
 
 ### D1. One-command cleanup
 
-As a developer arriving home, I run `rucksack arrive`.
+As a developer arriving home, I run `rucksack unpack`.
 
 Acceptance criteria:
 
@@ -165,7 +170,13 @@ Acceptance criteria:
 - a provider process may be stopped only after Rucksack has proven ownership; the current
   Codex path records no ownership and does not stop the daemon;
 - processes that existed before the session are never killed;
-- final output says “Normal sleep restored.”
+- final output says “Normal sleep restored”;
+- manual unpack, automatic release, and recovery atomically preserve a completed-session
+  report before transient session state is cleared;
+- `rucksack report` retrieves the latest report without contacting the helper or network;
+- human and JSON reports include duration, end kind/reason, battery and route outcome;
+- mobile data is explicitly an aggregate interface estimate, partial, or unavailable, and
+  is never presented as agent-only traffic or fabricated as zero.
 
 ## Failure stories
 

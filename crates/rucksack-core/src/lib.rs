@@ -13,4 +13,6 @@ pub use agent::AgentKind;
 pub use config::Config;
 pub use paths::AppPaths;
 pub use policy::{Focus, PolicyContext};
-pub use state::{ActivePolicy, SessionState};
+pub use state::{
+    ActivePolicy, MobileDataEstimate, MobileDataUsage, SessionEndKind, SessionReport, SessionState,
+};

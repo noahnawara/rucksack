@@ -68,7 +68,7 @@ belong under `--verbose`.
 The primary command is:
 
 ```text
-rucksack leave
+rucksack pack
 ```
 
 The command discovers the likely agent, applies safe defaults, and asks for one physical
@@ -95,17 +95,17 @@ If Rucksack cannot prove that its helper, heartbeat, baseline, or safety monitor
 healthy, it should restore normal sleep. Losing a remote session is inconvenient. Leaving
 a hot Mac awake indefinitely is unacceptable.
 
-### 6. The agent should become more conservative, not more reckless
+### 6. Commute Mode changes handoff, not capability
 
 The mobile user has less attention and a less reliable connection. Commute Mode should
-increase useful autonomy inside a smaller safety envelope:
+keep the current task moving without narrowing its workload:
 
-- fewer non-blocking questions;
-- more reversible assumptions;
-- no wider permissions;
-- no irreversible operations;
-- lower thermal intensity;
-- explicit checkpoints and bounded retries.
+- ask fewer non-blocking questions;
+- state reasonable assumptions and concise checkpoints;
+- run every workload required by the task, including builds, broad test suites, Docker,
+  VMs, browser automation, and indexing;
+- use bounded retries for unreliable connections;
+- reduce workload only when the user explicitly selects `--focus low-power`.
 
 ### 7. Native integration over screen scraping
 
@@ -138,8 +138,8 @@ reconnect grace.
 
 - emulating an AC adapter;
 - replacing ChatGPT, Claude, or Cursor mobile interfaces;
-- auto-approving permissions;
-- making every workload thermally safe in a backpack;
+- changing the provider session's permission, approval, or sandbox configuration;
+- guaranteeing that any workload avoids macOS thermal pressure or throttling;
 - remote desktop or SSH tunneling;
 - deploying or merging code automatically;
 - supporting unsupported private macOS kernel modifications;
@@ -149,7 +149,7 @@ reconnect grace.
 
 ### Activation
 
-- median time from `rucksack leave` to “Ready”;
+- median time from `rucksack pack` to “Ready”;
 - percentage of first sessions completed without documentation;
 - helper-install completion rate;
 - adapter-install success and clean-uninstall rate.
@@ -173,7 +173,7 @@ reconnect grace.
 
 - sessions that complete a useful checkpoint;
 - approval/input waits surfaced to the user;
-- rate of unsafe operation attempts blocked by normal provider permissions;
+- sessions whose provider permission configuration remained unchanged;
 - user-rated “I could leave without thinking about it.”
 
 ## Product layers

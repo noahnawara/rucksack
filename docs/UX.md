@@ -28,7 +28,7 @@ source remains honest.
 ## Primary flow
 
 ```text
-$ rucksack leave
+$ rucksack pack
 
 Rucksack
 Preparing this Mac for the walk home
@@ -98,7 +98,7 @@ Defaults
   Thermal release: serious
 
 Setup complete.
-Run `rucksack leave` the next time you walk out.
+Run `rucksack pack` the next time you walk out.
 ```
 
 For a published release, `scripts/install.sh` verifies the stable
@@ -112,9 +112,10 @@ With `--hotspot "Max’s iPhone"`, Rucksack first asks macOS to join that saved 
 network. It never accepts a hotspot password because command arguments are visible to
 other local processes. If the phone is advertised only through Apple Instant Hotspot,
 Rucksack gives one bounded prompt to select it from the Wi-Fi menu and then verifies the
-route and internet path. `--allow-unverified-ssid` permits a privacy-redacted configured
-SSID only after a successful exact join request or interactive confirmation that the
-Wi-Fi menu shows that hotspot. `--yes` cannot supply this evidence.
+route and internet path. That explicit interactive confirmation is sufficient evidence
+when macOS privacy-redacts the SSID. `--allow-unverified-ssid` permits a redacted configured
+SSID after a successful exact saved-network join request. `--yes` cannot supply interactive
+evidence.
 
 With `--usb`, Rucksack waits for the `iPhone USB` network device to become the default
 route. A connected charging cable is not sufficient evidence: Personal Hotspot must be
@@ -179,6 +180,13 @@ Agent
 
 Do not say “Remote Control verified” until Cursor exposes a stable machine-readable API.
 
+## Permission inheritance
+
+Commute Mode inherits the active agent session's permission, approval, and sandbox
+configuration exactly. Rucksack does not enable, disable, tighten, bypass, approve, or deny
+provider permissions. `PermissionRequest` hooks are passive lifecycle signals only and
+return no decision.
+
 ## Pairing Codex
 
 ```text
@@ -212,18 +220,49 @@ State: WaitingForApproval
 `rucksack status --verbose` adds the last event and helper record. `rucksack status --full`
 prints the complete session/helper view as JSON.
 
-## Arrival
+## Unpack
 
 ```text
-$ rucksack arrive
+$ rucksack unpack
 
 Rucksack
+Restoring this Mac
+
 ✓ Normal sleep restored
 ✓ Commute policy removed
 ✓ Watcher stopped
 
-Arrived.
+Unpacked.
+
+Session report
+✓ Codex · ~/work/atlas
+Duration 42m 18s · ended 2026-07-24 19:42
+Ended by unpack: user unpacked
+Battery 78% → 61%
+Estimated mobile data 184.2 MB total · 151.7 MB downloaded · 32.5 MB uploaded
+Aggregate traffic on en0; not agent-only usage or carrier billing.
 ```
+
+Automatic release writes the same report before the active session ends. `status` describes
+the live session; `report` reads the most recent completed session:
+
+```text
+$ rucksack report
+
+Rucksack
+Last session report
+
+✓ Codex · ~/work/atlas
+Duration 42m 18s · ended 2026-07-24 19:42
+Ended by automatic release: commute route moved to ordinary Wi-Fi
+Battery 78% → 61%
+Estimated mobile data 184.2 MB total · 151.7 MB downloaded · 32.5 MB uploaded
+Aggregate traffic on en0; not agent-only usage or carrier billing.
+```
+
+The estimate covers all Mac traffic observed on the verified commute interface during the
+measurement window. Missing samples or counter resets are reported as partial or
+unavailable, never fabricated as zero. `rucksack --json report` returns the typed report.
 
 ## Recovery
 
@@ -255,7 +294,7 @@ This Mac will sleep normally.
 CI and advanced users can use:
 
 ```text
-rucksack leave \
+rucksack pack \
   --agent codex \
   --hotspot "Max’s iPhone" \
   --for 75m \

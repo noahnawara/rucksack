@@ -7,6 +7,7 @@ mod helper_client;
 mod hooks;
 mod install;
 mod output;
+mod report;
 
 use clap::Parser;
 

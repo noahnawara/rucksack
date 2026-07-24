@@ -16,3 +16,8 @@ All notable changes to Rucksack will be documented here.
   authentication.
 - Stable package asset naming and a checksum-verifying installer script.
 - Machine-readable JSON progress and lifecycle state.
+- Canonical `pack`/`unpack` commands with hidden legacy aliases.
+- Private completed-session reports with aggregate commute-interface data estimates.
+- Permission-neutral Commute Mode that inherits the active provider session configuration.
+- Full task-required workloads by default, with heavy-work deferral only under explicit
+  low-power focus and independent release on thermal pressure or CPU throttling.

@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -14,9 +15,21 @@ fn run_rucksack_in_home(arguments: &[&str], home: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rucksack"))
         .args(arguments)
         .env("HOME", home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
         .env("NO_COLOR", "1")
         .output()
         .expect("rucksack should run")
+}
+
+fn report_file(home: &Path) -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        home.join("Library/Application Support/Rucksack/last-report.json")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        home.join(".local/share/Rucksack/last-report.json")
+    }
 }
 
 #[test]
@@ -56,7 +69,18 @@ fn json_flag_keeps_help_human_readable() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     assert!(stdout.contains("Usage: rucksack [OPTIONS] [COMMAND]"));
+    assert!(stdout.contains("\n  pack "));
+    assert!(stdout.contains("\n  unpack "));
+    assert!(stdout.contains("\n  report "));
+    assert!(!stdout.contains("\n  leave "));
+    assert!(!stdout.contains("\n  arrive "));
     assert!(!stdout.contains("\"type\":\"result\""));
+
+    for alias in ["leave", "arrive"] {
+        let alias_help = run_rucksack(&[alias, "--help"]);
+        assert_eq!(alias_help.status.code(), Some(0));
+        assert!(alias_help.stderr.is_empty());
+    }
 }
 
 #[test]
@@ -92,4 +116,114 @@ fn setup_rejects_control_characters_before_writing_components() {
         .path()
         .join("Library/Application Support/Rucksack")
         .exists());
+}
+
+#[test]
+fn report_reads_manual_and_automatic_sessions_without_mutating_them() {
+    for (end_kind, human_end_kind, release_reason) in [
+        (
+            "automatic",
+            "automatic release",
+            "commute route moved to ordinary Wi-Fi",
+        ),
+        ("unpack", "unpack", "user unpacked"),
+    ] {
+        let home = tempfile::tempdir().expect("temporary home should be created");
+        let path = report_file(home.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let fixture = serde_json::json!({
+            "version": 1,
+            "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "agent": "codex",
+            "project_dir": "/workspace/atlas",
+            "focus": "continue",
+            "started_at": "2026-07-24T14:00:00Z",
+            "released_at": "2026-07-24T14:05:00Z",
+            "duration_seconds": 300,
+            "end_kind": end_kind,
+            "release_reason": release_reason,
+            "start_battery_percent": 80,
+            "end_battery_percent": 77,
+            "expected_hotspot_ssid": "Noah",
+            "route_interface": "en0",
+            "route_gateway": "192.0.0.1",
+            "network_reachable_at_end": true,
+            "remote_confirmed_by_user": true,
+            "mobile_data": {
+                "status": "available",
+                "usage": {
+                    "interface": "en0",
+                    "received_bytes": 3000000,
+                    "sent_bytes": 500000,
+                    "total_bytes": 3500000,
+                    "measured_from": "2026-07-24T14:00:05Z",
+                    "measured_to": "2026-07-24T14:04:59Z"
+                }
+            }
+        });
+        let bytes = serde_json::to_vec_pretty(&fixture).unwrap();
+        fs::write(&path, &bytes).unwrap();
+
+        let human = run_rucksack_in_home(&["report"], home.path());
+        assert_eq!(human.status.code(), Some(0));
+        assert!(human.stderr.is_empty());
+        let human_stdout = String::from_utf8(human.stdout).unwrap();
+        assert!(human_stdout.contains("Last session report"));
+        assert!(human_stdout.contains("Codex · /workspace/atlas"));
+        assert!(human_stdout.contains("Duration 5m 0s"));
+        assert!(human_stdout.contains(human_end_kind));
+        assert!(human_stdout.contains(release_reason));
+        assert!(human_stdout.contains("3.5 MB total"));
+        assert!(human_stdout.contains("not agent-only usage or carrier billing"));
+
+        let json = run_rucksack_in_home(&["--json", "report"], home.path());
+        assert_eq!(json.status.code(), Some(0));
+        assert!(json.stderr.is_empty());
+        let json_stdout = String::from_utf8(json.stdout).unwrap();
+        let records = json_stdout
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["type"], "result");
+        assert_eq!(records[0]["ok"], true);
+        assert_eq!(records[0]["data"]["version"], 1);
+        assert_eq!(
+            records[0]["data"]["session_id"],
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        );
+        assert_eq!(records[0]["data"]["agent"], "codex");
+        assert_eq!(records[0]["data"]["project_dir"], "/workspace/atlas");
+        assert_eq!(records[0]["data"]["duration_seconds"], 300);
+        assert_eq!(records[0]["data"]["end_kind"], end_kind);
+        assert_eq!(records[0]["data"]["release_reason"], release_reason);
+        assert_eq!(
+            records[0]["data"]["mobile_data"]["usage"]["total_bytes"],
+            3_500_000
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn missing_report_returns_one_actionable_json_error_without_creating_state() {
+    let home = tempfile::tempdir().expect("temporary home should be created");
+    let path = report_file(home.path());
+
+    let output = run_rucksack_in_home(&["--json", "report"], home.path());
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let records = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["type"], "result");
+    assert_eq!(records[0]["ok"], false);
+    assert!(records[0]["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("rucksack pack")));
+    assert!(!path.exists());
 }

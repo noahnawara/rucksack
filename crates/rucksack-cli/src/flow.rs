@@ -1,7 +1,8 @@
-use crate::cli::{ArriveArgs, LeaveArgs, RecoverArgs, StatusArgs};
+use crate::cli::{PackArgs, RecoverArgs, StatusArgs, UnpackArgs};
 use crate::daemon::cleanup_policy;
 use crate::helper_client::HelperClient;
 use crate::output::Output;
+use crate::report;
 use anyhow::{anyhow, Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
 use rucksack_core::agent::{
@@ -9,7 +10,7 @@ use rucksack_core::agent::{
     detect, detect_all, install_adapters, verify_adapter, AdapterFileStatus, AgentAdapterEvidence,
     AgentDetection, AgentKind, ProjectMatch,
 };
-use rucksack_core::files::ensure_private_dir;
+use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
 use rucksack_core::network::{
     connect_saved_wifi, internet_probe, probe, provider_probe_url, read_default_route,
     read_iphone_usb_device, read_wifi_status, ProbeResult, RouteStatus, WifiStatus,
@@ -20,7 +21,9 @@ use rucksack_core::power::{
     read_active_sleep_utilities, read_power_status, read_sleep_disabled, read_thermal_status,
     PowerSource, ThermalLevel, ThermalStatus,
 };
-use rucksack_core::state::{ActivePolicy, SessionPhase, SessionState};
+use rucksack_core::state::{
+    ActivePolicy, SessionEndKind, SessionPhase, SessionReport, SessionState,
+};
 use rucksack_core::system::current_uid;
 use rucksack_core::{AppPaths, Config};
 use serde::Serialize;
@@ -46,14 +49,23 @@ struct VerifiedWifi {
     redacted_evidence: Option<RedactedWifiEvidence>,
 }
 
-pub fn leave(
-    args: &LeaveArgs,
+pub fn pack(
+    args: &PackArgs,
     output: &Output,
     paths: &AppPaths,
     base_config: &Config,
 ) -> Result<()> {
-    let mut cleanup = LeaveCleanup::new(paths);
-    match leave_inner(args, output, paths, base_config, &mut cleanup) {
+    with_terminal_operation(paths, || pack_transaction(args, output, paths, base_config))
+}
+
+fn pack_transaction(
+    args: &PackArgs,
+    output: &Output,
+    paths: &AppPaths,
+    base_config: &Config,
+) -> Result<()> {
+    let mut cleanup = PackCleanup::new(paths);
+    match pack_inner(args, output, paths, base_config, &mut cleanup) {
         Ok(()) => {
             cleanup.committed = true;
             Ok(())
@@ -73,12 +85,12 @@ pub fn leave(
     }
 }
 
-fn leave_inner(
-    args: &LeaveArgs,
+fn pack_inner(
+    args: &PackArgs,
     output: &Output,
     paths: &AppPaths,
     base_config: &Config,
-    cleanup: &mut LeaveCleanup<'_>,
+    cleanup: &mut PackCleanup<'_>,
 ) -> Result<()> {
     if !cfg!(target_os = "macos") {
         anyhow::bail!("Closed-lid Commute Mode currently requires macOS");
@@ -89,7 +101,7 @@ fn leave_inner(
             SessionPhase::Released | SessionPhase::Failed
         ) {
             anyhow::bail!(
-                "Rucksack is already active for {}. Run `rucksack status` or `rucksack arrive`.",
+                "Rucksack is already active for {}. Run `rucksack status` or `rucksack unpack`.",
                 existing.agent.display_name()
             );
         }
@@ -350,6 +362,11 @@ fn leave_inner(
         "Post-unplug probe {} ms; provider {}",
         after_internet.elapsed_ms, after_provider.detail
     ));
+    let commute_interface = after_route
+        .interface
+        .as_deref()
+        .context("The commute route has no interface after unplugging")?;
+    let mobile_data = report::read_mobile_data_baseline(commute_interface, output);
 
     output.blank();
     output.section("Safety");
@@ -395,12 +412,18 @@ fn leave_inner(
         commute_route_interface,
         commute_route_gateway,
         route_interface: after_route.interface,
+        start_battery_percent: Some(before_percent),
         battery_percent: Some(battery_percent),
         network_reachable: Some(true),
         network_outage_started_at: None,
         phase_before_offline: None,
         idle_grace_started_at: None,
         completed_at: None,
+        ended_at: None,
+        mobile_data_start: mobile_data.counters,
+        mobile_data_end: None,
+        mobile_data_finalized: false,
+        mobile_data_error: mobile_data.error,
         previous_sleep_disabled,
         remote_owned_by_rucksack: remote.owned,
         remote_pid: remote.pid,
@@ -416,8 +439,26 @@ fn leave_inner(
     let session = wait_for_daemon(session.id, daemon_pid, paths, Duration::from_secs(8))?;
 
     output.blank();
-    output.plain("Ready.");
-    output.plain("Lock your Mac, close the lid, and go.");
+    match session.phase {
+        SessionPhase::Failed | SessionPhase::Releasing | SessionPhase::Released => {
+            anyhow::bail!(
+                "The safety watcher entered {:?} during startup: {}",
+                session.phase,
+                session
+                    .last_event
+                    .as_deref()
+                    .or(session.release_reason.as_deref())
+                    .unwrap_or("no reason recorded")
+            );
+        }
+        SessionPhase::Completed | SessionPhase::IdleGrace => {
+            output.plain("Watcher ready; the agent is already finishing.");
+        }
+        _ => {
+            output.plain("Ready.");
+            output.plain("Lock your Mac, close the lid, and go.");
+        }
+    }
     output.plain("Normal sleep will be restored automatically.");
     if output.json() {
         output.emit_json(&session)?;
@@ -430,6 +471,10 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
         Ok(session) => (session, None),
         Err(error) => (None, Some(error.to_string())),
     };
+    let (latest_report, report_error) = match SessionReport::load(paths) {
+        Ok(report) => (report, None),
+        Err(error) => (None, Some(error.to_string())),
+    };
     let (helper, helper_error) = match HelperClient::default().status() {
         Ok(helper) => (helper, None),
         Err(error) => (None, Some(error.to_string())),
@@ -438,14 +483,18 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
     #[derive(Serialize)]
     struct StatusView {
         session: Option<SessionState>,
+        latest_report: Option<SessionReport>,
         helper: Option<rucksack_core::protocol::HelperStatus>,
         session_error: Option<String>,
+        report_error: Option<String>,
         helper_error: Option<String>,
     }
     let view = StatusView {
         session,
+        latest_report,
         helper,
         session_error,
+        report_error,
         helper_error,
     };
     if output.json() {
@@ -474,6 +523,12 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
         }
         if let Some(error) = view.helper_error.as_deref() {
             output.warn(format!("Power helper status failed: {error}"));
+        }
+        if view.latest_report.is_some() {
+            output.plain("Last completed session: run `rucksack report`.");
+        }
+        if let Some(error) = view.report_error.as_deref() {
+            output.warn(format!("Session report is unreadable: {error}"));
         }
         if args.full {
             output.blank();
@@ -514,6 +569,19 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
     if let Some(reason) = &session.release_reason {
         output.plain(format!("Ended because: {reason}"));
     }
+    if matches!(session.phase, SessionPhase::Released) {
+        if let Some(report) = view
+            .latest_report
+            .as_ref()
+            .filter(|report| report.session_id == session.id)
+        {
+            output.blank();
+            output.section("Session report");
+            report::show_body(output, report)?;
+        } else {
+            output.warn("The report for this completed session is unavailable.");
+        }
+    }
     if let Some(helper) = view.helper.as_ref() {
         output.detail(format!("Helper: {:?}", helper));
     }
@@ -523,6 +591,9 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
     if let Some(error) = view.session_error.as_deref() {
         output.warn(format!("Session state warning: {error}"));
     }
+    if let Some(error) = view.report_error.as_deref() {
+        output.warn(format!("Session report warning: {error}"));
+    }
     if args.full {
         output.blank();
         output.plain(serde_json::to_string_pretty(&view)?);
@@ -530,20 +601,24 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
     Ok(())
 }
 
-pub fn arrive(
-    _args: &ArriveArgs,
+pub fn unpack(
+    _args: &UnpackArgs,
     output: &Output,
     paths: &AppPaths,
     config: &Config,
 ) -> Result<()> {
+    with_terminal_operation(paths, || unpack_locked(output, paths, config))
+}
+
+fn unpack_locked(output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
     output.title("Restoring this Mac");
     let session = SessionState::load(paths)?;
-    if let Some(session) = &session {
+    let completed_report = if let Some(session) = &session {
         if let Some(pid) = session.daemon_pid {
             kill_process(pid);
         }
         let helper = HelperClient::default();
-        match helper.release(session.lease_id, "user arrived") {
+        match helper.release(session.lease_id, "user unpacked") {
             Ok(status)
                 if !status.active
                     && status.sleep_disabled == session.previous_sleep_disabled =>
@@ -568,11 +643,15 @@ pub fn arrive(
         cleanup_policy(paths, session.agent, &session.project_dir)?;
         output.pass("Commute policy removed");
 
-        if config.session.stop_owned_remote_on_arrive && session.remote_owned_by_rucksack {
+        if config.session.stop_owned_remote_on_unpack && session.remote_owned_by_rucksack {
             stop_owned_remote(session);
         }
-        SessionState::clear(paths)?;
+        let completed_report = archive_session_for_unpack(paths, session, output)?;
+        if !SessionState::clear_if_current(paths, session.id)? {
+            anyhow::bail!("Session state changed during unpack; refusing to clear a newer session");
+        }
         output.pass("Watcher stopped");
+        Some(completed_report)
     } else {
         let helper = HelperClient::default();
         let status = helper.status().context("Could not read the power helper")?;
@@ -597,10 +676,77 @@ pub fn arrive(
         }
         cleanup_orphaned_policy(paths)?;
         output.pass("Normal sleep is enabled");
-    }
+        load_report_or_quarantine(paths, output)?
+    };
     output.blank();
-    output.plain("Arrived.");
+    output.plain("Unpacked.");
+    if let Some(report) = completed_report.as_ref() {
+        output.blank();
+        output.section("Session report");
+        report::show_body(output, report)?;
+    }
     Ok(())
+}
+
+fn archive_session_for_unpack(
+    paths: &AppPaths,
+    session: &SessionState,
+    output: &Output,
+) -> Result<SessionReport> {
+    let persisted = SessionState::load(paths)?;
+    let session = persisted
+        .as_ref()
+        .filter(|persisted| persisted.id == session.id)
+        .unwrap_or(session);
+    if let Some(existing) =
+        load_report_or_quarantine(paths, output)?.filter(|report| report.session_id == session.id)
+    {
+        return Ok(existing);
+    }
+    if automatic_release_completed(session) {
+        let completed = finalize_automatic_session(session, Utc::now());
+        return report::archive_session(paths, &completed, SessionEndKind::Automatic);
+    }
+
+    let end_battery_percent = read_power_status().ok().and_then(|power| power.percent);
+    let mut completed = finalize_unpacked_session(session, Utc::now(), end_battery_percent);
+    report::sample_mobile_data(&mut completed, true);
+    report::archive_session(paths, &completed, SessionEndKind::Unpack)
+}
+
+fn automatic_release_completed(session: &SessionState) -> bool {
+    session.phase == SessionPhase::Released
+        || (session.phase == SessionPhase::Releasing && session.ended_at.is_some())
+}
+
+fn finalize_automatic_session(
+    session: &SessionState,
+    fallback_ended_at: chrono::DateTime<Utc>,
+) -> SessionState {
+    let mut completed = session.clone();
+    completed.phase = SessionPhase::Released;
+    completed.ended_at = completed
+        .ended_at
+        .or(completed.last_heartbeat_at)
+        .or(Some(fallback_ended_at));
+    if completed.release_reason.is_none() {
+        completed.release_reason = Some("automatic release completed".to_owned());
+    }
+    completed
+}
+
+fn finalize_unpacked_session(
+    session: &SessionState,
+    ended_at: chrono::DateTime<Utc>,
+    end_battery_percent: Option<u8>,
+) -> SessionState {
+    let mut completed = session.clone();
+    completed.battery_percent = end_battery_percent;
+    completed.phase = SessionPhase::Released;
+    completed.ended_at = Some(ended_at);
+    completed.release_reason = Some("user unpacked".to_owned());
+    completed.last_event = Some("normal sleep restored: user unpacked".to_owned());
+    completed
 }
 
 pub fn recover(args: &RecoverArgs, output: &Output, paths: &AppPaths) -> Result<()> {
@@ -615,9 +761,14 @@ pub fn recover(args: &RecoverArgs, output: &Output, paths: &AppPaths) -> Result<
         return Ok(());
     }
 
+    with_terminal_operation(paths, || recover_locked(output, paths))
+}
+
+fn recover_locked(output: &Output, paths: &AppPaths) -> Result<()> {
     restore_sleep_for_recovery(output)?;
 
     let mut cleanup_errors: Vec<String> = Vec::new();
+    let mut completed_report: Option<SessionReport> = None;
     let session = match SessionState::load(paths) {
         Ok(session) => session,
         Err(error) => {
@@ -678,9 +829,26 @@ pub fn recover(args: &RecoverArgs, output: &Output, paths: &AppPaths) -> Result<
             cleanup_errors.push(format!("could not clear policy state: {error}"));
         }
     }
-    if session.is_some() {
-        if let Err(error) = SessionState::clear(paths) {
-            cleanup_errors.push(format!("could not clear session state: {error}"));
+    if let Some(session) = session.as_ref() {
+        match archive_session_for_recovery(paths, session, output) {
+            Ok(report) => {
+                completed_report = Some(report);
+                match SessionState::clear_if_current(paths, session.id) {
+                    Ok(true) => {}
+                    Ok(false) => cleanup_errors.push(
+                        "session state changed during recovery; refusing to clear a newer session"
+                            .to_owned(),
+                    ),
+                    Err(error) => {
+                        cleanup_errors.push(format!("could not clear session state: {error}"))
+                    }
+                }
+            }
+            Err(error) => {
+                cleanup_errors.push(format!(
+                    "could not preserve the completed-session report; session state was kept: {error}"
+                ));
+            }
         }
     }
 
@@ -694,7 +862,66 @@ pub fn recover(args: &RecoverArgs, output: &Output, paths: &AppPaths) -> Result<
     output.pass("Temporary policy and stale state cleared");
     output.blank();
     output.plain("This Mac will sleep normally.");
+    if let Some(report) = completed_report.as_ref() {
+        output.blank();
+        output.section("Session report");
+        report::show_body(output, report)?;
+    }
     Ok(())
+}
+
+fn archive_session_for_recovery(
+    paths: &AppPaths,
+    session: &SessionState,
+    output: &Output,
+) -> Result<SessionReport> {
+    if let Some(existing) =
+        load_report_or_quarantine(paths, output)?.filter(|report| report.session_id == session.id)
+    {
+        return Ok(existing);
+    }
+    if automatic_release_completed(session) {
+        let completed = finalize_automatic_session(session, Utc::now());
+        return report::archive_session(paths, &completed, SessionEndKind::Automatic);
+    }
+
+    let mut completed = session.clone();
+    completed.phase = SessionPhase::Released;
+    completed.ended_at = completed.ended_at.or(Some(Utc::now()));
+    completed.battery_percent = read_power_status().ok().and_then(|power| power.percent);
+    if completed.release_reason.is_none() {
+        completed.release_reason = Some("recovery requested".to_owned());
+    }
+    if !completed.mobile_data_finalized {
+        completed.mobile_data_error = Some(
+            "Session ended through recovery; the final commute-interface boundary was not verified"
+                .to_owned(),
+        );
+    }
+    completed.last_event = Some("normal sleep restored through recovery".to_owned());
+    report::archive_session(paths, &completed, SessionEndKind::Recovery)
+}
+
+fn load_report_or_quarantine(paths: &AppPaths, output: &Output) -> Result<Option<SessionReport>> {
+    match SessionReport::load(paths) {
+        Ok(report) => Ok(report),
+        Err(error) => {
+            let quarantine = quarantine_corrupt_file(&paths.report_file, "report")?;
+            output.warn(format!(
+                "Unreadable session report was quarantined at {}: {error}",
+                quarantine.display()
+            ));
+            Ok(None)
+        }
+    }
+}
+
+fn with_terminal_operation<T>(
+    paths: &AppPaths,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let terminal_lock = paths.terminal_lock_file();
+    with_advisory_lock(&terminal_lock, operation)
 }
 
 fn restore_sleep_for_recovery(output: &Output) -> Result<()> {
@@ -894,7 +1121,7 @@ struct RemotePreparation {
 fn prepare_remote(
     agent: AgentKind,
     detection: &AgentDetection,
-    args: &LeaveArgs,
+    args: &PackArgs,
     output: &Output,
 ) -> Result<RemotePreparation> {
     match agent {
@@ -933,7 +1160,7 @@ fn prepare_remote(
                 "Codex session visibility accepted without phone verification"
             });
             // `start` may attach to a pre-existing daemon. Until the JSON schema exposes
-            // ownership explicitly, never stop it automatically during rollback or arrival.
+            // ownership explicitly, never stop it automatically during rollback or unpack.
             Ok(RemotePreparation {
                 owned: false,
                 pid: None,
@@ -982,7 +1209,7 @@ fn prepare_remote(
     }
 }
 
-fn confirm_remote(args: &LeaveArgs, output: &Output, prompt: &str) -> Result<bool> {
+fn confirm_remote(args: &PackArgs, output: &Output, prompt: &str) -> Result<bool> {
     if args.allow_unverified_remote {
         output.warn("Phone visibility was not verified; continuing by explicit override");
         return Ok(false);
@@ -1001,7 +1228,7 @@ fn confirm_remote(args: &LeaveArgs, output: &Output, prompt: &str) -> Result<boo
 
 fn wait_for_expected_wifi(
     expected: &str,
-    args: &LeaveArgs,
+    args: &PackArgs,
     output: &Output,
 ) -> Result<VerifiedWifi> {
     let current = read_wifi_status()?;
@@ -1044,21 +1271,19 @@ fn wait_for_expected_wifi(
         output.action(
             "Open the Wi-Fi menu and select the phone under Personal Hotspots (Instant Hotspot), then return here.",
         );
-        if args.allow_unverified_ssid {
-            if args.yes {
-                anyhow::bail!(
-                    "The automatic hotspot switch failed and a privacy-redacted SSID cannot be confirmed with --yes. Re-run interactively, select “{expected}” in the Wi-Fi menu, and confirm it."
-                );
-            }
-            if !output.confirm(
-                &format!("Does the Wi-Fi menu now show “{expected}” as connected?"),
-                false,
-            )? {
-                anyhow::bail!("The configured hotspot was not confirmed in the Wi-Fi menu");
-            }
-            output.pass("Hotspot selection confirmed by you");
-            redacted_evidence = Some(RedactedWifiEvidence::UserConfirmation);
+        if args.yes {
+            anyhow::bail!(
+                "The automatic hotspot switch failed and requires interactive Wi-Fi-menu confirmation. Re-run without --yes, select “{expected}”, and confirm it."
+            );
         }
+        if !output.confirm(
+            &format!("Does the Wi-Fi menu now show “{expected}” as connected?"),
+            false,
+        )? {
+            anyhow::bail!("The configured hotspot was not confirmed in the Wi-Fi menu");
+        }
+        output.pass("Hotspot selection confirmed by you");
+        redacted_evidence = Some(RedactedWifiEvidence::UserConfirmation);
     }
 
     output.action(format!("Connect “{expected}” on this Mac"));
@@ -1066,11 +1291,8 @@ fn wait_for_expected_wifi(
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let wifi = read_wifi_status()?;
-        let usable_redacted_evidence = if args.allow_unverified_ssid {
-            redacted_evidence
-        } else {
-            None
-        };
+        let usable_redacted_evidence =
+            accepted_redacted_evidence(args.allow_unverified_ssid, redacted_evidence);
         if wifi_is_acceptable(&wifi, expected, usable_redacted_evidence) {
             return Ok(VerifiedWifi {
                 redacted_evidence: wifi.redacted.then_some(usable_redacted_evidence).flatten(),
@@ -1084,6 +1306,17 @@ fn wait_for_expected_wifi(
             );
         }
         thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn accepted_redacted_evidence(
+    allow_saved_join: bool,
+    evidence: Option<RedactedWifiEvidence>,
+) -> Option<RedactedWifiEvidence> {
+    match evidence {
+        Some(RedactedWifiEvidence::UserConfirmation) => evidence,
+        Some(RedactedWifiEvidence::SavedNetworkJoin) if allow_saved_join => evidence,
+        _ => None,
     }
 }
 
@@ -1233,7 +1466,7 @@ fn require_no_active_sleep_utilities() -> Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     anyhow::bail!(
-        "Active sleep utility detected: {names}. End that utility's session and rerun `rucksack leave`; Rucksack will not stop it automatically."
+        "Active sleep utility detected: {names}. End that utility's session and rerun `rucksack pack`; Rucksack will not stop it automatically."
     )
 }
 
@@ -1285,11 +1518,7 @@ fn wait_for_daemon(
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(session) = SessionState::load(paths)? {
-            if session.id == session_id
-                && session.daemon_pid == Some(daemon_pid)
-                && session.last_heartbeat_at.is_some()
-                && session.phase == SessionPhase::Active
-            {
+            if watcher_has_started(&session, session_id, daemon_pid) {
                 return Ok(session);
             }
         }
@@ -1298,6 +1527,12 @@ fn wait_for_daemon(
         }
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn watcher_has_started(session: &SessionState, session_id: Uuid, daemon_pid: u32) -> bool {
+    session.id == session_id
+        && session.daemon_pid == Some(daemon_pid)
+        && session.last_heartbeat_at.is_some()
 }
 
 fn spawn_daemon(session_id: Uuid, paths: &AppPaths) -> Result<u32> {
@@ -1364,7 +1599,7 @@ fn project_name(project: &Path) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-struct LeaveCleanup<'a> {
+struct PackCleanup<'a> {
     paths: &'a AppPaths,
     lease_id: Option<Uuid>,
     policy_active: bool,
@@ -1376,7 +1611,7 @@ struct LeaveCleanup<'a> {
     committed: bool,
 }
 
-impl<'a> LeaveCleanup<'a> {
+impl<'a> PackCleanup<'a> {
     fn new(paths: &'a AppPaths) -> Self {
         Self {
             paths,
@@ -1445,7 +1680,7 @@ impl<'a> LeaveCleanup<'a> {
     }
 }
 
-impl Drop for LeaveCleanup<'_> {
+impl Drop for PackCleanup<'_> {
     fn drop(&mut self) {
         if !self.committed {
             for error in self.rollback() {
@@ -1458,6 +1693,69 @@ impl Drop for LeaveCleanup<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    fn test_paths(root: &Path) -> AppPaths {
+        let data_dir = root.join("data");
+        let log_dir = root.join("logs");
+        AppPaths {
+            home: root.to_path_buf(),
+            data_dir: data_dir.clone(),
+            config_file: data_dir.join("config.toml"),
+            session_file: data_dir.join("session.json"),
+            report_file: data_dir.join("last-report.json"),
+            policy_file: data_dir.join("active-policy.json"),
+            adapter_manifest_file: data_dir.join("adapters.json"),
+            log_dir: log_dir.clone(),
+            daemon_log: log_dir.join("daemon.log"),
+            codex_hooks: root.join(".codex/hooks.json"),
+            codex_skill: root.join(".agents/skills/commute-mode/SKILL.md"),
+            claude_settings: root.join(".claude/settings.json"),
+            claude_skill: root.join(".claude/skills/commute-mode/SKILL.md"),
+            cursor_hooks: root.join(".cursor/hooks.json"),
+        }
+    }
+
+    fn session(started_at: chrono::DateTime<Utc>) -> SessionState {
+        SessionState {
+            version: 1,
+            revision: 0,
+            id: Uuid::new_v4(),
+            lease_id: Uuid::new_v4(),
+            owner_uid: 501,
+            agent: AgentKind::Codex,
+            project_dir: PathBuf::from("/workspace/atlas"),
+            focus: rucksack_core::Focus::Continue,
+            phase: SessionPhase::Active,
+            started_at,
+            expires_at: started_at + ChronoDuration::minutes(30),
+            last_heartbeat_at: None,
+            daemon_pid: None,
+            expected_hotspot_ssid: Some("Noah".to_owned()),
+            observed_hotspot_ssid: Some("Noah".to_owned()),
+            commute_route_interface: Some("en0".to_owned()),
+            commute_route_gateway: Some("192.0.0.1".to_owned()),
+            route_interface: Some("en0".to_owned()),
+            start_battery_percent: Some(80),
+            battery_percent: Some(78),
+            network_reachable: Some(true),
+            network_outage_started_at: None,
+            phase_before_offline: None,
+            idle_grace_started_at: None,
+            completed_at: None,
+            ended_at: None,
+            mobile_data_start: None,
+            mobile_data_end: None,
+            mobile_data_finalized: false,
+            mobile_data_error: None,
+            previous_sleep_disabled: Some(0),
+            remote_owned_by_rucksack: false,
+            remote_pid: None,
+            remote_confirmed_by_user: true,
+            last_event: None,
+            release_reason: None,
+        }
+    }
 
     fn wifi(ssid: Option<&str>, redacted: bool) -> WifiStatus {
         WifiStatus {
@@ -1496,6 +1794,22 @@ mod tests {
     }
 
     #[test]
+    fn interactive_hotspot_confirmation_needs_no_extra_flag() {
+        assert_eq!(
+            accepted_redacted_evidence(false, Some(RedactedWifiEvidence::UserConfirmation)),
+            Some(RedactedWifiEvidence::UserConfirmation)
+        );
+        assert_eq!(
+            accepted_redacted_evidence(false, Some(RedactedWifiEvidence::SavedNetworkJoin)),
+            None
+        );
+        assert_eq!(
+            accepted_redacted_evidence(true, Some(RedactedWifiEvidence::SavedNetworkJoin)),
+            Some(RedactedWifiEvidence::SavedNetworkJoin)
+        );
+    }
+
+    #[test]
     fn strict_wifi_requires_the_wifi_device_as_default_route() {
         let verified_wifi = wifi(Some("Noah"), false);
 
@@ -1529,5 +1843,107 @@ mod tests {
             .unwrap(),
             Some(RedactedWifiEvidence::SavedNetworkJoin)
         );
+    }
+
+    #[test]
+    fn manual_unpack_finalization_produces_an_unpack_report() {
+        let started_at = "2026-07-24T14:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
+        let ended_at = started_at + ChronoDuration::minutes(5);
+        let completed = finalize_unpacked_session(&session(started_at), ended_at, Some(76));
+        let report = SessionReport::from_session(&completed, SessionEndKind::Unpack).unwrap();
+
+        assert_eq!(completed.phase, SessionPhase::Released);
+        assert_eq!(
+            completed.last_event.as_deref(),
+            Some("normal sleep restored: user unpacked")
+        );
+        assert_eq!(report.end_kind, SessionEndKind::Unpack);
+        assert_eq!(report.release_reason, "user unpacked");
+        assert_eq!(report.duration_seconds, 300);
+        assert_eq!(report.end_battery_percent, Some(76));
+
+        let unavailable = finalize_unpacked_session(&session(started_at), ended_at, None);
+        assert_eq!(unavailable.battery_percent, None);
+    }
+
+    #[test]
+    fn automatic_release_reconstruction_preserves_the_original_end_kind() {
+        let started_at = "2026-07-24T14:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
+        let heartbeat_at = started_at + ChronoDuration::minutes(4);
+        let mut released = session(started_at);
+        released.phase = SessionPhase::Released;
+        released.last_heartbeat_at = Some(heartbeat_at);
+        released.release_reason = Some("battery safety floor".to_owned());
+
+        assert!(automatic_release_completed(&released));
+        let completed =
+            finalize_automatic_session(&released, started_at + ChronoDuration::minutes(10));
+        let report = SessionReport::from_session(&completed, SessionEndKind::Automatic).unwrap();
+        assert_eq!(report.released_at, heartbeat_at);
+        assert_eq!(report.end_kind, SessionEndKind::Automatic);
+
+        released.phase = SessionPhase::Releasing;
+        released.ended_at = None;
+        assert!(!automatic_release_completed(&released));
+        released.ended_at = Some(heartbeat_at);
+        assert!(automatic_release_completed(&released));
+    }
+
+    #[test]
+    fn terminal_operations_are_serialized() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let first_paths = paths.clone();
+        let second_paths = paths.clone();
+        let (first_entered_tx, first_entered_rx) = std::sync::mpsc::channel::<()>();
+        let (release_first_tx, release_first_rx) = std::sync::mpsc::channel::<()>();
+        let (second_entered_tx, second_entered_rx) = std::sync::mpsc::channel::<()>();
+
+        let first = thread::spawn(move || {
+            with_terminal_operation(&first_paths, || {
+                first_entered_tx.send(())?;
+                release_first_rx.recv()?;
+                Ok(())
+            })
+        });
+        first_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+
+        let second = thread::spawn(move || {
+            with_terminal_operation(&second_paths, || {
+                second_entered_tx.send(())?;
+                Ok(())
+            })
+        });
+        assert!(second_entered_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        second_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        second.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn watcher_start_is_observed_before_a_completed_session_can_release() {
+        let started_at = Utc::now();
+        let mut started = session(started_at);
+        started.phase = SessionPhase::Completed;
+        started.daemon_pid = Some(42);
+        started.last_heartbeat_at = Some(started_at);
+
+        assert!(watcher_has_started(&started, started.id, 42));
+        assert!(!watcher_has_started(&started, Uuid::new_v4(), 42));
+        assert!(!watcher_has_started(&started, started.id, 43));
+        started.last_heartbeat_at = None;
+        assert!(!watcher_has_started(&started, started.id, 42));
     }
 }

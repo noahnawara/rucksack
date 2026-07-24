@@ -862,6 +862,7 @@ mod tests {
                 data_dir: data_dir.clone(),
                 config_file: data_dir.join("config.toml"),
                 session_file: data_dir.join("session.json"),
+                report_file: data_dir.join("last-report.json"),
                 policy_file: data_dir.join("active-policy.json"),
                 adapter_manifest_file: data_dir.join("adapters.json"),
                 log_dir: log_dir.clone(),

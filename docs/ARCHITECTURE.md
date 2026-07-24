@@ -5,7 +5,7 @@
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │ rucksack CLI                                                │
-│ setup · doctor · leave · status · arrive · recover          │
+│ setup · doctor · pack · status · unpack · report · recover  │
 └───────────────┬─────────────────────────────────────────────┘
                 │ typed JSON over Unix socket
 ┌───────────────▼─────────────────────────────────────────────┐
@@ -71,6 +71,7 @@ User state:
 ```text
 ~/Library/Application Support/Rucksack/config.toml
 ~/Library/Application Support/Rucksack/session.json
+~/Library/Application Support/Rucksack/last-report.json
 ~/Library/Application Support/Rucksack/active-policy.json
 ~/Library/Logs/Rucksack/daemon.log
 ```
@@ -107,10 +108,10 @@ ready
    ▼
 active ──────────────┬──────────────┬───────────────┐
    │                 │              │               │
-   │ user arrives    │ timeout      │ battery floor │ thermal
+   │ user unpacks    │ timeout      │ battery floor │ thermal
    ▼                 ▼              ▼               ▼
 releasing ◄─────────────────────────────────────────┘
-   │ baseline verified, policy removed
+   │ baseline verified, report saved, policy removed
    ▼
 inactive
 ```
@@ -209,7 +210,9 @@ The daemon is deliberately unprivileged. Every heartbeat:
 - for strict hotspot/USB sessions, compare live SSID, route interface, and gateway with the
   verified handoff route;
 - make a bounded internet/provider probe;
+- sample aggregate byte counters on the verified commute interface;
 - update local session state;
+- atomically replace the private local `last-report.json` before terminal session cleanup;
 - remove temporary policy after a terminal release.
 
 It cannot set `SleepDisabled` directly.
@@ -218,6 +221,13 @@ A different live SSID, interface, or gateway proves the strict commute route was
 and triggers immediate release. A missing route is treated as a temporary outage and uses
 the configured reconnect grace before release.
 
+The completed-session report retains only the latest session. Mobile-data accounting is a
+start/end delta of macOS interface byte counters and is explicitly an estimate of aggregate
+Mac traffic on that interface. A missing baseline or final sample, interface change, or
+counter reset produces a partial/unavailable result instead of a fabricated value. No
+packet capture or destination-level logging is involved. Report writes are serialized and
+a stale writer that no longer owns current session state cannot replace the latest report.
+
 ## Concurrency
 
 - helper lease state is guarded by one mutex;
@@ -225,6 +235,10 @@ the configured reconnect grace before release.
 - event and watchdog threads enqueue work against the same state;
 - user state mutations use short advisory-lock transactions, revision checks, and atomic
   temp-file + rename writes;
+- `pack`, daemon release, `unpack`, and `recover` share one terminal-operation lock, so only
+  one path can start or finalize a session;
+- same-session report writes are idempotent, and a different session can replace the latest
+  report only while it owns the current session state;
 - one user session is allowed per account;
 - helper allows one global lease because `SleepDisabled` is global.
 

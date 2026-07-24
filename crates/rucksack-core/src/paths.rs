@@ -7,6 +7,7 @@ pub struct AppPaths {
     pub data_dir: PathBuf,
     pub config_file: PathBuf,
     pub session_file: PathBuf,
+    pub report_file: PathBuf,
     pub policy_file: PathBuf,
     pub adapter_manifest_file: PathBuf,
     pub log_dir: PathBuf,
@@ -32,6 +33,7 @@ impl AppPaths {
             data_dir: base.clone(),
             config_file: base.join("config.toml"),
             session_file: base.join("session.json"),
+            report_file: base.join("last-report.json"),
             policy_file: base.join("active-policy.json"),
             adapter_manifest_file: base.join("adapters.json"),
             log_dir: log_dir.clone(),
@@ -42,6 +44,10 @@ impl AppPaths {
             claude_skill: home.join(".claude/skills/commute-mode/SKILL.md"),
             cursor_hooks: home.join(".cursor/hooks.json"),
         })
+    }
+
+    pub fn terminal_lock_file(&self) -> PathBuf {
+        self.session_file.with_extension("terminal.lock")
     }
 }
 

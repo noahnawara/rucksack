@@ -3,16 +3,16 @@
 Validation date: **2026-07-24**.
 
 This source tree has been compiled and tested on macOS. The compiler gate below passes,
-including strict Clippy and release-helper checks with a dummy CI Team ID. The signed
-package, real privileged power mutation, closed-lid behavior, and hardware/provider matrix
-remain release gates. The project must not be described as production-ready until those
-checks pass.
+including strict Clippy and release-helper checks with a dummy CI Team ID. A real
+privileged-helper and short closed-lid smoke test have passed; the signed package,
+15-minute closed-lid gate, and broader hardware/provider matrix remain release gates. The
+project must not be described as production-ready until those checks pass.
 
 ## Current source inventory
 
 Counts include repository dotfiles and exclude `.git` and `target`:
 
-- 30 Rust source files;
+- 31 Rust source files;
 - 8 TOML files;
 - 3 JSON fixtures/configuration files;
 - 1 launchd plist;
@@ -27,7 +27,7 @@ The current tree passes:
 cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+cargo test --workspace --all-targets --locked
 RUCKSACK_TEAM_ID=CI00000000 \
   cargo clippy -p rucksack-helper --all-targets --release --locked -- -D warnings
 RUCKSACK_TEAM_ID=CI00000000 \
@@ -36,7 +36,7 @@ RUCKSACK_TEAM_ID=CI00000000 \
 
 Test results:
 
-- 93 debug tests: CLI 25, core 57, helper 11;
+- 116 debug tests: CLI 37, core 68, helper 11;
 - 12 release-helper tests with the dummy CI Team ID;
 - 0 failures.
 
@@ -56,6 +56,14 @@ The automated and structural review also verifies:
 - bounded captive-portal and provider probes that contain no repository data;
 - strict hotspot/USB route binding, immediate release on confirmed route replacement, and
   reconnect grace for route loss;
+- serious/critical thermal pressure or CPU/scheduler throttling releases the lease and
+  records the observed limits, while raw CPU utilization alone does not false-trigger;
+- canonical `pack`, `unpack`, and `report` commands with hidden `leave`/`arrive`
+  compatibility aliases;
+- atomic, user-only completed-session reports with aggregate interface-counter deltas that
+  become partial/unavailable rather than fabricating zero, restore sleep before final
+  accounting, serialize pack/finalization commands, preserve newer session state, and reject
+  stale-session replacement;
 - a stable `rucksack-universal.pkg` release asset plus checksum, signature, and Gatekeeper
   validation in `scripts/install.sh`;
 - repository-relative Markdown links.
@@ -79,12 +87,24 @@ supervised short smoke test with an iPhone Personal Hotspot:
   `SleepDisabled=1`, and a non-renewable hard deadline;
 - with `AppleClamshellState=Yes`, local daemon revisions, helper renewals, the pinned route,
   and provider health advanced for approximately three minutes;
-- after the lid was reopened for an unrelated call, `rucksack arrive` stopped the watcher
+- after the lid was reopened for an unrelated call, `rucksack unpack` stopped the watcher
   and restored `SleepDisabled=0`; the Mac then returned to the ordinary Wi-Fi route.
 
-This is positive smoke-test evidence, not the required 15-minute hardware gate. The run
-was intentionally ended early, so automatic release on ordinary-Wi-Fi return also remains
-to be exercised in a later uninterrupted test.
+A second wireless-only run then exercised the missing route-return path:
+
+- no iPhone USB network interface was active; the hotspot remained the `en0` default route
+  with gateway `192.0.0.1`;
+- the manual Instant Hotspot selection survived the battery transition, and the development
+  flow exposed a redundant `--allow-unverified-ssid` requirement that has now been removed
+  for explicit interactive Wi-Fi-menu confirmation;
+- with `AppleClamshellState=Yes` and `SleepDisabled=Yes`, three consecutive daemon revisions
+  and heartbeats advanced while captive-network probes continued to pass;
+- selecting ordinary Wi-Fi changed the gateway to `192.168.1.1`; the watcher recorded that
+  exact route replacement, automatically released the lease, and restored
+  `SleepDisabled=0`.
+
+This is positive wireless-only and automatic-release smoke evidence, not the required
+15-minute hardware gate.
 
 ## Required package gate
 
@@ -118,7 +138,7 @@ The test must include:
 7. user-daemon termination;
 8. helper termination/restart;
 9. reboot with persisted helper state;
-10. `arrive`, `recover`, helper upgrade, and helper uninstall;
+10. `unpack`, `recover`, helper upgrade, and helper uninstall;
 11. exact restoration of normal sleep after every case.
 
 No release should claim production readiness until package, integration, and real-hardware

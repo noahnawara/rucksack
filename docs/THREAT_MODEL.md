@@ -83,7 +83,7 @@ clients.
 
 ## Hook controls
 
-- no auto-approval;
+- permission hooks return no decision and do not alter provider settings;
 - no shell construction from hook input;
 - stdin size limit;
 - output is generated from compiled policy and fixed schemas;
@@ -104,13 +104,14 @@ clients.
 
 ## Prompt-injection posture
 
-The policy is guidance, not a security boundary. The security boundary remains provider
-sandboxing and approval. A repository can attempt to override guidance; therefore:
+The policy is guidance, not a security boundary. The active provider session's existing
+instructions, sandbox, approval, and permission configuration remain the boundary, including
+any bypass mode the user deliberately selected. A repository can attempt to override
+guidance; therefore:
 
-- Rucksack never grants broader permissions;
-- destructive operations remain approval-gated;
-- the policy explicitly rejects privilege broadening and irreversible actions;
-- future strict hooks must be narrow and fail closed;
+- Rucksack neither grants nor revokes provider permissions;
+- Commute Mode adds no Rucksack-specific approval or deny rules;
+- permission lifecycle hooks observe state but return no decision;
 - user documentation must not claim prompt text alone guarantees safety.
 
 ## Denial of service
@@ -135,7 +136,14 @@ Default Rucksack state should not contain:
 - pairing codes after display;
 - repository remote URLs.
 
-Project directory may be stored for status and must remain local.
+The completed-session report may store local operational metadata and aggregate start/end
+byte counters for the verified commute interface. Rucksack does not capture packets,
+destinations, hostnames, URLs, payloads, prompts, responses, command output, file contents,
+or repository content for reporting.
+
+Project directory and reports remain local and are never uploaded by Rucksack. The mobile
+data value can include macOS and unrelated-app traffic, can omit traffic on other
+interfaces, and is neither per-agent attribution nor carrier billing.
 
 ## Residual risks
 
