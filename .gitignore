@@ -7,3 +7,9 @@
 .env
 .idea/
 .vscode/
+/site/node_modules/
+/site/dist/
+/site/test-results/
+/site/playwright-report/
+/site/blob-report/
+/site/.vercel/
