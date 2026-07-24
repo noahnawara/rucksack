@@ -501,6 +501,8 @@ mod anchored {
     }
 
     fn managed_mode(mode: u32) -> Result<Mode> {
+        // RawMode is u32 on Linux and narrower on macOS, where this conversion must stay checked.
+        #[allow(clippy::useless_conversion)]
         let raw_mode: RawMode = mode
             .try_into()
             .map_err(|_| anyhow!("Managed file mode {mode:o} is not supported on this platform"))?;
