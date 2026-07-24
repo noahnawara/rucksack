@@ -2,6 +2,7 @@ use crate::cli::{PackArgs, RecoverArgs, StatusArgs};
 use crate::daemon::cleanup_policy;
 use crate::helper_client::HelperClient;
 use crate::hooks::commute_mode_confirmation_command;
+use crate::onboarding::{assess, bases};
 use crate::output::{HumanEvent, Output};
 use crate::report;
 use anyhow::{anyhow, Context, Result};
@@ -16,6 +17,9 @@ use rucksack_core::network::{
     connect_saved_wifi, internet_probe, probe, provider_probe_url, read_default_route,
     read_iphone_usb_device, read_wifi_status, ProbeResult, RouteStatus, WifiStatus,
     DEFAULT_INTERNET_PROBE_URL,
+};
+use rucksack_core::onboarding::{
+    EvidenceInvalidationReason, EvidenceKind, RemoteOnboardingRegistry,
 };
 use rucksack_core::policy::{render_policy, PolicyContext};
 use rucksack_core::power::{
@@ -40,6 +44,8 @@ const PREFLIGHT_PROBE_ATTEMPTS: u8 = 3;
 const PREFLIGHT_PROBE_RETRY_DELAY: Duration = Duration::from_millis(500);
 const CONFIRMATION_TOKEN_PREFIX: &str = "rucksack-";
 const CONFIRMATION_TOKEN_HEX_LENGTH: usize = 16;
+const TASK_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+const TASK_ACTIVATION_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RedactedWifiEvidence {
@@ -229,7 +235,27 @@ fn pack_inner(
     }
     output.detail(&detection.detail);
 
-    ensure_adapter(paths, agent, args.yes, output)?;
+    let adapter = ensure_adapter(paths, agent, args.yes, output)?;
+    let onboarding_bases = bases(&detection, &adapter)?;
+    let onboarding_registry = RemoteOnboardingRegistry::load(paths)?;
+    let onboarding = assess(&onboarding_registry, agent, &onboarding_bases);
+    let onboarding_confirmed_by_user = onboarding.is_current();
+    if onboarding_confirmed_by_user {
+        output.story(HumanEvent::Fact(format!(
+            "{agent} pairing, native trust, and baseline phone visibility were confirmed by you during setup"
+        )));
+    } else if args.allow_unverified_remote {
+        output.story(HumanEvent::Warning(format!(
+            "{agent} Remote Control onboarding is incomplete ({}) and is being bypassed by the explicit unverified-remote exception",
+            onboarding.detail()
+        )));
+    } else {
+        anyhow::bail!(
+            "{} Remote Control onboarding is incomplete ({}). Run `rucksack setup` interactively, then pack again.",
+            agent.display_name(),
+            onboarding.detail()
+        );
+    }
 
     let now = Utc::now();
     let expires_at = now + ChronoDuration::minutes(config.session.duration_minutes as i64);
@@ -270,13 +296,20 @@ fn pack_inner(
         config.session.focus
     )));
 
-    let remote = prepare_remote(agent, &detection, args, &confirmation_command, output)?;
+    let remote = prepare_remote(
+        agent,
+        &detection,
+        &confirmation_command,
+        onboarding_confirmed_by_user,
+        output,
+    )?;
     cleanup.remote_agent = Some(agent);
     cleanup.remote_owned = remote.owned;
     cleanup.remote_pid = remote.pid;
-    if !args.allow_unverified_remote {
-        confirmed_policy_for_session(paths, policy.session_id)?;
-    }
+    await_task_activation(paths, policy.session_id, agent, args, output)?;
+    output.story(HumanEvent::Fact(format!(
+        "the exact {agent} task activation was observed"
+    )));
 
     output.story(HumanEvent::RucksackAction(
         "checking the commute connection".to_owned(),
@@ -526,11 +559,7 @@ fn pack_inner(
     } else {
         None
     };
-    let policy = if args.allow_unverified_remote {
-        active_policy_for_session(paths, policy.session_id)?
-    } else {
-        confirmed_policy_for_session(paths, policy.session_id)?
-    };
+    let policy = confirmed_policy_for_session(paths, policy.session_id)?;
     let mut session = SessionState {
         version: 1,
         revision: 0,
@@ -1230,7 +1259,12 @@ fn select_agent(
     Ok(candidates[selected].kind)
 }
 
-fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output) -> Result<()> {
+fn ensure_adapter(
+    paths: &AppPaths,
+    agent: AgentKind,
+    yes: bool,
+    output: &Output,
+) -> Result<AgentAdapterEvidence> {
     let binary = std::env::current_exe()?;
     output.story(HumanEvent::RucksackAction(format!(
         "checking the native {agent} commute mode adapter"
@@ -1240,7 +1274,7 @@ fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output
         output.story(HumanEvent::Fact(format!(
             "the native {agent} commute mode adapter is ready"
         )));
-        return Ok(());
+        return Ok(evidence);
     }
     report_adapter_issues(&evidence, output);
 
@@ -1283,7 +1317,14 @@ fn ensure_adapter(paths: &AppPaths, agent: AgentKind, yes: bool, output: &Output
     output.story(HumanEvent::Fact(format!(
         "the native {agent} commute mode adapter is installed and verified"
     )));
-    Ok(())
+    RemoteOnboardingRegistry::invalidate_evidence(
+        paths,
+        agent,
+        EvidenceKind::NativeTrust,
+        EvidenceInvalidationReason::AdapterChanged,
+        Utc::now(),
+    )?;
+    Ok(installed)
 }
 
 fn report_adapter_issues(evidence: &AgentAdapterEvidence, output: &Output) {
@@ -1335,8 +1376,8 @@ struct RemotePreparation {
 fn prepare_remote(
     agent: AgentKind,
     detection: &AgentDetection,
-    args: &PackArgs,
     confirmation_command: &str,
+    onboarding_confirmed_by_user: bool,
     output: &Output,
 ) -> Result<RemotePreparation> {
     match agent {
@@ -1374,24 +1415,13 @@ fn prepare_remote(
             output.story(HumanEvent::UserAction(vec![
                 format!("in the open codex conversation invoke `{confirmation_command}`"),
                 "wait for codex to acknowledge commute mode".to_owned(),
-                "open chatgpt on your phone and find this codex session".to_owned(),
             ]));
-            let confirmed = confirm_remote(
-                args,
-                output,
-                "confirm that codex acknowledged commute mode and your phone can see this session",
-            )?;
-            output.story(HumanEvent::Fact(if confirmed {
-                "commute mode and codex phone visibility were confirmed by you".to_owned()
-            } else {
-                "codex phone visibility was accepted without verification".to_owned()
-            }));
             // `start` may attach to a pre-existing daemon. Until the JSON schema exposes
             // ownership explicitly, never stop it automatically during rollback or unpack.
             Ok(RemotePreparation {
                 owned: false,
                 pid: None,
-                confirmed_by_user: confirmed,
+                confirmed_by_user: onboarding_confirmed_by_user,
             })
         }
         AgentKind::Claude => {
@@ -1428,22 +1458,11 @@ fn prepare_remote(
                 claude_remote_user_instruction().to_owned(),
                 "wait until `/rc active` appears".to_owned(),
                 format!("invoke `{confirmation_command}` in that exact conversation"),
-                "open claude on your phone and find that conversation".to_owned(),
             ]));
-            let confirmed = confirm_remote(
-                args,
-                output,
-                "confirm that claude code acknowledged commute mode and your phone can see that conversation",
-            )?;
-            output.story(HumanEvent::Fact(if confirmed {
-                "commute mode and claude code phone visibility were confirmed by you".to_owned()
-            } else {
-                "claude code phone visibility was accepted without verification".to_owned()
-            }));
             Ok(RemotePreparation {
                 owned: false,
                 pid: None,
-                confirmed_by_user: confirmed,
+                confirmed_by_user: onboarding_confirmed_by_user,
             })
         }
         AgentKind::Cursor => {
@@ -1451,43 +1470,64 @@ fn prepare_remote(
                 format!("in the open cursor conversation invoke `{confirmation_command}`"),
                 "wait for cursor to acknowledge commute mode".to_owned(),
                 "in cursor open agents and then remote control".to_owned(),
-                "open cursor on your phone and find this local agent".to_owned(),
             ]));
-            let confirmed = confirm_remote(
-                args,
-                output,
-                "confirm that cursor acknowledged commute mode and your phone can see this agent",
-            )?;
-            output.story(HumanEvent::Fact(if confirmed {
-                "commute mode and cursor phone visibility were confirmed by you".to_owned()
-            } else {
-                "cursor phone visibility was accepted without verification".to_owned()
-            }));
             Ok(RemotePreparation {
                 owned: false,
                 pid: None,
-                confirmed_by_user: confirmed,
+                confirmed_by_user: onboarding_confirmed_by_user,
             })
         }
     }
 }
 
-fn confirm_remote(args: &PackArgs, output: &Output, prompt: &str) -> Result<bool> {
-    if args.allow_unverified_remote {
-        output.story(HumanEvent::Warning(
-            "phone visibility is unverified because allow unverified remote was set".to_owned(),
-        ));
-        return Ok(false);
+fn await_task_activation(
+    paths: &AppPaths,
+    session_id: Uuid,
+    agent: AgentKind,
+    args: &PackArgs,
+    output: &Output,
+) -> Result<ActivePolicy> {
+    if !args.yes && !output.json() {
+        if !output.confirm(
+            &format!("confirm that {agent} acknowledged commute mode in that exact conversation"),
+            true,
+        )? {
+            anyhow::bail!("The exact Commute Mode task activation was not confirmed");
+        }
+        return confirmed_policy_for_session(paths, session_id);
     }
-    if args.yes {
-        anyhow::bail!(
-            "Phone visibility cannot be measured automatically. Omit --yes to confirm it, or add --allow-unverified-remote to accept that risk."
-        );
-    }
-    if output.confirm(prompt, true)? {
-        Ok(true)
-    } else {
-        anyhow::bail!("Remote Control was not confirmed on the phone")
+
+    output.story(HumanEvent::Waiting {
+        condition: format!("the exact {agent} task activation"),
+        continuation: "packing will continue when the native hook binds it".to_owned(),
+    });
+    wait_for_confirmed_policy(
+        paths,
+        session_id,
+        TASK_ACTIVATION_TIMEOUT,
+        TASK_ACTIVATION_POLL_INTERVAL,
+    )
+}
+
+fn wait_for_confirmed_policy(
+    paths: &AppPaths,
+    session_id: Uuid,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<ActivePolicy> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let policy = active_policy_for_session(paths, session_id)?;
+        if policy.provider_binding_confirmed() {
+            return Ok(policy);
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "Rucksack did not observe the exact Commute Mode task activation within {} seconds",
+                timeout.as_secs()
+            );
+        }
+        thread::sleep(poll_interval);
     }
 }
 
@@ -2538,7 +2578,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_pack_requires_a_confirmed_provider_binding_before_session_creation() {
+    fn every_pack_requires_a_confirmed_provider_binding_before_session_creation() {
         let directory = tempdir().unwrap();
         let paths = test_paths(directory.path());
         let now = Utc::now();
@@ -2559,6 +2599,15 @@ mod tests {
         policy.save(&paths).unwrap();
 
         assert!(confirmed_policy_for_session(&paths, policy.session_id).is_err());
+        assert!(wait_for_confirmed_policy(
+            &paths,
+            policy.session_id,
+            Duration::ZERO,
+            Duration::ZERO
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("did not observe the exact Commute Mode task activation"));
         assert_eq!(
             active_policy_for_session(&paths, policy.session_id)
                 .unwrap()
@@ -2572,6 +2621,13 @@ mod tests {
 
         assert_eq!(
             confirmed_policy_for_session(&paths, policy.session_id)
+                .unwrap()
+                .provider_session_id
+                .as_deref(),
+            Some("provider-session-1")
+        );
+        assert_eq!(
+            wait_for_confirmed_policy(&paths, policy.session_id, Duration::ZERO, Duration::ZERO)
                 .unwrap()
                 .provider_session_id
                 .as_deref(),

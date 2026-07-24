@@ -139,7 +139,8 @@ relay, or webhook transport.
 
 > Rucksack will tell you it is safe to close the lid only after the Mac is on battery, the
 > closed-lid lease is active, the hotspot path still has internet, and the selected agent’s
-> remote handoff is ready or explicitly acknowledged.
+> exact live task activation has been observed. Pairing, native trust, and baseline phone
+> visibility are confirmed once during setup and revalidated only after a material change.
 
 For a strict hotspot or USB session, that promise remains bound to the verified route. A
 confirmed replacement network ends Commute Mode; temporary route loss gets a bounded
@@ -196,7 +197,8 @@ Power lease, route verification, hotspot handoff, safety monitors, recovery.
 ### Layer 2: Agent handoff
 
 Start the provider remote where a stable CLI supports it; otherwise guide the user and
-record explicit phone confirmation. Always expose the exact next action.
+record explicit phone confirmation once during setup. Every pack still observes a fresh
+tokenized activation in the exact live task. Always expose the exact next action.
 
 ### Layer 3: Agent behavior
 

@@ -144,7 +144,9 @@ Guided setup
 2. Never infer or request a hotspot password.
 3. Let setup detect installed Codex, Claude Code, and Cursor installations.
 4. Let setup install reversible adapters only for supported agents it detects.
-5. If an adapter needs repair, use:
+5. Let setup ask me once for provider pairing, native trust, and baseline phone visibility.
+6. Treat those UI-only facts as confirmed by me, never machine-verified.
+7. If an adapter needs repair, use:
 
    <rucksack-binary> adapters install --agent <codex|claude|cursor>
 
@@ -154,7 +156,8 @@ For Codex:
 
 - Ask me to open /hooks.
 - Ask me to review the marked rucksack entries and trust them once.
-- Do not report automatic hooks active until I confirm that step.
+- Let guided setup persist that user confirmation without storing prompts, pairing codes,
+  credentials, transcripts, or task IDs.
 - If I request phone pairing, run <rucksack-binary> pair codex and ask me to enter the
   displayed code in ChatGPT on my phone.
 
@@ -169,8 +172,14 @@ For Claude Code:
 For Cursor:
 
 - Explain that Remote Control is UI-first.
-- Ask me to open Agents → Remote Control and confirm the phone sees the agent.
+- During setup, ask me to open Agents → Remote Control and confirm the phone sees the agent.
 - Do not claim pairing was machine-verified.
+
+For every later pack:
+
+- Reuse unchanged provider onboarding instead of repeating pairing/trust/phone checks.
+- Require the fresh tokenized /commute-mode command to bind the exact live provider task.
+- Never let --allow-unverified-remote bypass that exact task binding.
 
 Verification
 

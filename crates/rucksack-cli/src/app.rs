@@ -3,13 +3,19 @@ use crate::doctor::{self, CheckLevel};
 use crate::flow;
 use crate::helper_client::HelperClient;
 use crate::install;
+use crate::onboarding::{assess, bases, ProviderOnboardingBases};
 use crate::output::{JsonFailureEmitted, Output};
 use anyhow::{anyhow, Result};
+use chrono::Utc;
 use rucksack_core::agent::{
-    codex_pair, detect_all, install_adapters, remove_adapters, verify_adapters, AdapterFileStatus,
-    AdapterVerificationReport, AgentKind,
+    codex_pair, detect, detect_all, install_adapters, remove_adapters, verify_adapter,
+    verify_adapters, AdapterFileStatus, AdapterInstallReport, AdapterVerificationReport, AgentKind,
 };
 use rucksack_core::network::read_wifi_status;
+use rucksack_core::onboarding::{
+    EvidenceInvalidationReason, EvidenceKind, EvidenceSource, EvidenceStatus,
+    RemoteOnboardingRegistry,
+};
 use rucksack_core::{AppPaths, Config, SessionState};
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -59,7 +65,7 @@ pub fn run(cli: Cli) -> Result<()> {
             "adapters"
         }
         Some(Command::Pair(args)) => {
-            pair(args.agent, &output)?;
+            pair(args.agent, &output, &paths)?;
             "pair"
         }
         Some(Command::Helper { command }) => {
@@ -118,6 +124,7 @@ fn run_doctor(
 }
 
 fn setup(args: &SetupArgs, output: &Output, paths: &AppPaths, mut config: Config) -> Result<()> {
+    require_inactive_session_for_onboarding(paths)?;
     apply_explicit_setup_network(args, &mut config)?;
     validate_setup_config(&config)?;
 
@@ -130,7 +137,7 @@ fn setup(args: &SetupArgs, output: &Output, paths: &AppPaths, mut config: Config
         anyhow::bail!("Non-interactive setup requires `--hotspot \"My iPhone\"` or `--usb`.");
     }
 
-    output.title("Three things make the handoff reliable");
+    output.title("Four things make the handoff reliable");
 
     output.section("1. Hotspot");
     configure_setup_network(args, output, &mut config)?;
@@ -181,6 +188,7 @@ fn setup(args: &SetupArgs, output: &Output, paths: &AppPaths, mut config: Config
                 let binary = std::env::current_exe()?;
                 let report = install_adapters(paths, &binary, &agents)?;
                 require_current_adapters(&report.verification)?;
+                invalidate_changed_adapters(paths, &report)?;
                 let file_count = report
                     .verification
                     .agents
@@ -188,14 +196,13 @@ fn setup(args: &SetupArgs, output: &Output, paths: &AppPaths, mut config: Config
                     .map(|evidence| evidence.files.len())
                     .sum::<usize>();
                 output.pass(format!("{} adapter files ready", file_count));
-                if agents.contains(&AgentKind::Codex) {
-                    output.plain(
-                        "Codex: open `/hooks`, review the Rucksack entries, and trust them once.",
-                    );
-                }
             }
         }
     }
+
+    output.blank();
+    output.section("4. Remote Control");
+    let onboarding_complete = configure_remote_onboarding(args, output, paths)?;
 
     config.save(paths)?;
     output.blank();
@@ -203,8 +210,228 @@ fn setup(args: &SetupArgs, output: &Output, paths: &AppPaths, mut config: Config
         "Configuration saved to {}",
         paths.config_file.display()
     ));
-    output.plain("Setup complete. Run `rucksack pack` when you walk out.");
+    if onboarding_complete {
+        output.plain("Setup complete. Run `rucksack pack` when you walk out.");
+    } else {
+        output.warn(
+            "Core setup is saved, but Remote Control onboarding is incomplete. Re-run `rucksack setup` interactively before packing.",
+        );
+    }
     Ok(())
+}
+
+fn require_inactive_session_for_onboarding(paths: &AppPaths) -> Result<()> {
+    if SessionState::load(paths)?.is_some_and(|session| {
+        !matches!(
+            session.phase,
+            rucksack_core::state::SessionPhase::Released
+                | rucksack_core::state::SessionPhase::Failed
+        )
+    }) {
+        anyhow::bail!(
+            "A Commute Mode session is active. Run `rucksack unpack` before changing setup."
+        );
+    }
+    Ok(())
+}
+
+fn configure_remote_onboarding(
+    args: &SetupArgs,
+    output: &Output,
+    paths: &AppPaths,
+) -> Result<bool> {
+    let binary = std::env::current_exe()?;
+    let detections = detect_all(None);
+    let installed = detections
+        .iter()
+        .filter(|detection| detection.installed)
+        .collect::<Vec<_>>();
+    if installed.is_empty() {
+        output.warn("No supported agent is installed, so Remote Control onboarding is incomplete");
+        return Ok(false);
+    }
+
+    let mut all_current = true;
+    for detection in installed {
+        let adapter = verify_adapter(paths, &binary, detection.kind);
+        if !adapter.current {
+            output.warn(format!(
+                "{} adapter is not current; finish adapter setup before Remote Control onboarding",
+                detection.kind.display_name()
+            ));
+            all_current = false;
+            continue;
+        }
+        let provider_bases = bases(detection, &adapter)?;
+        let mut registry = refresh_installation_evidence(paths, detection.kind, &provider_bases)?;
+
+        let state = assess(&registry, detection.kind, &provider_bases);
+        if state.is_current() {
+            output.pass(format!(
+                "{} Remote Control onboarding is current",
+                detection.kind.display_name()
+            ));
+            continue;
+        }
+
+        let confirmations = [
+            EvidenceKind::Pairing,
+            EvidenceKind::NativeTrust,
+            EvidenceKind::PhoneVisibility,
+        ]
+        .into_iter()
+        .filter(|kind| state.needs_user_confirmation(*kind))
+        .collect::<Vec<_>>();
+        show_remote_onboarding_instructions(detection.kind, &confirmations, output);
+        if args.yes || output.json() {
+            output.warn(format!(
+                "{} {} require interactive confirmation; non-interactive setup did not record them",
+                detection.kind.display_name(),
+                confirmation_names(&confirmations)
+            ));
+            all_current = false;
+            continue;
+        }
+        if !output.confirm(
+            &format!(
+                "Confirm that {} {} {} complete",
+                detection.kind.display_name(),
+                confirmation_names(&confirmations),
+                if confirmations.len() == 1 {
+                    "is"
+                } else {
+                    "are"
+                }
+            ),
+            false,
+        )? {
+            output.warn(format!(
+                "{} Remote Control onboarding remains incomplete",
+                detection.kind.display_name()
+            ));
+            all_current = false;
+            continue;
+        }
+
+        let recorded_at = Utc::now();
+        for kind in confirmations {
+            registry = RemoteOnboardingRegistry::record_evidence(
+                paths,
+                detection.kind,
+                kind,
+                provider_bases.basis(kind),
+                EvidenceSource::ConfirmedByUser,
+                recorded_at,
+            )?;
+        }
+        let completed = assess(&registry, detection.kind, &provider_bases);
+        if completed.is_current() {
+            output.pass(format!(
+                "{} pairing, native trust, and baseline phone visibility were confirmed by you",
+                detection.kind.display_name()
+            ));
+        } else {
+            all_current = false;
+        }
+    }
+    Ok(all_current)
+}
+
+fn refresh_installation_evidence(
+    paths: &AppPaths,
+    agent: AgentKind,
+    bases: &ProviderOnboardingBases,
+) -> Result<RemoteOnboardingRegistry> {
+    let mut registry = RemoteOnboardingRegistry::load(paths)?;
+    let installation_status =
+        registry.evidence_status(agent, EvidenceKind::Installation, &bases.installation);
+    if matches!(
+        &installation_status,
+        EvidenceStatus::BasisChanged | EvidenceStatus::Invalidated { .. }
+    ) {
+        let invalidated_at = Utc::now();
+        for kind in [
+            EvidenceKind::Pairing,
+            EvidenceKind::NativeTrust,
+            EvidenceKind::PhoneVisibility,
+        ] {
+            registry = RemoteOnboardingRegistry::invalidate_evidence(
+                paths,
+                agent,
+                kind,
+                EvidenceInvalidationReason::ProviderInstallationChanged,
+                invalidated_at,
+            )?;
+        }
+    }
+    if !matches!(&installation_status, EvidenceStatus::Current) {
+        registry = RemoteOnboardingRegistry::record_evidence(
+            paths,
+            agent,
+            EvidenceKind::Installation,
+            bases.installation.clone(),
+            EvidenceSource::Measured,
+            Utc::now(),
+        )?;
+    }
+    Ok(registry)
+}
+
+fn show_remote_onboarding_instructions(
+    agent: AgentKind,
+    confirmations: &[EvidenceKind],
+    output: &Output,
+) {
+    if confirmations.contains(&EvidenceKind::NativeTrust) {
+        match agent {
+            AgentKind::Codex => output
+                .plain("Codex: open `/hooks`, review the marked Rucksack entries, and trust them."),
+            AgentKind::Claude => output.plain(
+                "Claude Code: confirm that the active workspace is trusted and native hooks are allowed.",
+            ),
+            AgentKind::Cursor => output.plain(
+                "Cursor: confirm that the workspace is trusted and native hooks are enabled.",
+            ),
+        }
+    }
+    if !confirmations
+        .iter()
+        .any(|kind| matches!(kind, EvidenceKind::Pairing | EvidenceKind::PhoneVisibility))
+    {
+        return;
+    }
+    match agent {
+        AgentKind::Codex => {
+            output.plain(
+                "Codex: if needed, run `rucksack pair codex` and finish pairing in ChatGPT.",
+            );
+            output.plain("Codex: confirm that ChatGPT on your phone can see a remote session.");
+        }
+        AgentKind::Claude => {
+            output.plain(
+                "Claude Code: run `/remote-control` in an active conversation and wait for `/rc active`.",
+            );
+            output
+                .plain("Claude Code: confirm that Claude on your phone can see the conversation.");
+        }
+        AgentKind::Cursor => {
+            output.plain("Cursor: open Agents → Remote Control and finish pairing.");
+            output.plain("Cursor: confirm that Cursor on your phone can see the local agent.");
+        }
+    }
+}
+
+fn confirmation_names(confirmations: &[EvidenceKind]) -> String {
+    confirmations
+        .iter()
+        .map(|kind| match kind {
+            EvidenceKind::Pairing => "pairing",
+            EvidenceKind::NativeTrust => "native adapter trust",
+            EvidenceKind::PhoneVisibility => "baseline phone visibility",
+            EvidenceKind::Installation => "installation",
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn apply_explicit_setup_network(args: &SetupArgs, config: &mut Config) -> Result<()> {
@@ -309,6 +536,7 @@ fn validate_network_name(value: &str, label: &str) -> Result<String> {
 fn adapters(command: AdapterCommand, output: &Output, paths: &AppPaths) -> Result<()> {
     match command {
         AdapterCommand::Install(args) => {
+            require_inactive_session_for_onboarding(paths)?;
             let agents = args
                 .agent
                 .map(|agent| vec![agent])
@@ -316,17 +544,13 @@ fn adapters(command: AdapterCommand, output: &Output, paths: &AppPaths) -> Resul
             let binary = std::env::current_exe()?;
             let report = install_adapters(paths, &binary, &agents)?;
             require_current_adapters(&report.verification)?;
+            invalidate_changed_adapters(paths, &report)?;
             output.title("Agent adapters");
             for path in report.changed {
                 output.pass(format!("Updated {}", path.display()));
             }
             for path in report.unchanged {
                 output.detail(format!("Already installed {}", path.display()));
-            }
-            if agents.contains(&AgentKind::Codex) {
-                output.plain(
-                    "Codex: open `/hooks`, review the Rucksack entries, and trust them once.",
-                );
             }
             Ok(())
         }
@@ -380,6 +604,15 @@ fn adapters(command: AdapterCommand, output: &Output, paths: &AppPaths) -> Resul
                 .map(|agent| vec![agent])
                 .unwrap_or_else(|| AgentKind::ALL.to_vec());
             let changed = remove_adapters(paths, &agents)?;
+            for agent in &agents {
+                RemoteOnboardingRegistry::invalidate_evidence(
+                    paths,
+                    *agent,
+                    EvidenceKind::NativeTrust,
+                    EvidenceInvalidationReason::AdapterRemoved,
+                    Utc::now(),
+                )?;
+            }
             output.title("Agent adapters");
             if changed.is_empty() {
                 output.pass("No managed entries needed removal");
@@ -391,6 +624,26 @@ fn adapters(command: AdapterCommand, output: &Output, paths: &AppPaths) -> Resul
             Ok(())
         }
     }
+}
+
+fn invalidate_changed_adapters(paths: &AppPaths, report: &AdapterInstallReport) -> Result<()> {
+    let changed_agents = report
+        .manifest
+        .files
+        .iter()
+        .filter(|file| report.changed.contains(&file.path))
+        .map(|file| file.agent)
+        .collect::<std::collections::HashSet<_>>();
+    for agent in changed_agents {
+        RemoteOnboardingRegistry::invalidate_evidence(
+            paths,
+            agent,
+            EvidenceKind::NativeTrust,
+            EvidenceInvalidationReason::AdapterChanged,
+            Utc::now(),
+        )?;
+    }
+    Ok(())
 }
 
 fn require_current_adapters(verification: &AdapterVerificationReport) -> Result<()> {
@@ -430,7 +683,17 @@ fn adapter_status_name(status: AdapterFileStatus) -> &'static str {
     }
 }
 
-fn pair(agent: AgentKind, output: &Output) -> Result<()> {
+fn pair(agent: AgentKind, output: &Output, paths: &AppPaths) -> Result<()> {
+    require_inactive_session_for_onboarding(paths)?;
+    for kind in [EvidenceKind::Pairing, EvidenceKind::PhoneVisibility] {
+        RemoteOnboardingRegistry::invalidate_evidence(
+            paths,
+            agent,
+            kind,
+            EvidenceInvalidationReason::PairingReset,
+            Utc::now(),
+        )?;
+    }
     match agent {
         AgentKind::Codex => {
             let result = codex_pair()?;
@@ -458,7 +721,6 @@ fn pair(agent: AgentKind, output: &Output) -> Result<()> {
                 output.plain(format!("Expires at {expires}"));
             }
             output.plain("Open ChatGPT on your phone and enter the code.");
-            Ok(())
         }
         AgentKind::Claude => {
             output.title("Claude Code Remote Control");
@@ -466,7 +728,6 @@ fn pair(agent: AgentKind, output: &Output) -> Result<()> {
             output.plain(
                 "During `rucksack pack`, invoke the exact one-time `/commute-mode rucksack-…` command it prints.",
             );
-            Ok(())
         }
         AgentKind::Cursor => {
             output.title("Cursor Remote Control");
@@ -475,9 +736,64 @@ fn pair(agent: AgentKind, output: &Output) -> Result<()> {
             output.plain(
                 "During `rucksack pack`, invoke the exact one-time `/commute-mode rucksack-…` command it prints.",
             );
-            Ok(())
         }
     }
+    complete_pairing_onboarding(agent, output, paths)
+}
+
+fn complete_pairing_onboarding(agent: AgentKind, output: &Output, paths: &AppPaths) -> Result<()> {
+    if output.json() {
+        return Ok(());
+    }
+    let detection = detect(agent, None)?;
+    if !detection.installed {
+        output.warn(format!(
+            "{} is not installed; pairing evidence was not recorded",
+            agent.display_name()
+        ));
+        return Ok(());
+    }
+    let binary = std::env::current_exe()?;
+    let adapter = verify_adapter(paths, &binary, agent);
+    if !adapter.current {
+        output.warn(format!(
+            "{} adapter is not current; run `rucksack setup` before recording pairing",
+            agent.display_name()
+        ));
+        return Ok(());
+    }
+    let provider_bases = bases(&detection, &adapter)?;
+    refresh_installation_evidence(paths, agent, &provider_bases)?;
+    if !output.confirm(
+        &format!(
+            "Confirm that {} pairing completed and your phone can see a remote session",
+            agent.display_name()
+        ),
+        false,
+    )? {
+        output.warn("Pairing and phone visibility were not recorded");
+        return Ok(());
+    }
+
+    let recorded_at = Utc::now();
+    RemoteOnboardingRegistry::record_evidence(
+        paths,
+        agent,
+        EvidenceKind::Pairing,
+        provider_bases.pairing,
+        EvidenceSource::ConfirmedByUser,
+        recorded_at,
+    )?;
+    RemoteOnboardingRegistry::record_evidence(
+        paths,
+        agent,
+        EvidenceKind::PhoneVisibility,
+        provider_bases.phone_visibility,
+        EvidenceSource::ConfirmedByUser,
+        recorded_at,
+    )?;
+    output.pass("Pairing and baseline phone visibility were confirmed by you");
+    Ok(())
 }
 
 fn helper(command: HelperCommand, output: &Output) -> Result<()> {
@@ -530,5 +846,86 @@ fn default_pack_args() -> PackArgs {
         yes: false,
         allow_unverified_ssid: false,
         allow_unverified_remote: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rucksack_core::onboarding::{EvidenceBasis, EvidenceStatus};
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    fn test_paths(root: &Path) -> AppPaths {
+        let data_dir = root.join("data");
+        let log_dir = root.join("logs");
+        AppPaths {
+            home: root.to_path_buf(),
+            data_dir: data_dir.clone(),
+            config_file: data_dir.join("config.toml"),
+            session_file: data_dir.join("session.json"),
+            report_file: data_dir.join("last-report.json"),
+            policy_file: data_dir.join("active-policy.json"),
+            adapter_manifest_file: data_dir.join("adapters.json"),
+            log_dir: log_dir.clone(),
+            daemon_log: log_dir.join("daemon.log"),
+            codex_hooks: root.join(".codex/hooks.json"),
+            codex_skill: root.join(".agents/skills/commute-mode/SKILL.md"),
+            claude_settings: root.join(".claude/settings.json"),
+            claude_skill: root.join(".claude/skills/commute-mode/SKILL.md"),
+            cursor_hooks: root.join(".cursor/hooks.json"),
+        }
+    }
+
+    fn test_bases(installation: &str) -> ProviderOnboardingBases {
+        ProviderOnboardingBases {
+            installation: EvidenceBasis::from_parts(&[installation.as_bytes()]),
+            pairing: EvidenceBasis::from_parts(&[b"pairing"]),
+            native_trust: EvidenceBasis::from_parts(&[b"native-trust"]),
+            phone_visibility: EvidenceBasis::from_parts(&[b"phone-visibility"]),
+        }
+    }
+
+    #[test]
+    fn provider_installation_change_invalidates_dependent_user_evidence() {
+        let directory = tempdir().unwrap();
+        let paths = test_paths(directory.path());
+        let agent = AgentKind::Codex;
+        let original = test_bases("original");
+        let recorded_at = Utc::now();
+        for (kind, source) in [
+            (EvidenceKind::Installation, EvidenceSource::Measured),
+            (EvidenceKind::Pairing, EvidenceSource::ConfirmedByUser),
+            (EvidenceKind::NativeTrust, EvidenceSource::ConfirmedByUser),
+            (
+                EvidenceKind::PhoneVisibility,
+                EvidenceSource::ConfirmedByUser,
+            ),
+        ] {
+            RemoteOnboardingRegistry::record_evidence(
+                &paths,
+                agent,
+                kind,
+                original.basis(kind),
+                source,
+                recorded_at,
+            )
+            .unwrap();
+        }
+
+        let replacement = test_bases("replacement");
+        let registry = refresh_installation_evidence(&paths, agent, &replacement).unwrap();
+        let state = assess(&registry, agent, &replacement);
+
+        assert_eq!(state.installation, EvidenceStatus::Current);
+        for status in [state.pairing, state.native_trust, state.phone_visibility] {
+            assert!(matches!(
+                status,
+                EvidenceStatus::Invalidated {
+                    reason: EvidenceInvalidationReason::ProviderInstallationChanged,
+                    ..
+                }
+            ));
+        }
     }
 }

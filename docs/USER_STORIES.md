@@ -61,7 +61,7 @@ Acceptance criteria:
 
 - Rucksack attempts `codex remote-control start` when the installed CLI supports it;
 - if standalone startup is unavailable but a Codex conversation is already running, the
-  user can explicitly confirm that conversation on the phone;
+  pack may continue after the fresh exact activation binds that conversation;
 - startup failure with no running Codex conversation blocks readiness;
 - first-time pairing is available through `rucksack pair codex`;
 - user-level Codex hooks inject the policy only for the canonical project and provider
@@ -69,7 +69,8 @@ Acceptance criteria:
 - a `$commute-mode` skill exists for explicit activation in an existing thread;
 - permission requests may be observed as passive status, but the hook returns no decision
   and the active provider permission configuration remains unchanged;
-- setup tells the user to review and trust the marked entries once through Codex `/hooks`;
+- setup tells the user to review and trust the marked entries once through Codex `/hooks`
+  and records pairing and baseline phone visibility as “confirmed by you”;
 - uninstall preserves unrelated `~/.codex/hooks.json` entries.
 
 ### B2. Claude Code Commute Mode
@@ -107,6 +108,8 @@ Acceptance criteria:
   the next `unpack` or `recover`, and a new pack cannot overwrite that locator;
 - the CLI labels remote readiness “user confirmed” rather than “verified” when no stable
   API exists.
+- ten unchanged pack runs reuse setup evidence without repeating pairing/trust/phone
+  confirmation, while each run still requires a fresh exact-task binding;
 
 ## Epic C: safety and recovery
 
@@ -205,9 +208,8 @@ immediately. A temporarily missing route enters reconnect grace instead.
 ### Remote provider unavailable
 
 An unreachable provider endpoint requires explicit `--allow-unverified-remote`, which is
-recorded in session state. Separately, a missing standalone Codex Remote Control command
-may continue only when a live Codex conversation exists and the user confirms it on the
-phone.
+recorded in session state. The same explicit exception may bypass missing stored phone
+onboarding, but it never bypasses the fresh tokenized provider-session binding.
 
 ### Battery too low
 

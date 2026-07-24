@@ -27,6 +27,12 @@ Adapters carry agent behavior policy. They never generate the user-facing packin
 Rucksack renders that copy deterministically from typed events so ownership and safety
 instructions cannot drift between models.
 
+`rucksack setup` records pairing, native-trust, and baseline phone-visibility facts once
+per provider. Facts that only a person can observe remain labeled “confirmed by you.”
+Unchanged packs reuse those facts, while a fresh tokenized command still binds the exact
+live provider session every time. Adapter repair/removal invalidates native-trust evidence;
+an explicit new pairing invalidates pairing and phone-visibility evidence.
+
 ## Shared policy
 
 The same behavioral intent is rendered into each native system:
@@ -112,8 +118,8 @@ durable session if this binding is not observed.
 
 Rucksack attempts `codex remote-control start`. If the installed CLI lacks that standalone
 command or startup fails, Rucksack continues only when a Codex conversation is already
-running and the user explicitly confirms that session on the phone. It fails when neither
-condition is available.
+running. The current pack must still observe its fresh exact activation; baseline phone
+visibility comes from the provider-scoped setup evidence.
 
 ### Remote ownership
 
