@@ -4,7 +4,7 @@
 
 pack your Mac. keep working from your phone.
 
-[open the setup prompt](https://rucksack-seven.vercel.app) ·
+[open the setup prompt](https://rucksack.wtf) ·
 [installation details](INSTALL.md) · [security](SECURITY.md)
 
 macOS 14+ · Codex, Claude Code, and Cursor · compiler-verified alpha · no signed package yet

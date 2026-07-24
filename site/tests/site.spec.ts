@@ -35,7 +35,7 @@ test("shows one promise, one distilled commute pass, one action, and the live st
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
-    "https://rucksack-seven.vercel.app",
+    "https://rucksack.wtf",
   );
   await expect(
     page.getByRole("heading", {

@@ -1,7 +1,7 @@
 # rucksack one-page site
 
 Status: implemented and deployed at
-[rucksack-seven.vercel.app](https://rucksack-seven.vercel.app).
+[rucksack.wtf](https://rucksack.wtf).
 
 ## product language
 
