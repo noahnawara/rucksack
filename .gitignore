@@ -13,3 +13,4 @@
 /site/playwright-report/
 /site/blob-report/
 /site/.vercel/
+/.agents/
