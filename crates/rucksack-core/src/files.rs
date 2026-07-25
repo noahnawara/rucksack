@@ -1,10 +1,9 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::NamedTempFile;
 
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
@@ -131,7 +130,7 @@ pub fn with_advisory_lock<T>(path: &Path, operation: impl FnOnce() -> Result<T>)
     }
 }
 
-pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
+fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     reject_symlink(path)?;
     let file = File::open(path).with_context(|| format!("Could not open {}", path.display()))?;
     serde_json::from_reader(file)
@@ -152,33 +151,6 @@ pub fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let mut text = String::new();
     file.read_to_string(&mut text)?;
     toml::from_str(&text).with_context(|| format!("Could not parse TOML in {}", path.display()))
-}
-
-pub fn backup_once(path: &Path, marker: &str) -> Result<Option<PathBuf>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    reject_symlink(path)?;
-    let parent = path.parent().context("File has no parent directory")?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .context("File name is not valid UTF-8")?;
-    let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
-    let backup = parent.join(format!("{file_name}.{marker}.{stamp}.bak"));
-    fs::copy(path, &backup).with_context(|| {
-        format!(
-            "Could not back up {} to {}",
-            path.display(),
-            backup.display()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&backup, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(Some(backup))
 }
 
 pub fn remove_if_exists(path: &Path) -> Result<()> {

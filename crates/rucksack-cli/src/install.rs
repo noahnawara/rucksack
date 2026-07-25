@@ -1,7 +1,7 @@
 use crate::helper_client::HelperClient;
 use crate::output::Output;
 use anyhow::{anyhow, Context, Result};
-use rucksack_core::system::run_owned;
+use rucksack_core::system::run;
 use std::fs::OpenOptions;
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
@@ -184,7 +184,7 @@ fn stage_helper(helper: &Path) -> Result<NamedTempFile> {
 
 fn bootout_helper_if_loaded() -> Result<()> {
     let target = format!("system/{HELPER_LABEL}");
-    let result = run_owned("/bin/launchctl", &["print".to_owned(), target.clone()])?;
+    let result = run("/bin/launchctl", &["print", &target])?;
     if !result.success() {
         return Ok(());
     }
@@ -192,11 +192,7 @@ fn bootout_helper_if_loaded() -> Result<()> {
 }
 
 fn sudo(args: &[&str]) -> Result<()> {
-    let owned = args
-        .iter()
-        .map(|value| (*value).to_owned())
-        .collect::<Vec<_>>();
-    let result = run_owned("/usr/bin/sudo", &owned)?;
+    let result = run("/usr/bin/sudo", args)?;
     if result.success() {
         Ok(())
     } else {

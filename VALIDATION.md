@@ -39,8 +39,8 @@ cd site && npm run test:e2e
 
 Test results:
 
-- 78 debug tests: CLI 23, CLI contract 7, core 37, helper 11;
-- 79 release tests: the same set plus one macOS release-only helper test;
+- 76 debug tests: CLI 22, CLI contract 7, core 36, helper 11;
+- 77 release tests: the same set plus one macOS release-only helper test;
 - 13 browser tests and 0 vulnerabilities reported by `npm audit`;
 - 0 failures.
 

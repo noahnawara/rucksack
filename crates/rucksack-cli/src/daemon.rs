@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use rucksack_core::files::{append_line, with_advisory_lock};
 use rucksack_core::network::{
-    internet_probe, read_default_route, read_wifi_status, DEFAULT_INTERNET_PROBE_URL,
+    reaches_internet, read_default_route, read_wifi_status, DEFAULT_INTERNET_PROBE_URL,
 };
 use rucksack_core::power::{read_power_status, read_thermal_status, PowerSource, ThermalLevel};
 use rucksack_core::state::{SessionPhase, SessionState};
@@ -26,7 +26,7 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
         .validate()
         .map_err(|error| anyhow::anyhow!("The configuration is not usable: {error}"))?;
     let helper = HelperClient::default();
-    let mut battery_failures = 0u8;
+    let mut blind_reads = 0u8;
 
     log(paths, &format!("watching session {session_id}"))?;
     let established = SessionState::update(paths, session_id, |session| {
@@ -48,13 +48,8 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
             return Ok(());
         }
 
-        let health = read_health();
-        battery_failures = if health.battery_readable {
-            0
-        } else {
-            battery_failures + 1
-        };
-        if let Some(reason) = release_reason(&session, config, &health, battery_failures) {
+        let health = read_health(&mut blind_reads);
+        if let Some(reason) = release_reason(&session, config, &health, blind_reads) {
             release(&helper, paths, session_id, &reason)?;
             log(paths, &format!("released: {reason}"))?;
             return Ok(());
@@ -64,7 +59,7 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
             .renew(session.lease_id, config.session.helper_ttl_seconds)
             .context("The power helper stopped answering, so it will restore sleep on its own.")?;
 
-        let observed = observe(config);
+        let observed = observe(config, &health, session.hotspot.is_none());
         SessionState::update(paths, session_id, |session| {
             session.last_heartbeat_at = Some(Utc::now());
             session.battery_percent = observed.battery_percent;
@@ -91,30 +86,33 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 struct Health {
     battery_percent: Option<u8>,
-    /// False only when the gauge is silent *and* the Mac is on battery, where flying blind is
-    /// genuinely unsafe. A silent gauge on AC power is ordinary and means nothing.
-    battery_readable: bool,
     too_hot: bool,
 }
 
-fn read_health() -> Health {
+/// Read the sensors, and count how long the battery gauge has been silent.
+///
+/// A silent gauge on AC power is ordinary and resets the count. On battery it means rucksack is
+/// flying blind, and only a run of failures — never one — is allowed to end a lease. The count
+/// lives here rather than inside `release_reason` so the rule cannot be tripped by a single read.
+fn read_health(consecutive_blind_reads: &mut u8) -> Health {
     let power = read_power_status();
-    let battery_percent = power.as_ref().ok().and_then(|power| power.percent);
-    let battery_readable = match power {
-        Ok(power) => power.percent.is_some() || power.source != PowerSource::Battery,
-        Err(_) => false,
+    let readable = power
+        .as_ref()
+        .is_ok_and(|power| power.percent.is_some() || power.source != PowerSource::Battery);
+    *consecutive_blind_reads = if readable {
+        0
+    } else {
+        consecutive_blind_reads.saturating_add(1)
     };
-    let too_hot = read_thermal_status().is_ok_and(|thermal| {
-        thermal.throttled
-            || matches!(
-                thermal.level,
-                ThermalLevel::Serious | ThermalLevel::Critical
-            )
-    });
     Health {
-        battery_percent,
-        battery_readable,
-        too_hot,
+        battery_percent: power.ok().and_then(|power| power.percent),
+        too_hot: read_thermal_status().is_ok_and(|thermal| {
+            thermal.throttled
+                || matches!(
+                    thermal.level,
+                    ThermalLevel::Serious | ThermalLevel::Critical
+                )
+        }),
     }
 }
 
@@ -125,7 +123,7 @@ fn release_reason(
     session: &SessionState,
     config: &Config,
     health: &Health,
-    battery_failures: u8,
+    consecutive_blind_reads: u8,
 ) -> Option<String> {
     if Utc::now() >= session.expires_at {
         return Some("the time limit was reached".to_owned());
@@ -139,7 +137,7 @@ fn release_reason(
             config.safety.sleep_battery_percent
         ));
     }
-    if battery_failures >= MAX_SENSOR_FAILURES {
+    if consecutive_blind_reads >= MAX_SENSOR_FAILURES {
         return Some("the battery level could not be read".to_owned());
     }
     if health.too_hot {
@@ -156,18 +154,23 @@ struct Observed {
 }
 
 /// Record where the Mac is, for `status`. Purely observational.
-fn observe(config: &Config) -> Observed {
+///
+/// Reuses the battery reading the release check already took, and only asks macOS for the network
+/// name when rucksack does not have one — each of those is a subprocess, every heartbeat, for as
+/// long as the lid is closed.
+fn observe(config: &Config, health: &Health, want_name: bool) -> Observed {
     let route_interface = read_default_route().ok().and_then(|route| route.interface);
     let online = route_interface.is_some()
-        && internet_probe(
+        && reaches_internet(
             DEFAULT_INTERNET_PROBE_URL,
             config.hotspot.probe_timeout_seconds,
-        )
-        .reachable;
+        );
     Observed {
-        battery_percent: read_power_status().ok().and_then(|power| power.percent),
+        battery_percent: health.battery_percent,
         route_interface,
-        hotspot: read_wifi_status().ok().and_then(|status| status.ssid),
+        hotspot: want_name
+            .then(|| read_wifi_status().ok().and_then(|status| status.ssid))
+            .flatten(),
         online,
     }
 }
@@ -210,13 +213,12 @@ mod tests {
 
     fn session(expires_in: chrono::Duration) -> SessionState {
         let now = Utc::now();
-        SessionState::new(Uuid::new_v4(), 501, now, now + expires_in)
+        SessionState::new(Uuid::new_v4(), now, now + expires_in)
     }
 
     fn healthy() -> Health {
         Health {
             battery_percent: Some(80),
-            battery_readable: true,
             too_hot: false,
         }
     }
@@ -244,13 +246,15 @@ mod tests {
             None
         );
 
-        // A silent gauge on AC power is ordinary.
-        let on_ac_without_a_gauge = Health {
+        // A silent gauge is only dangerous once it has been silent repeatedly.
+        let without_a_gauge = Health {
             battery_percent: None,
-            battery_readable: true,
-            too_hot: false,
+            ..healthy()
         };
-        assert_eq!(reason(&live, on_ac_without_a_gauge, 0), None);
+        assert_eq!(
+            reason(&live, without_a_gauge, MAX_SENSOR_FAILURES - 1),
+            None
+        );
     }
 
     #[test]
@@ -282,8 +286,7 @@ mod tests {
         let live = session(chrono::Duration::hours(1));
         let blind = Health {
             battery_percent: None,
-            battery_readable: false,
-            too_hot: false,
+            ..healthy()
         };
 
         assert_eq!(reason(&live, blind, MAX_SENSOR_FAILURES - 1), None);

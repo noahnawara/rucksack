@@ -40,6 +40,11 @@ impl AppPaths {
         self.session_file.with_extension("terminal.lock")
     }
 
+    /// Records that rucksack has asked about starring the project, so it only ever asks once.
+    pub fn star_prompt_marker(&self) -> PathBuf {
+        self.data_dir.join("asked-about-star")
+    }
+
     pub fn legacy_codex_skill(&self) -> PathBuf {
         self.home.join(".agents/skills/commute-mode/SKILL.md")
     }

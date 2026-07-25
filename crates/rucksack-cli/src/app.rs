@@ -57,10 +57,11 @@ fn helper(command: HelperCommand, output: &Output) -> Result<()> {
             Ok(())
         }
         HelperCommand::Status => {
-            match HelperClient::default().status()? {
-                Some(status) if status.active => output.done("The power helper holds a lease."),
-                Some(_) => output.done("The power helper is installed and idle."),
-                None => output.done("The power helper is installed and idle."),
+            let status = HelperClient::default().status()?;
+            if status.is_some_and(|status| status.active) {
+                output.done("The power helper holds a lease.");
+            } else {
+                output.done("The power helper is installed and idle.");
             }
             let (helper, plist) = install::helper_paths();
             output.detail(format!("{helper}\n{plist}"));

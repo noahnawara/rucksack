@@ -26,7 +26,6 @@ pub struct SessionState {
     pub version: u32,
     pub id: Uuid,
     pub lease_id: Uuid,
-    pub owner_uid: u32,
     pub phase: SessionPhase,
     pub started_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -42,17 +41,11 @@ pub struct SessionState {
 }
 
 impl SessionState {
-    pub fn new(
-        lease_id: Uuid,
-        owner_uid: u32,
-        started_at: DateTime<Utc>,
-        expires_at: DateTime<Utc>,
-    ) -> Self {
+    pub fn new(lease_id: Uuid, started_at: DateTime<Utc>, expires_at: DateTime<Utc>) -> Self {
         Self {
             version: SESSION_STATE_VERSION,
             id: Uuid::new_v4(),
             lease_id,
-            owner_uid,
             phase: SessionPhase::Ready,
             started_at,
             expires_at,
@@ -151,7 +144,7 @@ mod tests {
 
     fn session() -> SessionState {
         let now = Utc::now();
-        SessionState::new(Uuid::new_v4(), 501, now, now + chrono::Duration::hours(1))
+        SessionState::new(Uuid::new_v4(), now, now + chrono::Duration::hours(1))
     }
 
     #[test]

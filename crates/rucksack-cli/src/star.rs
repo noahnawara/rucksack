@@ -1,8 +1,8 @@
 use crate::output::Output;
 use anyhow::{Context, Result};
-use rucksack_core::system::{run_owned, which};
+use rucksack_core::files::atomic_write;
+use rucksack_core::system::{run, which};
 use rucksack_core::AppPaths;
-use std::fs;
 
 const REPOSITORY: &str = "noahnawara/rucksack";
 const REPOSITORY_URL: &str = "https://github.com/noahnawara/rucksack";
@@ -15,16 +15,8 @@ pub fn star(output: &Output) -> Result<()> {
     let Some(gh) = which("gh") else {
         return open_in_browser(output);
     };
-    let result = run_owned(
-        gh,
-        &[
-            "api".to_owned(),
-            "--method".to_owned(),
-            "PUT".to_owned(),
-            format!("/user/starred/{REPOSITORY}"),
-        ],
-    )
-    .context("Could not run `gh`.")?;
+    let endpoint = format!("/user/starred/{REPOSITORY}");
+    let result = run(gh, &["api", "--method", "PUT", &endpoint]).context("Could not run `gh`.")?;
     if result.success() {
         output.done("Starred. Thank you.");
         return Ok(());
@@ -34,8 +26,7 @@ pub fn star(output: &Output) -> Result<()> {
 }
 
 fn open_in_browser(output: &Output) -> Result<()> {
-    let result = run_owned("/usr/bin/open", &[REPOSITORY_URL.to_owned()])
-        .context("Could not open a browser.")?;
+    let result = run("/usr/bin/open", &[REPOSITORY_URL]).context("Could not open a browser.")?;
     if !result.success() {
         output.done(format!("Star it here: {REPOSITORY_URL}"));
         return Ok(());
@@ -51,13 +42,12 @@ fn open_in_browser(output: &Output) -> Result<()> {
 /// while they are halfway out of the door, which is exactly what rucksack is supposed to stop
 /// doing. Never asks when there is no terminal to answer from, so agents and scripts are unaffected.
 pub fn offer_once(paths: &AppPaths, output: &Output) {
-    let marker = paths.data_dir.join("asked-about-star");
+    let marker = paths.star_prompt_marker();
     if marker.exists() || !output.is_interactive() {
         return;
     }
     // Record the ask before making it, so a refusal is never asked twice.
-    let _ = fs::create_dir_all(&paths.data_dir);
-    if fs::write(&marker, b"asked\n").is_err() {
+    if atomic_write(&marker, b"asked\n", 0o600).is_err() {
         return;
     }
     match output.ask("That worked. Star rucksack on GitHub?") {

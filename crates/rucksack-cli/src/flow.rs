@@ -6,12 +6,12 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
 use rucksack_core::network::{
-    connect_saved_wifi, internet_probe, read_default_route, read_iphone_usb_device,
+    connect_saved_wifi, reaches_internet, read_default_route, read_iphone_usb_device,
     read_wifi_status, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
 };
 use rucksack_core::power::{read_power_status, read_sleep_disabled, read_thermal_status};
 use rucksack_core::state::SessionState;
-use rucksack_core::system::{current_uid, processes, run_owned, ProcessInfo};
+use rucksack_core::system::{processes, run, ProcessInfo};
 use rucksack_core::{codex, skill, AppPaths, Config};
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -99,7 +99,7 @@ fn pack_inner(
 
     start_remote_control(args.require_remote, paths, output)?;
 
-    let mut session = SessionState::new(lease_id, current_uid(), started_at, expires_at);
+    let mut session = SessionState::new(lease_id, started_at, expires_at);
     session.hotspot = network.ssid;
     session.route_interface = network.route.interface;
     session.battery_percent = battery;
@@ -227,15 +227,13 @@ struct CommuteNetwork {
 /// without Location Services. It cannot be judged on "the internet works" either: the office
 /// network the user is walking away from also works, and accepting it packs a Mac that goes
 /// offline at the door.
+/// What rucksack must see before it believes the Mac has moved networks.
 #[derive(Debug)]
-enum Arrival {
-    /// macOS reported that it joined the network rucksack asked for.
-    Joined,
-    /// Proven by the network's name, or by the route visibly leaving `baseline`.
-    Switched {
-        expected: Option<String>,
-        baseline: Option<RouteStatus>,
-    },
+struct CommuteTarget {
+    /// The saved network's name, when there is one and macOS will reveal it.
+    expected: Option<String>,
+    /// Where the route pointed before the switch.
+    baseline: Option<RouteStatus>,
 }
 
 /// iOS Personal Hotspot always serves 172.20.10.0/28 with itself as the gateway, so this gateway
@@ -246,35 +244,53 @@ fn is_personal_hotspot(route: &RouteStatus) -> bool {
     route.gateway.as_deref() == Some(PERSONAL_HOTSPOT_GATEWAY)
 }
 
-fn arrival_confirmed(arrival: &Arrival, route: &RouteStatus, ssid: Option<&str>) -> bool {
-    match arrival {
-        Arrival::Joined => true,
-        Arrival::Switched { expected, baseline } => {
-            let named = expected.is_some() && ssid == expected.as_deref();
-            let moved = baseline.as_ref().is_some_and(|baseline| {
-                baseline.interface != route.interface || baseline.gateway != route.gateway
-            });
-            named || moved || is_personal_hotspot(route)
-        }
-    }
+/// Has the Mac left the network it started on?
+///
+/// Proven by the network's name, by an iPhone hotspot gateway, or by the route visibly moving.
+/// Never by "the internet works": the network being walked away from also works.
+fn has_switched(target: &CommuteTarget, route: &RouteStatus, ssid: Option<&str>) -> bool {
+    let named = target.expected.is_some() && ssid == target.expected.as_deref();
+    let moved = target
+        .baseline
+        .as_ref()
+        .is_some_and(|baseline| baseline != route);
+    named || moved || is_personal_hotspot(route)
 }
 
-/// Has the Mac arrived on a network that will survive leaving the building?
+/// Is there a working internet connection right now, and what is it?
 ///
-/// Identity is checked before the internet probe, so a poll loop does not pay a six-second HTTP
-/// request against the network it is trying to leave.
-fn arrived(arrival: &Arrival, config: &Config) -> Option<CommuteNetwork> {
+/// The probe runs last, so a poll loop never pays a six-second HTTP request before it knows the
+/// route is even plausible. The Wi-Fi name is read only when someone will compare it.
+fn online(config: &Config, want_name: bool) -> Option<CommuteNetwork> {
     let route = read_default_route().ok()?;
     route.interface.as_ref()?;
-    let ssid = read_wifi_status().ok().and_then(|status| status.ssid);
-    if !arrival_confirmed(arrival, &route, ssid.as_deref()) {
-        return None;
-    }
-    internet_probe(
+    let ssid = want_name
+        .then(|| read_wifi_status().ok().and_then(|status| status.ssid))
+        .flatten();
+    reaches_internet(
         DEFAULT_INTERNET_PROBE_URL,
         config.hotspot.probe_timeout_seconds,
     )
-    .reachable
+    .then_some(CommuteNetwork { route, ssid })
+}
+
+/// Has the Mac arrived on the commute network?
+fn arrived(target: &CommuteTarget, config: &Config) -> Option<CommuteNetwork> {
+    let route = read_default_route().ok()?;
+    route.interface.as_ref()?;
+    // Only the named case needs the name, and reading it costs two subprocesses.
+    let ssid = target
+        .expected
+        .is_some()
+        .then(|| read_wifi_status().ok().and_then(|status| status.ssid))
+        .flatten();
+    if !has_switched(target, &route, ssid.as_deref()) {
+        return None;
+    }
+    reaches_internet(
+        DEFAULT_INTERNET_PROBE_URL,
+        config.hotspot.probe_timeout_seconds,
+    )
     .then_some(CommuteNetwork { route, ssid })
 }
 
@@ -286,8 +302,6 @@ fn ensure_commute_network(
     if config.hotspot.require_iphone_usb {
         return wait_for_iphone_usb(config, output);
     }
-    let baseline = read_default_route().ok();
-    let current_ssid = read_wifi_status().ok().and_then(|status| status.ssid);
 
     // `--here` is the user saying this network is the commute network.
     //
@@ -296,39 +310,30 @@ fn ensure_commute_network(
     // on a travel router or an Android hotspot waiting for a switch they have already made, take
     // them at their word — and still refuse if the network does not actually reach the internet.
     if args.here {
-        let network = arrived(&Arrival::Joined, config).context(
+        let network = online(config, true).context(
             "This Mac has no working internet connection right now.\nConnect it, then run `rucksack pack --here` again.",
         )?;
-        output.step(match network.ssid.as_deref() {
-            Some(ssid) => format!("On {ssid}."),
-            None => "Online.".to_owned(),
-        });
+        announce(&network, output);
         return Ok(network);
     }
 
+    let baseline = read_default_route().ok();
+    let expected = config.hotspot.ssid.clone();
     // Already on a phone hotspot, or already on the saved network: nothing to switch.
     let already_there = baseline.as_ref().is_some_and(is_personal_hotspot)
-        || (config.hotspot.ssid.is_some() && current_ssid == config.hotspot.ssid);
+        || (expected.is_some()
+            && read_wifi_status().ok().and_then(|status| status.ssid) == expected);
     if already_there {
-        if let Some(network) = arrived(&Arrival::Joined, config) {
-            output.step(match network.ssid.as_deref() {
-                Some(ssid) => format!("On {ssid}."),
-                None => "Online.".to_owned(),
-            });
+        if let Some(network) = online(config, true) {
+            announce(&network, output);
             return Ok(network);
         }
     }
 
-    let Some(expected) = config.hotspot.ssid.clone() else {
-        return Ok(wait_for_network(
-            "Switch this Mac to your hotspot in Wi-Fi. Waiting…",
-            &Arrival::Switched {
-                expected: None,
-                baseline,
-            },
-            config,
-            output,
-        ));
+    let target = CommuteTarget { expected, baseline };
+    let instruction = match target.expected.as_deref() {
+        Some(expected) => format!("Choose “{expected}” in Wi-Fi. Waiting…"),
+        None => "Switch this Mac to your hotspot in Wi-Fi. Waiting…".to_owned(),
     };
 
     // Only ask macOS to switch networks when there is nothing to lose.
@@ -337,51 +342,33 @@ fn ensure_commute_network(
     // Instant Hotspot at all, so it usually fails — and a failed attempt drops the connection the
     // Mac already had. Gambling a working network on it would make rucksack the reason someone
     // went offline. When the Mac is already online, the Wi-Fi menu is both faster and safe.
-    if online_now(config) {
-        return Ok(wait_for_network(
-            &format!("Choose “{expected}” in Wi-Fi. Waiting…"),
-            &Arrival::Switched {
-                expected: Some(expected),
-                baseline,
-            },
-            config,
-            output,
-        ));
-    }
-
-    output.step(format!("Connecting to {expected}…"));
-    let joined = match read_wifi_status().ok().and_then(|status| status.device) {
-        Some(device) => connect_saved_wifi(&device, &expected)
-            .inspect_err(|error| output.detail(format!("Automatic join failed: {error}")))
-            .is_ok(),
-        None => false,
-    };
-    if joined {
-        if let Some(network) = wait_for_arrival(&Arrival::Joined, AUTOMATIC_JOIN_TIMEOUT, config) {
-            output.step("Joined.");
-            return Ok(network);
+    if let Some(expected) = target.expected.clone() {
+        if online(config, false).is_none() {
+            output.step(format!("Connecting to {expected}…"));
+            let joined = match read_wifi_status().ok().and_then(|status| status.device) {
+                Some(device) => connect_saved_wifi(&device, &expected)
+                    .inspect_err(|error| output.detail(format!("Automatic join failed: {error}")))
+                    .is_ok(),
+                None => false,
+            };
+            if joined {
+                if let Some(network) = wait_for_join(config) {
+                    output.step("Joined.");
+                    return Ok(network);
+                }
+            }
         }
     }
 
-    Ok(wait_for_network(
-        &format!("Choose “{expected}” in Wi-Fi. Waiting…"),
-        &Arrival::Switched {
-            expected: Some(expected),
-            baseline,
-        },
-        config,
-        output,
-    ))
+    Ok(wait_for_network(&instruction, &target, config, output))
 }
 
-/// Does this Mac currently reach the internet at all?
-fn online_now(config: &Config) -> bool {
-    read_default_route().is_ok_and(|route| route.interface.is_some())
-        && internet_probe(
-            DEFAULT_INTERNET_PROBE_URL,
-            config.hotspot.probe_timeout_seconds,
-        )
-        .reachable
+/// The one sentence that reports a successful arrival.
+fn announce(network: &CommuteNetwork, output: &Output) {
+    output.step(match network.ssid.as_deref() {
+        Some(ssid) => format!("On {ssid}."),
+        None => "Online.".to_owned(),
+    });
 }
 
 /// Wait for the user to pick a network, for as long as it takes.
@@ -390,7 +377,7 @@ fn online_now(config: &Config) -> bool {
 /// not have to do is start over. Ctrl-C is the way out.
 fn wait_for_network(
     instruction: &str,
-    arrival: &Arrival,
+    target: &CommuteTarget,
     config: &Config,
     output: &Output,
 ) -> CommuteNetwork {
@@ -398,32 +385,18 @@ fn wait_for_network(
     output.step(instruction);
     open_wifi_settings(output);
 
-    let started = Instant::now();
-    let mut next_tick = WAIT_TICK;
-    loop {
-        if let Some(network) = arrived(arrival, config) {
-            output.step(match network.ssid.as_deref() {
-                Some(ssid) => format!("On {ssid}."),
-                None => "Online.".to_owned(),
-            });
-            return network;
-        }
-        if started.elapsed() >= next_tick {
-            output.step("Still waiting for the network…");
-            next_tick += WAIT_TICK;
-        }
-        thread::sleep(NETWORK_POLL_INTERVAL);
-    }
+    let network = poll(output, "Still waiting for the network…", || {
+        arrived(target, config)
+    });
+    announce(&network, output);
+    network
 }
 
-fn wait_for_arrival(
-    arrival: &Arrival,
-    timeout: Duration,
-    config: &Config,
-) -> Option<CommuteNetwork> {
-    let deadline = Instant::now() + timeout;
+/// Give a confirmed automatic join a moment to come up, before falling back to the Wi-Fi menu.
+fn wait_for_join(config: &Config) -> Option<CommuteNetwork> {
+    let deadline = Instant::now() + AUTOMATIC_JOIN_TIMEOUT;
     loop {
-        if let Some(network) = arrived(arrival, config) {
+        if let Some(network) = online(config, true) {
             return Some(network);
         }
         if Instant::now() >= deadline {
@@ -437,23 +410,35 @@ fn wait_for_iphone_usb(config: &Config, output: &Output) -> Result<CommuteNetwor
     let device = read_iphone_usb_device()?.context(
         "macOS does not expose an iPhone USB network service right now.\nConnect the iPhone by cable and turn on Personal Hotspot, then run `rucksack pack` again.",
     )?;
-    let on_iphone =
-        |network: &CommuteNetwork| network.route.interface.as_deref() == Some(device.as_str());
-    if let Some(network) = arrived(&Arrival::Joined, config).filter(on_iphone) {
-        output.step("Online through the iPhone.");
-        return Ok(network);
+    let on_the_iphone = || {
+        online(config, false)
+            .filter(|network| network.route.interface.as_deref() == Some(device.as_str()))
+    };
+    if on_the_iphone().is_none() {
+        output.step("Turn on Personal Hotspot on the connected iPhone. Waiting…");
     }
+    let network = poll(output, "Still waiting for the iPhone…", on_the_iphone);
+    output.step("Online through the iPhone.");
+    Ok(network)
+}
 
-    output.step("Turn on Personal Hotspot on the connected iPhone. Waiting…");
+/// Wait for something to become true, for as long as it takes.
+///
+/// Never gives up and never asks for a re-run: the user is mid-stride, and the one thing they must
+/// not have to do is start over. Ctrl-C is the way out.
+fn poll(
+    output: &Output,
+    still_waiting: &str,
+    mut ready: impl FnMut() -> Option<CommuteNetwork>,
+) -> CommuteNetwork {
     let started = Instant::now();
     let mut next_tick = WAIT_TICK;
     loop {
-        if let Some(network) = arrived(&Arrival::Joined, config).filter(on_iphone) {
-            output.step("Online through the iPhone.");
-            return Ok(network);
+        if let Some(network) = ready() {
+            return network;
         }
         if started.elapsed() >= next_tick {
-            output.step("Still waiting for the iPhone…");
+            output.step(still_waiting);
             next_tick += WAIT_TICK;
         }
         thread::sleep(NETWORK_POLL_INTERVAL);
@@ -488,7 +473,7 @@ fn remember_hotspot(
 }
 
 fn open_wifi_settings(output: &Output) {
-    match run_owned("/usr/bin/open", &[WIFI_SETTINGS_URL.to_owned()]) {
+    match run("/usr/bin/open", &[WIFI_SETTINGS_URL]) {
         Ok(result) if result.success() => {}
         Ok(result) => output.detail(format!(
             "Could not open Wi-Fi settings: {}",
@@ -543,7 +528,6 @@ fn start_remote_control(require_remote: bool, paths: &AppPaths, output: &Output)
 }
 
 pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()> {
-    let helper = HelperClient::default().status();
     let session = match SessionState::load(paths) {
         Ok(session) => session,
         Err(error) => {
@@ -555,46 +539,50 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
         }
     };
 
-    match session.filter(SessionState::is_holding_a_lease) {
-        Some(session) => {
-            output.done(format!(
-                "Packed · {} · battery {} · {} left",
-                session
-                    .hotspot
-                    .as_deref()
-                    .or(session.route_interface.as_deref())
-                    .unwrap_or("online"),
-                session
-                    .battery_percent
-                    .map(|percent| format!("{percent}%"))
-                    .unwrap_or_else(|| "unknown".to_owned()),
-                format_duration(session.remaining_minutes(Utc::now()))
-            ));
-            if !session.online {
-                output
-                    .step("Offline right now. This Mac is still awake, but nothing can reach it.");
-            }
-            if let Some(event) = &session.last_event {
-                output.detail(format!("Last event: {event}"));
-            }
-            if args.full {
-                output.step(serde_json::to_string_pretty(&session)?);
-            }
+    // Answering "am I still packed?" from the session file alone keeps `status` free of the round
+    // trip to the helper, which makes the root daemon run `pmset`. Only the not-packed answer needs
+    // to know whether something else is holding sleep off.
+    if let Some(session) = session
+        .as_ref()
+        .filter(|session| session.is_holding_a_lease())
+    {
+        output.done(format!(
+            "Packed · {} · battery {} · {} left",
+            session
+                .hotspot
+                .as_deref()
+                .or(session.route_interface.as_deref())
+                .unwrap_or("online"),
+            session
+                .battery_percent
+                .map(|percent| format!("{percent}%"))
+                .unwrap_or_else(|| "unknown".to_owned()),
+            format_duration(session.remaining_minutes(Utc::now()))
+        ));
+        if !session.online {
+            output.step("Offline right now. This Mac is still awake, but nothing can reach it.");
         }
-        None => {
-            let holding = helper.as_ref().ok().and_then(Option::as_ref);
-            if holding.is_some_and(|status| status.active) {
-                output.done("Not packed, but something is still holding this Mac awake.");
-                output.step("Run `rucksack unpack` to let it sleep again.");
-            } else if holding.is_some_and(|status| status.sleep_disabled == Some(1)) {
-                output.done("Not packed, but this Mac still will not sleep.");
-                output.step("Another app owns that setting; quit it to let this Mac sleep again.");
-            } else {
-                output.done("Not packed. This Mac sleeps normally.");
-                if let Some(reason) = last_release_reason(paths) {
-                    output.step(format!("The last session ended: {reason}"));
-                }
-            }
+        if let Some(event) = &session.last_event {
+            output.detail(format!("Last event: {event}"));
+        }
+        if args.full {
+            output.step(serde_json::to_string_pretty(session)?);
+        }
+        return Ok(());
+    }
+
+    let helper = HelperClient::default().status();
+    let holding = helper.as_ref().ok().and_then(Option::as_ref);
+    if holding.is_some_and(|status| status.active) {
+        output.done("Not packed, but something is still holding this Mac awake.");
+        output.step("Run `rucksack unpack` to let it sleep again.");
+    } else if holding.is_some_and(|status| status.sleep_disabled == Some(1)) {
+        output.done("Not packed, but this Mac still will not sleep.");
+        output.step("Another app owns that setting; quit it to let this Mac sleep again.");
+    } else {
+        output.done("Not packed. This Mac sleeps normally.");
+        if let Some(reason) = session.and_then(|session| session.release_reason) {
+            output.step(format!("The last session ended: {reason}"));
         }
     }
     if let Err(error) = helper {
@@ -603,16 +591,14 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
     Ok(())
 }
 
-fn last_release_reason(paths: &AppPaths) -> Option<String> {
-    SessionState::load(paths).ok()?.and_then(|session| {
-        (!session.is_holding_a_lease())
-            .then_some(session.release_reason)
-            .flatten()
-    })
-}
-
 pub fn unpack(output: &Output, paths: &AppPaths) -> Result<()> {
-    with_terminal_operation(paths, || unpack_locked(output, paths))
+    let released = with_terminal_operation(paths, || unpack_locked(output, paths))?;
+    // Asked outside the lock: it waits on a person, and the lock exists to serialise `pack`
+    // against `unpack`, not to wait for someone to answer a question.
+    if released {
+        crate::star::offer_once(paths, output);
+    }
+    Ok(())
 }
 
 /// Let this Mac sleep again, from any state.
@@ -620,7 +606,7 @@ pub fn unpack(output: &Output, paths: &AppPaths) -> Result<()> {
 /// This is also the recovery path: an unreadable session file, a lease whose id no longer matches,
 /// or a watcher that died all end here, because "let my Mac sleep" is the only thing the user
 /// wants and it must never dead-end into a second command.
-fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
+fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<bool> {
     let helper = HelperClient::default();
     let session = match SessionState::load(paths) {
         Ok(session) => session,
@@ -644,16 +630,12 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
     if read_sleep_disabled().unwrap_or(0) != 0 {
         output.warn("Sleep is still switched off — something else is holding it.");
     }
-    let had_something_to_release = released || session.is_some();
-    output.done(if had_something_to_release {
+    output.done(if released {
         "Unpacked. This Mac sleeps normally."
     } else {
         "Already unpacked. This Mac sleeps normally."
     });
-    if had_something_to_release {
-        crate::star::offer_once(paths, output);
-    }
-    Ok(())
+    Ok(released)
 }
 
 /// Give sleep back, escalating until something works.
@@ -874,7 +856,6 @@ mod tests {
         RouteStatus {
             interface: Some(interface.to_owned()),
             gateway: Some(gateway.to_owned()),
-            detail: String::new(),
         }
     }
 
@@ -885,37 +866,33 @@ mod tests {
     #[test]
     fn a_working_office_network_is_not_the_commute_network() {
         let office = route("en0", "192.168.1.1");
-        let arrival = Arrival::Switched {
+        let target = CommuteTarget {
             expected: Some("Noah".to_owned()),
             baseline: Some(office.clone()),
         };
 
-        assert!(!arrival_confirmed(&arrival, &office, None));
-        assert!(!arrival_confirmed(&arrival, &office, Some("Office")));
-        assert!(arrival_confirmed(&arrival, &office, Some("Noah")));
-        assert!(arrival_confirmed(
-            &arrival,
-            &route("en0", "172.20.10.1"),
-            None
-        ));
+        assert!(!has_switched(&target, &office, None));
+        assert!(!has_switched(&target, &office, Some("Office")));
+
+        // Only a name, a moved route, or an iPhone gateway counts.
+        assert!(has_switched(&target, &office, Some("Noah")));
+        assert!(has_switched(&target, &route("en7", "192.168.1.1"), None));
+        assert!(has_switched(&target, &route("en0", "172.20.10.1"), None));
     }
 
-    /// With no saved hotspot there is nothing to compare a name against, so the route must move.
+    /// With no saved hotspot there is no name to compare, so the route itself must move.
     #[test]
     fn without_a_saved_hotspot_the_route_still_has_to_change() {
         let office = route("en0", "192.168.1.1");
-        let arrival = Arrival::Switched {
+        let target = CommuteTarget {
             expected: None,
             baseline: Some(office.clone()),
         };
 
-        assert!(!arrival_confirmed(&arrival, &office, None));
-        assert!(!arrival_confirmed(&arrival, &office, Some("Office")));
-        assert!(arrival_confirmed(
-            &arrival,
-            &route("en7", "192.168.1.1"),
-            None
-        ));
+        assert!(!has_switched(&target, &office, None));
+        assert!(!has_switched(&target, &office, Some("Office")));
+        assert!(has_switched(&target, &route("en0", "172.20.10.1"), None));
+        assert!(has_switched(&target, &route("en7", "192.168.1.1"), None));
     }
 
     /// The one signal that survives macOS hiding the network name.
@@ -923,15 +900,6 @@ mod tests {
     fn an_iphone_hotspot_gateway_is_proof_on_its_own() {
         assert!(is_personal_hotspot(&route("en0", "172.20.10.1")));
         assert!(!is_personal_hotspot(&route("en0", "192.168.1.1")));
-    }
-
-    #[test]
-    fn a_join_that_macos_confirmed_needs_no_further_proof() {
-        assert!(arrival_confirmed(
-            &Arrival::Joined,
-            &route("en0", "192.168.1.1"),
-            None
-        ));
     }
 
     #[test]

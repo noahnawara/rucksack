@@ -1,4 +1,4 @@
-use crate::system::{run_bounded_cleared, CommandResult};
+use crate::system::{require_success, run_bounded_cleared, CommandResult};
 use anyhow::{anyhow, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -182,18 +182,6 @@ fn run_pmset(args: &[&str]) -> Result<CommandResult> {
         POWER_COMMAND_TIMEOUT,
         POWER_COMMAND_MAX_OUTPUT_BYTES,
     )
-}
-
-fn require_success(name: &str, result: &CommandResult) -> Result<()> {
-    if result.success() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "{name} failed with exit code {}: {}",
-            result.code,
-            result.combined_trimmed()
-        ))
-    }
 }
 
 #[cfg(test)]
