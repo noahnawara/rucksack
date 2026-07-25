@@ -10,8 +10,10 @@ Implemented in source:
 - hotspot/unplug handshake;
 - battery floor and thermal signal;
 - Codex, Claude Code, and Cursor adapter installers;
+- provider-scoped onboarding for pairing, native trust, and baseline phone visibility;
 - temporary policy and hook telemetry;
 - waiting/input/approval lifecycle state;
+- a 24-hour default hard deadline with shorter sessions available through `--for`;
 - machine-readable JSON progress;
 - private completed-session reports with aggregate commute-interface data estimates;
 - strict hotspot/USB route identity with reconnect grace for temporary loss;
@@ -34,14 +36,6 @@ Release gate:
 - public `ProcessInfo.thermalState` FFI;
 - IOKit battery data instead of command parsing;
 - provider/version capability detection;
-- persisted per-provider remote onboarding: installation, pairing, native trust, and baseline
-  phone visibility are confirmed once during `setup`; later `pack` runs still bind and
-  activate the exact live session, but repeat onboarding proof only when the provider
-  account, paired device, adapter/trust state, or detected provider capability materially
-  changes;
-- make the helper's 24-hour safety horizon the default hard deadline; keep `rucksack pack
-  --for <duration>` for intentionally shorter sessions and keep active hard deadlines
-  non-renewable;
 - commute-aware orchestration: keep useful independent work parallel, but give every
   agent, monitor, preview server, and poll loop an owner, purpose, stop condition, and
   cleanup path; prefer event-driven waits and cached watcher evidence, and terminate work

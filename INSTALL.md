@@ -1,78 +1,95 @@
-# install rucksack
+# Install rucksack
 
-Use only [noahnawara/rucksack](https://github.com/noahnawara/rucksack). Pin one exact
-tag or commit before changing the Mac, and read this file plus [SECURITY.md](SECURITY.md)
-at that same ref.
+`rucksack` is currently a source-only alpha. There is no signed GitHub release, Homebrew
+cask, npm package, or `cargo install` package yet.
 
-rucksack supports macOS 14 or newer and Codex, Claude Code, and Cursor. There is no
-Homebrew, npm, or `cargo install` distribution.
+The helper changes a global macOS sleep setting. Read the [security policy](SECURITY.md)
+before installing it, and use only the
+[official repository](https://github.com/noahnawara/rucksack).
 
-## choose the install
+## Requirements
 
-Use a signed release only when the selected stable GitHub release contains both:
+- macOS; release packaging targets macOS 14 and newer
+- Xcode Command Line Tools
+- Rust 1.86 or newer
+- an administrator account for the helper installation
+- Codex, Claude Code, or Cursor with its own remote-control feature
 
-- `rucksack-universal.pkg`
-- `rucksack-universal.pkg.sha256`
+The agent adapters are experimental. Current hardware testing covers short Codex/hotspot
+desk runs on one Apple silicon Mac. See [VALIDATION.md](VALIDATION.md) for the open release
+checks.
 
-Inspect `scripts/install.sh` at the selected tag. The script downloads from
-`releases/latest`, so immediately before running it, confirm that the selected tag is still
-the latest stable release. Stop if the tag, package, or checksum does not match.
+## Build from source
 
-Run the inspected script from that tag:
+Clone the repository into a directory you plan to keep. Adapter hooks store the absolute
+path to the development binary, so a temporary checkout will break them later. Check out
+the tag or commit you intend to test before recording its hash and building.
 
 ```sh
-/bin/sh scripts/install.sh
+git clone https://github.com/noahnawara/rucksack.git
+cd rucksack
+git rev-parse HEAD
+cargo build --workspace --locked
 ```
 
-Let its HTTPS retry, SHA-256, package-signature, and Gatekeeper checks run unchanged.
-Administrator authentication belongs in the terminal, never in chat. A signed install
-must finish at `/usr/local/bin/rucksack`.
+The build puts both required binaries next to each other:
 
-If no qualifying signed release exists, stop. A development build requires the user's
-explicit approval.
+```text
+target/debug/rucksack
+target/debug/rucksack-helper
+```
 
-## approved development build
-
-Require Xcode Command Line Tools, Rust 1.86 or newer, and a stable source directory. Do not
-build in a temporary directory because installed adapter hooks retain the binary's absolute
-path.
-
-Clone the official repository, check out the approved exact commit, record its SHA, and run:
+Run setup from that checkout:
 
 ```sh
-cargo build --workspace --locked
 ./target/debug/rucksack setup
 ```
 
-Keep `target/debug/rucksack` beside `target/debug/rucksack-helper`. Describe this path as an
-unsigned development build, never as a production security boundary.
+Setup asks for administrator authorization when it installs the development helper. It
+also detects supported agents, installs reversible adapters, and saves the hotspot or
+iPhone USB choice.
 
-## guided setup
-
-Let `rucksack setup` own hotspot or iPhone USB selection, supported-agent detection,
-reversible adapter installation, and provider-specific confirmations. Do not request a
-hotspot password, change an agent's permissions, or bypass verification with
-`--allow-unverified-ssid`, `--allow-unverified-remote`, or `--force`.
-
-The CLI owns the user instructions. Its ownership grammar and product voice live in
-[docs/UX.md](docs/UX.md); do not duplicate that script in an install prompt.
-
-## verify
-
-Use the installed binary for every check:
+## Check the installation
 
 ```sh
-<rucksack-binary> --version
-<rucksack-binary> helper status
-<rucksack-binary> adapters status
-<rucksack-binary> doctor
+./target/debug/rucksack --version
+./target/debug/rucksack helper status
+./target/debug/rucksack adapters status
+./target/debug/rucksack doctor
 ```
 
-Warnings remain warnings and failures remain failures. Never run `rucksack pack` as an
-installation test.
+Use `doctor` as the installation check. Do not run `pack` just to test the install; it
+starts a real closed-lid sleep lease.
 
-Report the measured version, binary path, tag or commit, signing status, helper status,
-connection mode, adapter status, doctor warnings or failures, and the next command.
+## Use it
 
-For the full trust boundary, read [SECURITY.md](SECURITY.md),
-[VALIDATION.md](VALIDATION.md), and [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+```sh
+./target/debug/rucksack pack
+./target/debug/rucksack status
+./target/debug/rucksack unpack
+```
+
+If a session was interrupted, restore normal sleep with:
+
+```sh
+./target/debug/rucksack recover
+```
+
+## Remove a development install
+
+End or recover any active session first. Then remove the adapters and helper:
+
+```sh
+./target/debug/rucksack adapters remove
+./target/debug/rucksack helper uninstall
+```
+
+## Signed releases
+
+A signed release must contain both `rucksack-universal.pkg` and
+`rucksack-universal.pkg.sha256`. The repository's `scripts/install.sh` downloads those
+files, checks the SHA-256 checksum, package signature, and Gatekeeper result, then runs the
+macOS installer.
+
+Do not run that script until a signed release with both files exists. Administrator
+authentication belongs in the terminal, never in a chat.

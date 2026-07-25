@@ -1,6 +1,6 @@
 # Validation status
 
-Validation date: **2026-07-24**.
+Validation date: **2026-07-25**.
 
 This source tree has been compiled and tested on macOS. The compiler gate below passes,
 including strict Clippy and release-helper checks with a dummy CI Team ID. A real
@@ -13,11 +13,11 @@ project must not be described as production-ready until those checks pass.
 Counts include repository dotfiles and exclude `.git` and `target`:
 
 - 33 Rust source files;
-- 11 TOML files;
-- 8 JSON files;
+- 8 TOML files;
+- 7 JSON files;
 - 1 launchd plist;
-- 4 YAML workflow/configuration files, including 2 GitHub Actions workflows;
-- 57 Markdown files.
+- 3 YAML workflow/configuration files, including 2 GitHub Actions workflows;
+- 24 Markdown files.
 
 ## Completed automated checks
 
@@ -44,7 +44,7 @@ Test results:
 - 183 debug tests: CLI 75, CLI JSON E2E 8, core 89, helper 11;
 - 184 release tests with the dummy CI Team ID: CLI 75, CLI JSON E2E 8, core 89,
   helper 12;
-- 10 browser tests and 0 high-severity npm vulnerabilities;
+- 11 browser tests and 0 high-severity npm vulnerabilities;
 - 0 failures.
 
 The automated and structural review also verifies:
