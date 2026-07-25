@@ -26,7 +26,9 @@ const STATE_PATH: &str = "/var/db/rucksack/helper-state.json";
 const MAX_REQUEST_BYTES: u64 = 256 * 1024;
 const MAX_CONCURRENT_CONNECTIONS: usize = 32;
 const CONNECTION_IO_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(any(test, target_os = "macos"))]
 const CLIENT_SIGNING_IDENTIFIER: &str = "io.rucksack.cli";
+#[cfg(any(test, target_os = "macos"))]
 const APPLE_TEAM_ID_LENGTH: usize = 10;
 
 /// The Apple Developer team whose signed `rucksack` this helper will talk to.
@@ -35,6 +37,7 @@ const APPLE_TEAM_ID_LENGTH: usize = 10;
 /// therefore verify the calling binary's code signature; source builds authenticate by UID alone,
 /// which is what makes `cargo build --release` usable at all. Either way the socket is root:admin
 /// 0660 and every lease is owner-checked.
+#[cfg(target_os = "macos")]
 const COMPILED_TEAM_ID: Option<&str> = option_env!("RUCKSACK_TEAM_ID");
 
 struct ConnectionPermit {
@@ -286,6 +289,7 @@ fn validate_peer_code_signature(pid: libc::pid_t, team_id: &str) -> Result<()> {
         })
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_team_id(team_id: &str) -> Result<()> {
     if team_id.len() != APPLE_TEAM_ID_LENGTH
         || !team_id
@@ -299,6 +303,7 @@ fn validate_team_id(team_id: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn client_code_requirement(team_id: &str) -> Result<String> {
     validate_team_id(team_id)?;
     Ok(format!(

@@ -42,7 +42,7 @@ a34e1ca198f194cd663c79a76fa0de4be06e505942b35545dbb58790991d2856  ./crates/rucks
 54df8432bb8c2d980b3383b50a4e1de629863b3bf22347e9727e97028d6c45df  ./crates/rucksack-helper/src/lease.rs
 fdd422ce10ba23289793559e0de9655de426fb23811a8d499662d95785201301  ./crates/rucksack-helper/src/main.rs
 425b8dc0b66f2188fd2a14a0cd7dd468baf2408356de19c2af1502e4fa7690ae  ./crates/rucksack-helper/src/power_events.rs
-43457eb160be586cf4ab3bd9f8e3fb47b636e24ab655ec1d7f7ac05132361e24  ./crates/rucksack-helper/src/server.rs
+29b23b44b860c888f9d263ca5ee4fba28c40c4159c70d4f2d0d07d52860f7317  ./crates/rucksack-helper/src/server.rs
 1614f44836e78fa13615e37879912b44b82f35852ef9b37be0f7b8f2926edefd  ./deny.toml
 151610f306ea36c9c90d91637f46eb53c695c33e48058a5907021672479a6185  ./docs/ADAPTERS.md
 cf4d88220b76bceab3a4e47c9c03f33df420055e371b04f746f8e01f064c8db8  ./docs/ARCHITECTURE.md
