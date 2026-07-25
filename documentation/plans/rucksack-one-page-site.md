@@ -1,7 +1,7 @@
 # rucksack one-page site
 
 Status: implemented and deployed at
-[rucksack.wtf](https://rucksack.wtf).
+[rucksack.wtf](https://www.rucksack.wtf/).
 
 ## product language
 
@@ -23,11 +23,12 @@ to leave while useful work is still running. they want the shortest path from of
 to a phone hotspot without cloning the project, rebuilding an environment, or moving
 secrets into another machine.
 
-the page must answer three questions in order:
+the page must answer four questions in order:
 
 1. what does rucksack do?
 2. why not move the project to the cloud?
 3. what does `packed` prove?
+4. why is a bounded closed-lid handoff different from `caffeinate`?
 
 ## page structure
 
@@ -36,7 +37,7 @@ the page must answer three questions in order:
 the first viewport contains:
 
 - the lowercase rucksack wordmark and pixel backpack mark;
-- one GitHub link with the repository star count;
+- one GitHub link;
 - the primary promise and support line;
 - a compact commute pass showing `office wifi → phone hotspot`;
 - the `seamless commute` outcome;
@@ -68,6 +69,15 @@ rucksack   pack → connect hotspot → go
 the section also states the safety boundary: permissions stay unchanged and rucksack
 never relays repository code.
 
+### 4. direct closed-lid answers
+
+`keep a MacBook awake—with limits.` answers the three high-intent questions without a
+card grid:
+
+- whether a MacBook can stay awake with the lid closed on battery;
+- why `caffeinate` is not the closed-lid primitive;
+- how Codex, Claude Code, and Cursor remain reachable through provider-native remotes.
+
 ### footer
 
 the footer repeats only the wordmark, GitHub link, and security link.
@@ -97,8 +107,8 @@ the design is a compact commuter pass on a quiet dark field.
 - DM Sans carries product copy.
 - Doto carries route labels and measured state.
 - acid green marks the active route and primary action.
-- a low-contrast green glow follows the page from hero to proof.
-- three continuous backgrounds create sections without rules or decorative lines.
+- one near-black field keeps the full page continuous.
+- huge vertical rhythm and subtle chapter rules separate sections.
 - spacing and alignment carry hierarchy; the pass is the only bordered object.
 - the pixel backpack is a route marker, not an emoji or illustration.
 - motion explains issue, route, and packed state; it never blocks the setup action.

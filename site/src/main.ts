@@ -17,20 +17,6 @@ type PassElements = {
   readonly stage: HTMLElement;
 };
 
-type GitHubElements = {
-  readonly count: HTMLElement;
-  readonly link: HTMLAnchorElement;
-};
-
-type GitHubRepositoryResponse = {
-  readonly stargazers_count?: unknown;
-};
-
-const GITHUB_REPOSITORY_API =
-  "https://api.github.com/repos/noahnawara/rucksack";
-const GITHUB_REPOSITORY_URL = "https://github.com/noahnawara/rucksack";
-const GITHUB_REQUEST_ATTEMPTS = 2;
-
 const requireElement = <ElementType extends Element>(
   selector: string,
 ): ElementType => {
@@ -53,11 +39,6 @@ const getCopyElements = (): CopyElements => ({
 
 const getPassElements = (): PassElements => ({
   stage: requireElement<HTMLElement>("#pass-stage"),
-});
-
-const getGitHubElements = (): GitHubElements => ({
-  count: requireElement<HTMLElement>("[data-github-star-count]"),
-  link: requireElement<HTMLAnchorElement>("[data-github-link]"),
 });
 
 const selectPrompt = (elements: CopyElements): void => {
@@ -132,114 +113,6 @@ const playPass = (
   });
 };
 
-const wait = async (milliseconds: number): Promise<void> =>
-  new Promise((resolve: () => void): void => {
-    window.setTimeout(resolve, milliseconds);
-  });
-
-const readGitHubStarCount = (value: unknown): number => {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("GitHub repository response was not an object");
-  }
-
-  const response = value as GitHubRepositoryResponse;
-  const count = response.stargazers_count;
-  if (
-    typeof count !== "number" ||
-    !Number.isSafeInteger(count) ||
-    count < 0
-  ) {
-    throw new TypeError(
-      `GitHub repository response has an invalid stargazers_count: ${String(count)}`,
-    );
-  }
-
-  return count;
-};
-
-const requestGitHubStarCount = async (): Promise<number> => {
-  const response = await fetch(GITHUB_REPOSITORY_API, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-
-  if (!response.ok) {
-    const responseBody = await response.text();
-    throw new Error(
-      `GitHub star request failed for ${GITHUB_REPOSITORY_API} with ` +
-        `${response.status} ${response.statusText}: ${responseBody.slice(0, 500)}`,
-    );
-  }
-
-  return readGitHubStarCount(await response.json());
-};
-
-const fetchGitHubStarCount = async (): Promise<number> => {
-  let lastError: unknown = new Error(
-    `GitHub star request did not run for ${GITHUB_REPOSITORY_API}`,
-  );
-
-  for (
-    let attempt = 1;
-    attempt <= GITHUB_REQUEST_ATTEMPTS;
-    attempt += 1
-  ) {
-    try {
-      return await requestGitHubStarCount();
-    } catch (error: unknown) {
-      lastError = error;
-      console.warn("github_star_request_failed", {
-        attempt,
-        error,
-        maxAttempts: GITHUB_REQUEST_ATTEMPTS,
-        repository: GITHUB_REPOSITORY_URL,
-      });
-
-      if (attempt < GITHUB_REQUEST_ATTEMPTS) {
-        await wait(250 * attempt);
-      }
-    }
-  }
-
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-  throw new Error("GitHub star request failed with an unknown error");
-};
-
-const formatCompactCount = (count: number): string =>
-  new Intl.NumberFormat("en", {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(count);
-
-const showGitHubStarCount = (
-  elements: GitHubElements,
-  count: number,
-): void => {
-  const exactCount = new Intl.NumberFormat("en").format(count);
-  elements.count.textContent = formatCompactCount(count);
-  elements.link.setAttribute(
-    "aria-label",
-    `rucksack on GitHub; ${exactCount} stars`,
-  );
-};
-
-const loadGitHubStarCount = async (
-  elements: GitHubElements,
-): Promise<void> => {
-  try {
-    showGitHubStarCount(elements, await fetchGitHubStarCount());
-  } catch (error: unknown) {
-    console.warn("github_star_count_unavailable", {
-      error,
-      repository: GITHUB_REPOSITORY_URL,
-    });
-  }
-};
-
 const isLocalHostname = (hostname: string): boolean =>
   hostname === "127.0.0.1" || hostname === "localhost";
 
@@ -257,7 +130,6 @@ document.documentElement.classList.add("js");
 
 const copyElements = getCopyElements();
 const passElements = getPassElements();
-const githubElements = getGitHubElements();
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 copyElements.button.addEventListener("click", (): void => {
@@ -275,4 +147,3 @@ window.addEventListener(
 );
 
 initializeVercelTelemetry();
-void loadGitHubStarCount(githubElements);

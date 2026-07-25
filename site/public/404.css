@@ -1,0 +1,98 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    "SF Pro Display",
+    "Helvetica Neue",
+    sans-serif;
+  background: #080a07;
+  color: #f4f5eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100svh;
+  margin: 0;
+  background: #080a07;
+}
+
+main {
+  display: grid;
+  width: min(100% - 2.5rem, 46rem);
+  min-height: 100svh;
+  margin-inline: auto;
+  align-content: center;
+  justify-items: start;
+}
+
+.wordmark {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.55rem;
+  color: #f4f5eb;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-decoration: none;
+}
+
+.route-mark {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  overflow: hidden;
+  background: #ceff39;
+  clip-path: polygon(0 0, 72% 0, 100% 28%, 100% 100%, 0 100%);
+}
+
+.state {
+  margin: 4rem 0 1rem;
+  color: #ceff39;
+  font-family:
+    "SFMono-Regular",
+    monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+h1 {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(2.5rem, 10vw, 4.75rem);
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-wrap: balance;
+}
+
+.message {
+  max-width: 38rem;
+  margin: 1.5rem 0 0;
+  color: #a9b09f;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.action {
+  min-height: 3.25rem;
+  margin-block-start: 2rem;
+  align-content: center;
+  padding-inline: 1.1rem;
+  background: #ceff39;
+  color: #0a0d08;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.action:hover {
+  background: #e0ff82;
+}
+
+:focus-visible {
+  outline: 3px solid #ceff39;
+  outline-offset: 4px;
+}

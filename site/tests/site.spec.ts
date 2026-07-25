@@ -3,10 +3,17 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, URL } from "node:url";
 
-const GITHUB_REPOSITORY_API =
-  "https://api.github.com/repos/noahnawara/rucksack";
 const promptPath = fileURLToPath(
   new URL("../src/content/install-agent-prompt.txt", import.meta.url),
+);
+const robotsPath = fileURLToPath(
+  new URL("../public/robots.txt", import.meta.url),
+);
+const sitemapPath = fileURLToPath(
+  new URL("../public/sitemap.xml", import.meta.url),
+);
+const manifestPath = fileURLToPath(
+  new URL("../public/site.webmanifest", import.meta.url),
 );
 
 type TextLineBounds = {
@@ -38,30 +45,17 @@ const measureTextLines = (
   );
 };
 
-test.beforeEach(async ({ page }): Promise<void> => {
-  await page.route(
-    GITHUB_REPOSITORY_API,
-    async (route): Promise<void> => {
-      await route.fulfill({
-        json: {
-          stargazers_count: 1_234,
-        },
-      });
-    },
-  );
-});
-
-test("shows one promise, one distilled commute pass, one action, and the live star count", async ({
+test("shows one promise, one distilled commute pass, one action, and the evidence chapters", async ({
   page,
 }): Promise<void> => {
   await page.goto("/");
 
   await expect(page).toHaveTitle(
-    "rucksack — switch to your hotspot. keep your agent running.",
+    "Keep Your AI Coding Agent Running on Mac | rucksack",
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
-    "https://rucksack.wtf",
+    "https://www.rucksack.wtf/",
   );
   await expect(
     page.getByRole("heading", {
@@ -112,7 +106,22 @@ test("shows one promise, one distilled commute pass, one action, and the live st
   ).toBeVisible();
   await expect(
     page.getByText(
-      "permissions stay unchanged. rucksack never relays your code.",
+      "permissions stay unchanged. provider-native remotes carry the conversation; rucksack has no code relay.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      level: 2,
+      name: "keep a MacBook awake—with limits.",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("why isn’t caffeinate enough?", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "can I control Codex, Claude Code, or Cursor from my phone?",
+      { exact: true },
     ),
   ).toBeVisible();
   await expect(
@@ -120,10 +129,120 @@ test("shows one promise, one distilled commute pass, one action, and the live st
   ).toContainText("security");
   await expect(
     page.getByRole("link", {
-      name: "rucksack on GitHub; 1,234 stars",
+      name: "rucksack on GitHub",
     }),
   ).toHaveAttribute("href", "https://github.com/noahnawara/rucksack");
-  await expect(page.locator("[data-github-star-count]")).toHaveText("1.2K");
+});
+
+test("publishes canonical search, social, and software metadata", async ({
+  page,
+}): Promise<void> => {
+  await page.goto("/");
+
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    "Keep Codex, Claude Code, or Cursor running on your MacBook and reachable from your phone through a verified hotspot handoff and bounded closed-lid lease.",
+  );
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+    "content",
+    "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1",
+  );
+  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute(
+    "content",
+    "https://www.rucksack.wtf/",
+  );
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+    "content",
+    "https://www.rucksack.wtf/rucksack-ai-coding-agent-phone-hotspot.jpg",
+  );
+  await expect(page.locator('meta[property="og:image:width"]')).toHaveAttribute(
+    "content",
+    "1200",
+  );
+  await expect(page.locator('meta[property="og:image:height"]')).toHaveAttribute(
+    "content",
+    "630",
+  );
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+    "content",
+    "summary_large_image",
+  );
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
+    "href",
+    "/site.webmanifest",
+  );
+
+  const structuredDataText = await page
+    .locator('script[type="application/ld+json"]')
+    .textContent();
+  if (structuredDataText === null) {
+    throw new Error("The JSON-LD graph is missing");
+  }
+  const structuredData: unknown = JSON.parse(structuredDataText);
+  expect(structuredData).toMatchObject({
+    "@context": "https://schema.org",
+    "@graph": expect.arrayContaining([
+      expect.objectContaining({
+        "@type": "WebSite",
+        "url": "https://www.rucksack.wtf/",
+      }),
+      expect.objectContaining({
+        "@type": "WebPage",
+        "url": "https://www.rucksack.wtf/",
+      }),
+      expect.objectContaining({
+        "@type": "ImageObject",
+        "width": 1200,
+        "height": 630,
+      }),
+      expect.objectContaining({
+        "@type": "SoftwareApplication",
+        "operatingSystem": "macOS 14 or later",
+        "softwareVersion": "0.1.0-alpha.1",
+        "codeRepository": "https://github.com/noahnawara/rucksack",
+      }),
+    ]),
+  });
+});
+
+test("publishes crawl discovery files and a valid manifest", async ({
+  request,
+}): Promise<void> => {
+  const expectedRobots = await readFile(robotsPath, "utf8");
+  const expectedSitemap = await readFile(sitemapPath, "utf8");
+  const manifestText = await readFile(manifestPath, "utf8");
+  const manifest: unknown = JSON.parse(manifestText);
+
+  const robotsResponse = await request.get("/robots.txt");
+  expect(robotsResponse.ok()).toBe(true);
+  expect(await robotsResponse.text()).toBe(expectedRobots);
+
+  const sitemapResponse = await request.get("/sitemap.xml");
+  expect(sitemapResponse.ok()).toBe(true);
+  expect(await sitemapResponse.text()).toBe(expectedSitemap);
+
+  const socialImageResponse = await request.get(
+    "/rucksack-ai-coding-agent-phone-hotspot.jpg",
+  );
+  expect(socialImageResponse.ok()).toBe(true);
+  expect(socialImageResponse.headers()["content-type"]).toContain("image/jpeg");
+
+  for (const iconPath of [
+    "/favicon.ico",
+    "/apple-touch-icon.png",
+    "/icon-192.png",
+    "/icon-512.png",
+  ] as const) {
+    const iconResponse = await request.get(iconPath);
+    expect(iconResponse.ok()).toBe(true);
+    expect(iconResponse.headers()["content-type"]).toContain("image/");
+  }
+
+  expect(manifest).toMatchObject({
+    name: "rucksack — Commute Mode for AI coding agents",
+    start_url: "/",
+    categories: ["productivity", "utilities"],
+  });
 });
 
 test("renders and copies the canonical prompt byte for byte", async ({
@@ -195,6 +314,30 @@ test("has no automated accessibility violations", async ({
   page,
 }): Promise<void> => {
   await page.goto("/");
+
+  const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
+  expect(accessibilityScanResults.violations).toEqual([]);
+});
+
+test("keeps the custom not-found page out of search and offers recovery", async ({
+  page,
+}): Promise<void> => {
+  await page.goto("/404.html");
+
+  await expect(page).toHaveTitle("route not packed | rucksack");
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+    "content",
+    "noindex, follow",
+  );
+  await expect(
+    page.getByRole("heading", {
+      level: 1,
+      name: "this page missed the handoff.",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "back to rucksack" }),
+  ).toHaveAttribute("href", "/");
 
   const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
   expect(accessibilityScanResults.violations).toEqual([]);

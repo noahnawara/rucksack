@@ -675,6 +675,71 @@ h1 {
   line-height: 1.45;
 }
 
+.handoff-answers {
+  display: grid;
+  gap: 3.75rem;
+  border-block-start: 1px solid var(--chapter-line);
+  padding-block: 10rem;
+}
+
+.answers-copy {
+  max-width: 31rem;
+}
+
+.answers-copy h2 {
+  max-width: 15ch;
+  font-size: clamp(1.65rem, 7vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.answers-copy p {
+  max-width: 28rem;
+  margin-block-start: 0.9rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.answer-list {
+  display: grid;
+  align-content: start;
+  gap: 2.35rem;
+}
+
+.answer {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.answer dt {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.answer dd {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.answer code {
+  color: #d5d8cc;
+  font-family:
+    "Doto Variable",
+    "SFMono-Regular",
+    monospace;
+  font-size: 0.94em;
+  font-weight: 700;
+}
+
 .site-footer {
   background: var(--night);
 }
@@ -772,7 +837,8 @@ h1 {
 
   .hero,
   .setup-contrast,
-  .handoff-proof-inner {
+  .handoff-proof-inner,
+  .handoff-answers {
     grid-template-columns: minmax(0, 1fr) 23rem;
     column-gap: clamp(4rem, 8vw, 7rem);
   }
@@ -838,8 +904,14 @@ h1 {
     padding-block: 13.5rem;
   }
 
-  .proof-copy h2 {
+  .proof-copy h2,
+  .answers-copy h2 {
     font-size: 2.25rem;
+  }
+
+  .handoff-answers {
+    align-items: start;
+    padding-block: 13.5rem;
   }
 }
 
