@@ -9,8 +9,34 @@ const promptPath = fileURLToPath(
   new URL("../src/content/install-agent-prompt.txt", import.meta.url),
 );
 
+type TextLineBounds = {
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+};
+
 const readCanonicalPrompt = async (): Promise<string> =>
   readFile(promptPath, "utf8");
+
+const measureTextLines = (
+  element: HTMLElement,
+): readonly TextLineBounds[] => {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+
+  return Array.from(
+    range.getClientRects(),
+    (bounds: DOMRect): TextLineBounds => {
+      return {
+        height: bounds.height,
+        width: bounds.width,
+        x: bounds.x,
+        y: bounds.y,
+      };
+    },
+  );
+};
 
 test.beforeEach(async ({ page }): Promise<void> => {
   await page.route(
@@ -377,6 +403,46 @@ test("shows the final pass state without motion when reduced motion is requested
   expect(runningAnimations).toBe(0);
 });
 
+test("keeps the hero glyphs fixed when the display font arrives late", async ({
+  page,
+}): Promise<void> => {
+  const displayFont = '700 3rem "DM Sans Variable"';
+  const fontGate = Promise.withResolvers<void>();
+  const fontRequestStarted = Promise.withResolvers<void>();
+
+  await page.route(
+    "**/*dm-sans-latin-wght-normal*.woff2*",
+    async (route): Promise<void> => {
+      fontRequestStarted.resolve();
+      await fontGate.promise;
+      await route.continue();
+    },
+  );
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/", { waitUntil: "commit" });
+
+  const headline = page.locator("#headline");
+  await headline.waitFor({ state: "attached" });
+  await fontRequestStarted.promise;
+  await page.waitForTimeout(250);
+  const beforeFonts = await headline.evaluate(measureTextLines);
+
+  fontGate.resolve();
+  await page.evaluate(async (font: string): Promise<void> => {
+    await document.fonts.load(font);
+    await document.fonts.ready;
+    await new Promise<void>((resolve: () => void): void => {
+      requestAnimationFrame((): void => {
+        requestAnimationFrame((): void => resolve());
+      });
+    });
+  }, displayFont);
+  const afterFonts = await headline.evaluate(measureTextLines);
+
+  expect(afterFonts).toEqual(beforeFonts);
+});
+
 test("brings the complete pass into focus without spatial movement", async ({
   page,
 }): Promise<void> => {
@@ -396,13 +462,9 @@ test("brings the complete pass into focus without spatial movement", async ({
       readonly opacities: readonly string[];
       readonly spatialProperties: readonly string[];
     } => {
-      const stage = element.closest<HTMLElement>(".pass-stage");
-      if (stage === null) {
-        throw new Error("The commute-pass stage is missing");
-      }
-      stage.classList.remove("is-running");
-      void stage.offsetWidth;
-      stage.classList.add("is-running");
+      element.classList.remove("pass-reveal");
+      void element.offsetWidth;
+      element.classList.add("pass-reveal");
 
       const animation = element
         .getAnimations()
@@ -466,12 +528,12 @@ test("brings the complete pass into focus without spatial movement", async ({
     },
   );
 
-  expect(focus.duration).toBe(480);
+  expect(focus.duration).toBe(620);
   expect(focus.filters).toEqual([
-    "blur(1.5px) saturate(0.8)",
+    "blur(6px) saturate(0.7)",
     "blur(0px) saturate(1)",
   ]);
-  expect(focus.opacities).toEqual(["0.8", "1"]);
+  expect(focus.opacities).toEqual(["0.62", "1"]);
   expect(focus.spatialProperties).toEqual([]);
   expect(focus.bounds[1]).toEqual(focus.bounds[0]);
   expect(focus.bounds[2]).toEqual(focus.bounds[0]);

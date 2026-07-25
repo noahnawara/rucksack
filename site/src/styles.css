@@ -1,3 +1,12 @@
+@font-face {
+  font-family: "DM Sans Variable";
+  font-style: normal;
+  font-display: optional;
+  font-weight: 100 1000;
+  src: url("@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2")
+    format("woff2-variations");
+}
+
 :root {
   color-scheme: dark;
   font-family:
@@ -182,7 +191,7 @@ svg {
 }
 
 h1 {
-  max-width: 14.5ch;
+  max-width: 22rem;
   font-size: clamp(2.15rem, 9.2vw, 2.3rem);
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -228,8 +237,8 @@ h1 {
   );
 }
 
-.pass-stage.is-running .pass {
-  animation: focus-pass 480ms cubic-bezier(0.16, 1, 0.3, 1);
+.pass-reveal {
+  animation: focus-pass 620ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .pass-head {
@@ -710,8 +719,8 @@ h1 {
 
 @keyframes focus-pass {
   from {
-    opacity: 0.8;
-    filter: blur(1.5px) saturate(0.8);
+    opacity: 0.62;
+    filter: blur(6px) saturate(0.7);
   }
 
   to {
@@ -786,7 +795,7 @@ h1 {
   }
 
   h1 {
-    max-width: 13ch;
+    max-width: 26.375rem;
     font-size: clamp(2.65rem, 3.2vw, 3rem);
   }
 
@@ -839,7 +848,7 @@ h1 {
     scroll-behavior: auto;
   }
 
-  .pass-stage.is-running .pass,
+  .pass-reveal,
   .pass-stage.is-running .pass-body::after {
     animation: none;
   }
