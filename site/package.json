@@ -2,8 +2,8 @@
   "name": "rucksack-site",
   "private": true,
   "version": "0.1.0",
-  "description": "switch to your hotspot. keep your agent running.",
-  "homepage": "https://rucksack.wtf",
+  "description": "Verified MacBook commute handoff for local AI coding agents.",
+  "homepage": "https://www.rucksack.wtf/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/noahnawara/rucksack.git",

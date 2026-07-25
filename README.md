@@ -4,7 +4,7 @@
 phone connection, and close the lid. You continue the same local Codex, Claude Code, or
 Cursor session from your phone.
 
-[Website](https://rucksack.wtf) · [Install](INSTALL.md) · [Security](SECURITY.md)
+[Website](https://www.rucksack.wtf/) · [Install](INSTALL.md) · [Security](SECURITY.md)
 
 > Source-only alpha. CI passes, and short Codex/hotspot desk tests have passed. There is no
 > signed package yet, and all three agent adapters are experimental.
