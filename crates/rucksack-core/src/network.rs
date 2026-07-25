@@ -1,7 +1,5 @@
-use crate::agent::AgentKind;
 use crate::system::{run_bounded_cleared, CommandResult};
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -25,14 +23,6 @@ pub struct RouteStatus {
     pub interface: Option<String>,
     pub gateway: Option<String>,
     pub detail: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InterfaceCounters {
-    pub interface: String,
-    pub received_bytes: u64,
-    pub sent_bytes: u64,
-    pub sampled_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,90 +160,6 @@ pub fn read_default_route() -> Result<RouteStatus> {
     Ok(parse_default_route(&result.stdout))
 }
 
-pub fn read_interface_counters(interface: &str) -> Result<InterfaceCounters> {
-    let interface = interface.trim();
-    if interface.is_empty() || interface.chars().any(char::is_control) {
-        return Err(anyhow!(
-            "Network interface name must be non-empty and contain no control characters"
-        ));
-    }
-    let result = run_network_command("/usr/sbin/netstat", &["-ibn", "-I", interface])?;
-    require_success("netstat -ibn -I", &result)?;
-    parse_interface_counters(&result.stdout, interface, Utc::now())
-}
-
-pub fn parse_interface_counters(
-    text: &str,
-    interface: &str,
-    sampled_at: DateTime<Utc>,
-) -> Result<InterfaceCounters> {
-    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
-    let header = lines
-        .next()
-        .ok_or_else(|| anyhow!("netstat returned no interface-counter header"))?;
-    let columns = header.split_whitespace().collect::<Vec<_>>();
-    let network_index = columns
-        .iter()
-        .position(|column| *column == "Network")
-        .ok_or_else(|| anyhow!("netstat output has no Network column"))?;
-    let received_header_index = columns
-        .iter()
-        .position(|column| *column == "Ibytes")
-        .ok_or_else(|| anyhow!("netstat output has no Ibytes column"))?;
-    let sent_header_index = columns
-        .iter()
-        .position(|column| *column == "Obytes")
-        .ok_or_else(|| anyhow!("netstat output has no Obytes column"))?;
-    let received_from_end = columns.len() - received_header_index;
-    let sent_from_end = columns.len() - sent_header_index;
-
-    let mut parsed: Option<(u64, u64)> = None;
-    for line in lines {
-        let values = line.split_whitespace().collect::<Vec<_>>();
-        if values.first().copied() != Some(interface)
-            || !values
-                .get(network_index)
-                .is_some_and(|network| network.starts_with("<Link#"))
-        {
-            continue;
-        }
-        if parsed.is_some() {
-            return Err(anyhow!(
-                "netstat returned multiple link-layer counter rows for interface {interface}"
-            ));
-        }
-        let received_index = values
-            .len()
-            .checked_sub(received_from_end)
-            .ok_or_else(|| anyhow!("netstat link row for {interface} is missing Ibytes"))?;
-        let sent_index = values
-            .len()
-            .checked_sub(sent_from_end)
-            .ok_or_else(|| anyhow!("netstat link row for {interface} is missing Obytes"))?;
-        let received = values
-            .get(received_index)
-            .ok_or_else(|| anyhow!("netstat row for {interface} has no Ibytes value"))?
-            .parse::<u64>()
-            .map_err(|error| anyhow!("Invalid Ibytes value for {interface}: {error}"))?;
-        let sent = values
-            .get(sent_index)
-            .ok_or_else(|| anyhow!("netstat row for {interface} has no Obytes value"))?
-            .parse::<u64>()
-            .map_err(|error| anyhow!("Invalid Obytes value for {interface}: {error}"))?;
-        parsed = Some((received, sent));
-    }
-
-    let (received_bytes, sent_bytes) = parsed.ok_or_else(|| {
-        anyhow!("netstat returned no link-layer byte-counter row for interface {interface}")
-    })?;
-    Ok(InterfaceCounters {
-        interface: interface.to_owned(),
-        received_bytes,
-        sent_bytes,
-        sampled_at,
-    })
-}
-
 pub fn parse_default_route(text: &str) -> RouteStatus {
     RouteStatus {
         interface: field(text, "interface"),
@@ -284,10 +190,6 @@ fn field(text: &str, key: &str) -> Option<String> {
             None
         }
     })
-}
-
-pub fn probe(url: &str, timeout_seconds: u64) -> ProbeResult {
-    probe_with_policy(url, timeout_seconds, false)
 }
 
 /// Verify an actual internet path, not merely an HTTP response.
@@ -379,14 +281,6 @@ fn apple_captive_success_body(body: &str) -> bool {
     normalized.contains("<title>success</title>") && normalized.contains("<body>success</body>")
 }
 
-pub fn provider_probe_url(agent: AgentKind) -> &'static str {
-    match agent {
-        AgentKind::Codex => "https://chatgpt.com/",
-        AgentKind::Claude => "https://api.anthropic.com/",
-        AgentKind::Cursor => "https://cursor.com/",
-    }
-}
-
 fn require_success(name: &str, result: &CommandResult) -> Result<()> {
     if result.success() {
         Ok(())
@@ -449,81 +343,6 @@ mod tests {
             parse_hardware_device(text, &["iphone usb"]).as_deref(),
             Some("en7")
         );
-    }
-
-    #[test]
-    fn parses_interface_byte_counters_without_double_counting_address_rows() {
-        let sampled_at = DateTime::parse_from_rfc3339("2026-07-24T14:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let text = "Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll\n\
-                    en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 100 0 123456 80 0 654321 0\n\
-                    en0 1500 192.0.0 192.0.0.2 100 - 123456 80 - 654321 -\n";
-
-        let counters = parse_interface_counters(text, "en0", sampled_at).unwrap();
-
-        assert_eq!(counters.interface, "en0");
-        assert_eq!(counters.received_bytes, 123_456);
-        assert_eq!(counters.sent_bytes, 654_321);
-        assert_eq!(counters.sampled_at, sampled_at);
-    }
-
-    #[test]
-    fn parses_link_row_that_omits_the_address_column() {
-        let sampled_at = DateTime::parse_from_rfc3339("2026-07-24T14:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let text = "Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll\n\
-                    utun4 1380 <Link#19> 396 0 55298 462 0 99815 0\n";
-
-        let counters = parse_interface_counters(text, "utun4", sampled_at).unwrap();
-
-        assert_eq!(counters.received_bytes, 55_298);
-        assert_eq!(counters.sent_bytes, 99_815);
-    }
-
-    #[test]
-    fn interface_counter_parser_rejects_missing_byte_columns() {
-        let sampled_at = Utc::now();
-        let error =
-            parse_interface_counters("Name Mtu Network Address\n", "en0", sampled_at).unwrap_err();
-
-        assert!(error.to_string().contains("Ibytes"));
-    }
-
-    #[test]
-    fn interface_counter_parser_rejects_invalid_link_rows() {
-        let sampled_at = Utc::now();
-        let header = "Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll\n";
-
-        let missing = parse_interface_counters(
-            &format!("{header}en0 1500 192.0.0 192.0.0.2 1 - 2 3 - 4 -\n"),
-            "en0",
-            sampled_at,
-        )
-        .unwrap_err();
-        assert!(missing.to_string().contains("no link-layer"));
-
-        let duplicate = parse_interface_counters(
-            &format!(
-                "{header}en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 1 0 2 3 0 4 0\n\
-                 en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 1 0 2 3 0 4 0\n"
-            ),
-            "en0",
-            sampled_at,
-        )
-        .unwrap_err();
-        assert!(duplicate.to_string().contains("multiple link-layer"));
-
-        let overflow = parse_interface_counters(
-            &format!(
-                "{header}en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 1 0 18446744073709551616 3 0 4 0\n"
-            ),
-            "en0",
-            sampled_at,
-        )
-        .unwrap_err();
-        assert!(overflow.to_string().contains("Invalid Ibytes"));
     }
 
     #[test]

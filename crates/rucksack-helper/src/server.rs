@@ -5,7 +5,7 @@ use rucksack_core::files::ensure_private_dir;
 use rucksack_core::protocol::{
     HelperRequest, HelperResponse, DEFAULT_HELPER_SOCKET, HELPER_PROTOCOL_VERSION,
 };
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
+#[cfg(target_os = "macos")]
 use security_framework::os::macos::code_signing::{
     Flags, GuestAttributes, SecCode, SecRequirement,
 };
@@ -26,12 +26,15 @@ const STATE_PATH: &str = "/var/db/rucksack/helper-state.json";
 const MAX_REQUEST_BYTES: u64 = 256 * 1024;
 const MAX_CONCURRENT_CONNECTIONS: usize = 32;
 const CONNECTION_IO_TIMEOUT: Duration = Duration::from_secs(10);
-#[cfg(any(test, all(target_os = "macos", not(debug_assertions))))]
 const CLIENT_SIGNING_IDENTIFIER: &str = "io.rucksack.cli";
-#[cfg(any(test, all(target_os = "macos", not(debug_assertions))))]
 const APPLE_TEAM_ID_LENGTH: usize = 10;
 
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
+/// The Apple Developer team whose signed `rucksack` this helper will talk to.
+///
+/// Set when the notarized package is built, absent when someone builds from source. Signed builds
+/// therefore verify the calling binary's code signature; source builds authenticate by UID alone,
+/// which is what makes `cargo build --release` usable at all. Either way the socket is root:admin
+/// 0660 and every lease is owner-checked.
 const COMPILED_TEAM_ID: Option<&str> = option_env!("RUCKSACK_TEAM_ID");
 
 struct ConnectionPermit {
@@ -213,13 +216,9 @@ fn start_power_observer(
 #[cfg(target_os = "macos")]
 fn authenticate_peer(stream: &UnixStream) -> Result<u32> {
     let uid = peer_uid(stream)?;
-
-    #[cfg(not(debug_assertions))]
-    {
-        let pid = peer_pid(stream)?;
-        validate_peer_code_signature(pid, expected_team_id()?)?;
+    if let Some(team_id) = COMPILED_TEAM_ID {
+        validate_peer_code_signature(peer_pid(stream)?, team_id)?;
     }
-
     Ok(uid)
 }
 
@@ -240,7 +239,7 @@ fn peer_uid(stream: &UnixStream) -> Result<u32> {
     }
 }
 
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
+#[cfg(target_os = "macos")]
 fn peer_pid(stream: &UnixStream) -> Result<libc::pid_t> {
     let mut pid: libc::pid_t = 0;
     let mut length = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
@@ -269,7 +268,7 @@ fn peer_pid(stream: &UnixStream) -> Result<libc::pid_t> {
     Ok(pid)
 }
 
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
+#[cfg(target_os = "macos")]
 fn validate_peer_code_signature(pid: libc::pid_t, team_id: &str) -> Result<()> {
     let requirement_text = client_code_requirement(team_id)?;
     let requirement: SecRequirement = requirement_text
@@ -287,16 +286,6 @@ fn validate_peer_code_signature(pid: libc::pid_t, team_id: &str) -> Result<()> {
         })
 }
 
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
-fn expected_team_id() -> Result<&'static str> {
-    let team_id = COMPILED_TEAM_ID.context(
-        "Release helper was built without RUCKSACK_TEAM_ID; refusing all privileged clients",
-    )?;
-    validate_team_id(team_id)?;
-    Ok(team_id)
-}
-
-#[cfg(any(test, all(target_os = "macos", not(debug_assertions))))]
 fn validate_team_id(team_id: &str) -> Result<()> {
     if team_id.len() != APPLE_TEAM_ID_LENGTH
         || !team_id
@@ -310,7 +299,6 @@ fn validate_team_id(team_id: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(test, all(target_os = "macos", not(debug_assertions))))]
 fn client_code_requirement(team_id: &str) -> Result<String> {
     validate_team_id(team_id)?;
     Ok(format!(
@@ -318,17 +306,17 @@ fn client_code_requirement(team_id: &str) -> Result<String> {
     ))
 }
 
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(target_os = "macos")]
 fn validate_client_authentication_configuration() -> Result<()> {
-    eprintln!(
-        "rucksack-helper WARNING: debug build accepts UID-authenticated unsigned clients; never distribute this binary"
-    );
-    Ok(())
-}
-
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
-fn validate_client_authentication_configuration() -> Result<()> {
-    expected_team_id().map(|_| ())
+    match COMPILED_TEAM_ID {
+        Some(team_id) => validate_team_id(team_id),
+        None => {
+            eprintln!(
+                "rucksack-helper: built without RUCKSACK_TEAM_ID, so clients are authenticated by user ID alone. Do not distribute this binary."
+            );
+            Ok(())
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

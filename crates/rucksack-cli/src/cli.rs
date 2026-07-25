@@ -1,23 +1,17 @@
 use clap::{Args, Parser, Subcommand};
-use rucksack_core::{AgentKind, Focus};
-use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "rucksack",
     version,
-    about = "switch to your hotspot. keep your agent running.",
-    long_about = "switch to your hotspot. keep your agent running.\n\npack your Mac, verify the handoff, and keep working from your phone."
+    about = "close the lid. keep your agents running.",
+    long_about = "close the lid. keep your agents running.\n\nrucksack switches this Mac to your phone hotspot and keeps it awake on battery, so the work you have running survives the walk to the train."
 )]
 pub struct Cli {
-    /// Show implementation details and probe output.
+    /// Show the probes and paths behind each step.
     #[arg(long, global = true)]
     pub verbose: bool,
-
-    /// Emit newline-delimited machine-readable progress and results.
-    #[arg(long, global = true)]
-    pub json: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -25,35 +19,20 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// One-time hotspot, helper, adapter, and Remote Control setup.
-    Setup(SetupArgs),
-
-    /// Check whether this Mac is ready for a commute.
-    Doctor(DoctorArgs),
-
-    /// Prepare the Mac, remote, hotspot, and agent policy.
+    /// Switch to your hotspot and keep this Mac awake with the lid closed.
     Pack(PackArgs),
 
-    /// Show the active lease, connection, safety, and agent state.
+    /// Say whether this Mac is still packed.
     Status(StatusArgs),
 
-    /// Restore normal sleep and remove Commute Mode.
+    /// Let this Mac sleep normally again.
     Unpack,
 
-    /// Show the most recent completed-session report.
-    Report,
+    /// Print a Codex Remote Control pairing code.
+    Pair,
 
-    /// Restore normal sleep after an interrupted session.
-    Recover(RecoverArgs),
-
-    /// Install, inspect, or remove native agent adapters.
-    Adapters {
-        #[command(subcommand)]
-        command: AdapterCommand,
-    },
-
-    /// Pair or explain pairing for a provider remote.
-    Pair(PairArgs),
+    /// Star rucksack on GitHub.
+    Star,
 
     /// Install and inspect the privileged power helper.
     Helper {
@@ -61,129 +40,49 @@ pub enum Command {
         command: HelperCommand,
     },
 
-    /// Internal lifecycle hook entrypoint.
-    #[command(hide = true)]
-    Hook(HookArgs),
-
-    /// Internal user daemon.
+    /// Internal safety watcher.
     #[command(hide = true)]
     Daemon(DaemonArgs),
 }
 
-#[derive(Debug, Args)]
-pub struct SetupArgs {
-    /// Hotspot SSID to save. If omitted, setup reads the current Wi-Fi network.
-    #[arg(long, conflicts_with = "usb")]
-    pub hotspot: Option<String>,
-
-    /// Require iPhone USB tethering as the commute's default route.
-    #[arg(long)]
-    pub usb: bool,
-
-    /// Skip the administrator helper installation.
-    #[arg(long)]
-    pub no_helper: bool,
-
-    /// Skip agent adapter installation.
-    #[arg(long)]
-    pub no_adapters: bool,
-
-    /// Accept defaults without confirmation.
-    #[arg(long)]
-    pub yes: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct DoctorArgs {
-    /// Check only this agent's remote and adapter.
-    #[arg(long)]
-    pub agent: Option<AgentKind>,
-}
-
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, Default, Args)]
 pub struct PackArgs {
-    /// Agent to hand off. Auto-detected when omitted.
-    #[arg(long)]
-    pub agent: Option<AgentKind>,
-
-    /// Expected hotspot SSID.
-    #[arg(long, conflicts_with = "usb")]
+    /// Hotspot to join. Remembered for next time.
+    #[arg(long, conflicts_with_all = ["usb", "here"])]
     pub hotspot: Option<String>,
 
-    /// Require iPhone USB tethering as the commute's default route.
-    #[arg(long)]
+    /// Use the iPhone's USB tethering instead of Wi-Fi.
+    #[arg(long, conflicts_with = "here")]
     pub usb: bool,
 
-    /// Maximum session duration, such as 45m, 90m, or 2h.
+    /// Keep the network this Mac is on. Use it when you are already tethered.
+    #[arg(long)]
+    pub here: bool,
+
+    /// How long to stay awake, such as 45m, 90m, or 2h. Defaults to 24h.
     #[arg(long = "for", value_parser = parse_duration_minutes)]
     pub duration_minutes: Option<u64>,
 
-    /// Behavioral focus: continue, finish, investigate, review, or low-power.
+    /// Fail instead of warning when Remote Control cannot be started.
     #[arg(long)]
-    pub focus: Option<Focus>,
-
-    /// Accept prompts where the state can still be measured.
-    #[arg(long)]
-    pub yes: bool,
-
-    /// Accept a privacy-redacted SSID after an exact saved-network join request.
-    #[arg(long)]
-    pub allow_unverified_ssid: bool,
-
-    /// Skip stored phone onboarding or endpoint proof; exact task binding remains mandatory.
-    #[arg(long)]
-    pub allow_unverified_remote: bool,
+    pub require_remote: bool,
 }
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    /// Print the complete session and helper records.
+    /// Print the whole session record.
     #[arg(long)]
     pub full: bool,
 }
 
-#[derive(Debug, Args)]
-pub struct RecoverArgs {
-    /// Perform the recovery without an interactive confirmation.
-    #[arg(long)]
-    pub yes: bool,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum AdapterCommand {
-    /// Install hooks, skills, and reversible rules.
-    Install(AdapterArgs),
-    /// Show installed adapter files.
-    Status,
-    /// Remove only rucksack-owned entries.
-    Remove(AdapterArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct AdapterArgs {
-    /// Limit the operation to one provider.
-    #[arg(long)]
-    pub agent: Option<AgentKind>,
-}
-
-#[derive(Debug, Args)]
-pub struct PairArgs {
-    pub agent: AgentKind,
-}
-
 #[derive(Debug, Subcommand)]
 pub enum HelperCommand {
-    /// Install the root LaunchDaemon. Requires one administrator authentication.
+    /// Install the root helper. macOS authenticates once.
     Install,
-    /// Show helper status.
+    /// Show what the helper reports.
     Status,
-    /// Restore any lease and remove the helper.
+    /// Restore normal sleep and remove the helper.
     Uninstall,
-}
-
-#[derive(Debug, Args)]
-pub struct HookArgs {
-    pub agent: AgentKind,
 }
 
 #[derive(Debug, Args)]
@@ -238,11 +137,6 @@ pub fn parse_duration_minutes(value: &str) -> Result<u64, String> {
     Ok(total)
 }
 
-#[allow(dead_code)]
-pub fn canonical_config_path(value: Option<PathBuf>) -> Option<PathBuf> {
-    value
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,23 +147,34 @@ mod tests {
         assert_eq!(parse_duration_minutes("75m").unwrap(), 75);
         assert_eq!(parse_duration_minutes("1h30m").unwrap(), 90);
         assert_eq!(parse_duration_minutes("45").unwrap(), 45);
+        assert!(parse_duration_minutes("0m").is_err());
+        assert!(parse_duration_minutes("48h").is_err());
+    }
+
+    /// The whole surface is five verbs. Anything more is a thing to learn.
+    #[test]
+    fn the_command_surface_stays_small() {
+        let help = Cli::command().render_help().to_string();
+        for verb in ["pack", "status", "unpack", "pair", "star", "helper"] {
+            assert!(help.contains(&format!("\n  {verb} ")), "{verb} missing");
+        }
+        for gone in [
+            "setup", "doctor", "report", "recover", "adapters", "hook", "leave", "arrive",
+        ] {
+            assert!(!help.contains(&format!("\n  {gone} ")), "{gone} came back");
+        }
+        assert!(!help.contains("--json"));
     }
 
     #[test]
-    fn pack_and_unpack_are_the_only_lifecycle_names() {
-        let pack = Cli::try_parse_from(["rucksack", "pack"]).unwrap();
-        let unpack = Cli::try_parse_from(["rucksack", "unpack"]).unwrap();
-
-        assert!(matches!(pack.command, Some(Command::Pack(_))));
-        assert!(matches!(unpack.command, Some(Command::Unpack)));
-        assert!(Cli::try_parse_from(["rucksack", "unpack", "--force"]).is_err());
-        assert!(Cli::try_parse_from(["rucksack", "leave"]).is_err());
-        assert!(Cli::try_parse_from(["rucksack", "arrive"]).is_err());
-
-        let help = Cli::command().render_help().to_string();
-        assert!(help.contains("\n  pack "));
-        assert!(help.contains("\n  unpack "));
-        assert!(!help.contains("\n  leave "));
-        assert!(!help.contains("\n  arrive "));
+    fn pack_takes_no_questions() {
+        let help = Cli::command()
+            .find_subcommand_mut("pack")
+            .expect("pack exists")
+            .render_help()
+            .to_string();
+        for gone in ["--yes", "--agent", "--focus", "--allow-unverified"] {
+            assert!(!help.contains(gone), "{gone} came back");
+        }
     }
 }

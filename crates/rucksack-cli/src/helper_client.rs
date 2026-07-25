@@ -6,93 +6,24 @@ use rucksack_core::protocol::{
 };
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use uuid::Uuid;
 
+const CALL_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+
+/// Talks to the root helper over its Unix socket.
+///
+/// Every call is one request and one response, and every failure is a plain `anyhow::Error`.
+/// Callers never need to distinguish "the request never arrived" from "the reply was lost":
+/// `pack` registers its rollback before acquiring anything, and `unpack` escalates through
+/// release, then recover, then asking macOS directly.
 #[derive(Debug, Clone)]
 pub struct HelperClient {
     socket: PathBuf,
-}
-
-#[derive(Debug)]
-pub struct HelperCallError {
-    error: anyhow::Error,
-    request_may_have_been_processed: bool,
-    acquire_state_is_ambiguous: bool,
-    response_status: Option<HelperStatus>,
-}
-
-impl HelperCallError {
-    fn before_send(error: anyhow::Error) -> Self {
-        Self {
-            error,
-            request_may_have_been_processed: false,
-            acquire_state_is_ambiguous: false,
-            response_status: None,
-        }
-    }
-
-    fn after_send(error: anyhow::Error) -> Self {
-        Self {
-            error,
-            request_may_have_been_processed: true,
-            acquire_state_is_ambiguous: true,
-            response_status: None,
-        }
-    }
-
-    fn response_error(error: anyhow::Error, response_status: Option<HelperStatus>) -> Self {
-        Self {
-            error,
-            request_may_have_been_processed: true,
-            acquire_state_is_ambiguous: false,
-            response_status,
-        }
-    }
-
-    fn ambiguous_response(error: anyhow::Error, response_status: Option<HelperStatus>) -> Self {
-        Self {
-            error,
-            request_may_have_been_processed: true,
-            acquire_state_is_ambiguous: true,
-            response_status,
-        }
-    }
-
-    pub fn acquire_needs_cleanup(&self, lease_id: Uuid) -> bool {
-        if !self.request_may_have_been_processed {
-            return false;
-        }
-        if self.acquire_state_is_ambiguous {
-            return true;
-        }
-        match self.response_status.as_ref() {
-            Some(status) if !status.active => false,
-            Some(status)
-                if status
-                    .lease_id
-                    .is_some_and(|active_lease| active_lease != lease_id) =>
-            {
-                false
-            }
-            _ => true,
-        }
-    }
-
-    fn completed_release_status(&self) -> Option<HelperStatus> {
-        if !self.request_may_have_been_processed || self.acquire_state_is_ambiguous {
-            return None;
-        }
-        self.response_status
-            .as_ref()
-            .filter(|status| !status.active && status.sleep_disabled == Some(0))
-            .cloned()
-    }
-
-    pub fn into_anyhow(self) -> anyhow::Error {
-        self.error
-    }
 }
 
 impl Default for HelperClient {
@@ -104,7 +35,7 @@ impl Default for HelperClient {
 }
 
 impl HelperClient {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new(socket: impl AsRef<Path>) -> Self {
         Self {
             socket: socket.as_ref().to_path_buf(),
@@ -121,19 +52,14 @@ impl HelperClient {
         ttl_seconds: u64,
         hard_expires_at: DateTime<Utc>,
         reason: impl Into<String>,
-    ) -> std::result::Result<HelperStatus, HelperCallError> {
-        self.call_with_delivery_state(HelperOperation::Acquire {
+    ) -> Result<HelperStatus> {
+        self.call(HelperOperation::Acquire {
             lease_id,
             ttl_seconds,
             hard_expires_at,
             reason: reason.into(),
         })?
-        .ok_or_else(|| {
-            HelperCallError::ambiguous_response(
-                anyhow!("helper returned no status after acquiring a lease"),
-                None,
-            )
-        })
+        .ok_or_else(|| anyhow!("The helper acquired a lease but reported no status."))
     }
 
     pub fn renew(&self, lease_id: Uuid, ttl_seconds: u64) -> Result<HelperStatus> {
@@ -141,105 +67,56 @@ impl HelperClient {
             lease_id,
             ttl_seconds,
         })?
-        .ok_or_else(|| anyhow!("helper returned no status after renewing a lease"))
-    }
-
-    pub fn reassert(&self, lease_id: Uuid) -> Result<HelperStatus> {
-        self.call(HelperOperation::Reassert { lease_id })?
-            .ok_or_else(|| anyhow!("helper returned no status after reasserting a lease"))
+        .ok_or_else(|| anyhow!("The helper renewed a lease but reported no status."))
     }
 
     pub fn release(&self, lease_id: Uuid, reason: impl Into<String>) -> Result<HelperStatus> {
-        let operation = HelperOperation::Release {
+        self.call(HelperOperation::Release {
             lease_id,
             reason: reason.into(),
-        };
-        match self.call_with_delivery_state(operation) {
-            Ok(Some(status)) => Ok(status),
-            Ok(None) => Err(anyhow!("helper returned no status after releasing a lease")),
-            Err(error) => match error.completed_release_status() {
-                Some(status) => Ok(status),
-                None => Err(error.into_anyhow()),
-            },
-        }
+        })?
+        .ok_or_else(|| anyhow!("The helper released a lease but reported no status."))
     }
 
     pub fn recover(&self) -> Result<Option<HelperStatus>> {
         self.call(HelperOperation::Recover)
     }
 
-    pub fn is_available(&self) -> bool {
-        self.status().is_ok()
-    }
-
     fn call(&self, operation: HelperOperation) -> Result<Option<HelperStatus>> {
-        self.call_with_delivery_state(operation)
-            .map_err(HelperCallError::into_anyhow)
-    }
-
-    fn call_with_delivery_state(
-        &self,
-        operation: HelperOperation,
-    ) -> std::result::Result<Option<HelperStatus>, HelperCallError> {
         let request = HelperRequest::new(operation);
         let mut stream = UnixStream::connect(&self.socket)
-            .with_context(|| format!("Could not connect to {}", self.socket.display()))
-            .map_err(HelperCallError::before_send)?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(8)))
-            .map_err(|error| HelperCallError::before_send(error.into()))?;
-        stream
-            .set_write_timeout(Some(Duration::from_secs(8)))
-            .map_err(|error| HelperCallError::before_send(error.into()))?;
+            .with_context(|| format!("Could not reach the helper at {}", self.socket.display()))?;
+        stream.set_read_timeout(Some(CALL_TIMEOUT))?;
+        stream.set_write_timeout(Some(CALL_TIMEOUT))?;
 
-        let mut encoded = serde_json::to_vec(&request)
-            .map_err(|error| HelperCallError::before_send(error.into()))?;
+        let mut encoded = serde_json::to_vec(&request)?;
         encoded.push(b'\n');
-        stream
-            .write_all(&encoded)
-            .map_err(|error| HelperCallError::after_send(error.into()))?;
-        stream
-            .flush()
-            .map_err(|error| HelperCallError::after_send(error.into()))?;
+        stream.write_all(&encoded)?;
+        stream.flush()?;
 
-        let mut response_line = String::new();
-        BufReader::new(stream)
-            .read_line(&mut response_line)
-            .map_err(|error| HelperCallError::after_send(error.into()))?;
-        if response_line.len() > 256 * 1024 {
-            return Err(HelperCallError::after_send(anyhow!(
-                "helper response exceeded the size limit"
-            )));
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line)?;
+        if line.len() > MAX_RESPONSE_BYTES {
+            anyhow::bail!("The helper reply was too large to trust.");
         }
-        let response: HelperResponse = serde_json::from_str(&response_line)
-            .context("The helper returned invalid JSON")
-            .map_err(HelperCallError::after_send)?;
+        let response: HelperResponse =
+            serde_json::from_str(&line).context("The helper returned invalid JSON.")?;
         if response.protocol != HELPER_PROTOCOL_VERSION {
-            return Err(HelperCallError::ambiguous_response(
-                anyhow!(
-                    "helper response protocol {} did not match expected protocol {}",
-                    response.protocol,
-                    HELPER_PROTOCOL_VERSION
-                ),
-                response.status,
-            ));
+            anyhow::bail!(
+                "The helper speaks protocol {} and rucksack speaks {HELPER_PROTOCOL_VERSION}. Reinstall the helper.",
+                response.protocol
+            );
         }
         if response.request_id != request.request_id {
-            return Err(HelperCallError::ambiguous_response(
-                anyhow!("helper response request_id did not match"),
-                response.status,
-            ));
+            anyhow::bail!("The helper answered a different request.");
         }
         if !response.ok {
-            return Err(HelperCallError::response_error(
-                anyhow!(
-                    "{}",
-                    response
-                        .error
-                        .unwrap_or_else(|| "helper operation failed".to_owned())
-                ),
-                response.status,
-            ));
+            anyhow::bail!(
+                "{}",
+                response
+                    .error
+                    .unwrap_or_else(|| "The helper refused the request.".to_owned())
+            );
         }
         Ok(response.status)
     }
@@ -248,13 +125,11 @@ impl HelperClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rucksack_core::protocol::{HelperOperation, HelperRequest, HelperResponse};
-    use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
     use std::thread;
     use tempfile::tempdir;
 
-    fn inactive_status() -> HelperStatus {
+    fn status() -> HelperStatus {
         HelperStatus {
             active: false,
             lease_id: None,
@@ -269,301 +144,116 @@ mod tests {
         }
     }
 
-    fn active_status(lease_id: Option<Uuid>) -> HelperStatus {
-        HelperStatus {
-            active: true,
-            lease_id,
-            owner_uid: Some(501),
-            created_at: None,
-            expires_at: None,
-            hard_expires_at: None,
-            previous_sleep_disabled: Some(0),
-            sleep_disabled: Some(1),
-            reason: None,
-            last_reasserted_at: None,
+    /// Stand up a fake helper that answers one request with whatever `reply` builds.
+    fn fake_helper(
+        reply: impl Fn(&HelperRequest) -> HelperResponse + Send + 'static,
+    ) -> (tempfile::TempDir, PathBuf) {
+        let directory = tempdir().unwrap();
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(&stream).read_line(&mut line).unwrap();
+            let request: HelperRequest = serde_json::from_str(&line).unwrap();
+            let mut encoded = serde_json::to_vec(&reply(&request)).unwrap();
+            encoded.push(b'\n');
+            stream.write_all(&encoded).unwrap();
+            stream.flush().unwrap();
+        });
+        (directory, socket)
+    }
+
+    fn ok_response(request: &HelperRequest) -> HelperResponse {
+        HelperResponse {
+            protocol: HELPER_PROTOCOL_VERSION,
+            request_id: request.request_id,
+            ok: true,
+            error: None,
+            status: Some(status()),
         }
     }
 
     #[test]
-    fn acquire_marks_a_lost_response_as_ambiguous() {
+    fn a_successful_call_returns_the_status() {
+        let (_directory, socket) = fake_helper(ok_response);
+
+        let reported = HelperClient::new(&socket).status().unwrap();
+
+        assert_eq!(reported.map(|status| status.active), Some(false));
+    }
+
+    #[test]
+    fn an_unreachable_helper_says_so() {
         let directory = tempdir().unwrap();
-        let socket = directory.path().join("helper.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let lease_id = Uuid::new_v4();
-        let server = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut request_line = String::new();
-            BufReader::new(stream).read_line(&mut request_line).unwrap();
-            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
-            assert!(matches!(
-                request.operation,
-                HelperOperation::Acquire {
-                    lease_id: requested_lease_id,
-                    ..
-                } if requested_lease_id == lease_id
-            ));
+
+        let error = HelperClient::new(directory.path().join("absent.sock"))
+            .status()
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Could not reach the helper"));
+    }
+
+    #[test]
+    fn a_refusal_surfaces_the_helpers_own_reason() {
+        let (_directory, socket) = fake_helper(|request| HelperResponse {
+            protocol: HELPER_PROTOCOL_VERSION,
+            request_id: request.request_id,
+            ok: false,
+            error: Some("another user owns the lease".to_owned()),
+            status: None,
+        });
+
+        let error = HelperClient::new(&socket).recover().unwrap_err();
+
+        assert!(error.to_string().contains("another user owns the lease"));
+    }
+
+    /// A helper from a different release must never be interpreted.
+    #[test]
+    fn a_protocol_mismatch_is_refused() {
+        let (_directory, socket) = fake_helper(|request| HelperResponse {
+            protocol: HELPER_PROTOCOL_VERSION + 1,
+            request_id: request.request_id,
+            ok: true,
+            error: None,
+            status: Some(status()),
+        });
+
+        let error = HelperClient::new(&socket).status().unwrap_err();
+
+        assert!(error.to_string().contains("Reinstall the helper"));
+    }
+
+    #[test]
+    fn a_reply_to_a_different_request_is_refused() {
+        let (_directory, socket) = fake_helper(|_| HelperResponse {
+            protocol: HELPER_PROTOCOL_VERSION,
+            request_id: Uuid::new_v4(),
+            ok: true,
+            error: None,
+            status: Some(status()),
+        });
+
+        let error = HelperClient::new(&socket).status().unwrap_err();
+
+        assert!(error.to_string().contains("different request"));
+    }
+
+    #[test]
+    fn acquire_insists_on_a_status() {
+        let (_directory, socket) = fake_helper(|request| HelperResponse {
+            protocol: HELPER_PROTOCOL_VERSION,
+            request_id: request.request_id,
+            ok: true,
+            error: None,
+            status: None,
         });
 
         let error = HelperClient::new(&socket)
-            .acquire(
-                lease_id,
-                60,
-                Utc::now() + chrono::Duration::minutes(5),
-                "test",
-            )
+            .acquire(Uuid::new_v4(), 90, Utc::now(), "test")
             .unwrap_err();
 
-        assert!(error.acquire_needs_cleanup(lease_id));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn acquire_rejection_with_an_inactive_status_needs_no_cleanup() {
-        let directory = tempdir().unwrap();
-        let socket = directory.path().join("helper.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let lease_id = Uuid::new_v4();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request_line = String::new();
-            BufReader::new(stream.try_clone().unwrap())
-                .read_line(&mut request_line)
-                .unwrap();
-            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
-            let response = HelperResponse::failure(
-                request.request_id,
-                "acquire rejected",
-                Some(inactive_status()),
-            );
-            let mut bytes = serde_json::to_vec(&response).unwrap();
-            bytes.push(b'\n');
-            stream.write_all(&bytes).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let error = HelperClient::new(&socket)
-            .acquire(
-                lease_id,
-                60,
-                Utc::now() + chrono::Duration::minutes(5),
-                "test",
-            )
-            .unwrap_err();
-
-        assert!(!error.acquire_needs_cleanup(lease_id));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn acquire_rejection_without_status_needs_cleanup() {
-        let directory = tempdir().unwrap();
-        let socket = directory.path().join("helper.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let lease_id = Uuid::new_v4();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request_line = String::new();
-            BufReader::new(stream.try_clone().unwrap())
-                .read_line(&mut request_line)
-                .unwrap();
-            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
-            let response = HelperResponse::failure(request.request_id, "acquire rejected", None);
-            let mut bytes = serde_json::to_vec(&response).unwrap();
-            bytes.push(b'\n');
-            stream.write_all(&bytes).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let error = HelperClient::new(&socket)
-            .acquire(
-                lease_id,
-                60,
-                Utc::now() + chrono::Duration::minutes(5),
-                "test",
-            )
-            .unwrap_err();
-
-        assert!(error.acquire_needs_cleanup(lease_id));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn processed_acquire_rejection_only_skips_cleanup_for_authoritative_status() {
-        let candidate_lease = Uuid::new_v4();
-        let other_lease = Uuid::new_v4();
-
-        assert!(!HelperCallError::response_error(
-            anyhow!("acquire rejected"),
-            Some(inactive_status())
-        )
-        .acquire_needs_cleanup(candidate_lease));
-        assert!(!HelperCallError::response_error(
-            anyhow!("acquire rejected"),
-            Some(active_status(Some(other_lease))),
-        )
-        .acquire_needs_cleanup(candidate_lease));
-        assert!(HelperCallError::response_error(
-            anyhow!("acquire rejected"),
-            Some(active_status(Some(candidate_lease))),
-        )
-        .acquire_needs_cleanup(candidate_lease));
-        assert!(HelperCallError::response_error(
-            anyhow!("acquire rejected"),
-            Some(active_status(None)),
-        )
-        .acquire_needs_cleanup(candidate_lease));
-    }
-
-    #[test]
-    fn acquire_success_without_status_needs_cleanup() {
-        let directory = tempdir().unwrap();
-        let socket = directory.path().join("helper.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let lease_id = Uuid::new_v4();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request_line = String::new();
-            BufReader::new(stream.try_clone().unwrap())
-                .read_line(&mut request_line)
-                .unwrap();
-            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
-            let response = HelperResponse::success(request.request_id, None);
-            let mut bytes = serde_json::to_vec(&response).unwrap();
-            bytes.push(b'\n');
-            stream.write_all(&bytes).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let error = HelperClient::new(&socket)
-            .acquire(
-                lease_id,
-                60,
-                Utc::now() + chrono::Duration::minutes(5),
-                "test",
-            )
-            .unwrap_err();
-
-        assert!(error.acquire_needs_cleanup(lease_id));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn acquire_rejects_a_mismatched_protocol_and_preserves_its_status() {
-        let directory = tempdir().unwrap();
-        let socket = directory.path().join("helper.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let lease_id = Uuid::new_v4();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request_line = String::new();
-            BufReader::new(stream.try_clone().unwrap())
-                .read_line(&mut request_line)
-                .unwrap();
-            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
-            let mut response = HelperResponse::failure(
-                request.request_id,
-                "acquire rejected",
-                Some(inactive_status()),
-            );
-            response.protocol = HELPER_PROTOCOL_VERSION + 1;
-            let mut bytes = serde_json::to_vec(&response).unwrap();
-            bytes.push(b'\n');
-            stream.write_all(&bytes).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let error = HelperClient::new(&socket)
-            .acquire(
-                lease_id,
-                60,
-                Utc::now() + chrono::Duration::minutes(5),
-                "test",
-            )
-            .unwrap_err();
-
-        assert!(error.acquire_needs_cleanup(lease_id));
-        assert_eq!(
-            error
-                .response_status
-                .as_ref()
-                .and_then(|status| status.sleep_disabled),
-            Some(0)
-        );
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn acquire_marks_a_connection_failure_as_not_sent() {
-        let directory = tempdir().unwrap();
-        let lease_id = Uuid::new_v4();
-        let error = HelperClient::new(directory.path().join("missing.sock"))
-            .acquire(
-                lease_id,
-                60,
-                Utc::now() + chrono::Duration::minutes(5),
-                "test",
-            )
-            .unwrap_err();
-
-        assert!(!error.acquire_needs_cleanup(lease_id));
-    }
-
-    #[test]
-    fn release_accepts_an_authoritative_already_inactive_status() {
-        let directory = tempdir().unwrap();
-        let socket = directory.path().join("helper.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let lease_id = Uuid::new_v4();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request_line = String::new();
-            BufReader::new(stream.try_clone().unwrap())
-                .read_line(&mut request_line)
-                .unwrap();
-            let request: HelperRequest = serde_json::from_str(&request_line).unwrap();
-            assert!(matches!(
-                request.operation,
-                HelperOperation::Release {
-                    lease_id: requested_lease_id,
-                    ..
-                } if requested_lease_id == lease_id
-            ));
-            let response = HelperResponse::failure(
-                request.request_id,
-                "no active lease",
-                Some(inactive_status()),
-            );
-            let mut bytes = serde_json::to_vec(&response).unwrap();
-            bytes.push(b'\n');
-            stream.write_all(&bytes).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let status = HelperClient::new(&socket)
-            .release(lease_id, "hard timeout reached")
-            .unwrap();
-
-        assert!(!status.active);
-        assert_eq!(status.sleep_disabled, Some(0));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn completed_release_requires_authoritative_normal_sleep_proof() {
-        let confirmed =
-            HelperCallError::response_error(anyhow!("no active lease"), Some(inactive_status()));
-        assert!(confirmed.completed_release_status().is_some());
-
-        let mut unsafe_status = inactive_status();
-        unsafe_status.sleep_disabled = Some(1);
-        let unsafe_release =
-            HelperCallError::response_error(anyhow!("no active lease"), Some(unsafe_status));
-        assert!(unsafe_release.completed_release_status().is_none());
-
-        let ambiguous = HelperCallError::ambiguous_response(
-            anyhow!("helper response protocol did not match"),
-            Some(inactive_status()),
-        );
-        assert!(ambiguous.completed_release_status().is_none());
+        assert!(error.to_string().contains("reported no status"));
     }
 }

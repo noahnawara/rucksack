@@ -13,7 +13,7 @@ Status: implemented and deployed at
 - primary action: `copy setup prompt`
 - verified state: `packed`
 
-[docs/UX.md](../../docs/UX.md) is the canonical language contract. the public site,
+the strings in `crates/rucksack-cli/src/flow.rs` are the language contract. the public site,
 README, repository metadata, and CLI summary reuse this vocabulary.
 
 ## audience and job
@@ -53,18 +53,18 @@ grid:
 
 ```text
 cloud      clone → configure → add secrets
-rucksack   pack → connect hotspot → go
+rucksack   rucksack pack → go
 ```
 
 ### 3. packed proof
 
-`packed means you can leave.` names the four mandatory states:
+`packed means you can leave.` names the four gates `pack` actually enforces. every row must be
+one of them; nothing aspirational belongs in this list.
 
-- power — running on battery
-- route — phone hotspot has internet
-- agent — current task observed
-- phone — access confirmed by you
-- sleep — closed-lid lease active and bounded
+- network — your hotspot actually reaches the internet
+- battery — enough charge to be worth leaving
+- heat — not already throttling
+- sleep — held for 24 hours, or until 15% battery
 
 the section also states the safety boundary: permissions stay unchanged and rucksack
 never relays repository code.

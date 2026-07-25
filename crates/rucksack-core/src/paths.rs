@@ -1,22 +1,17 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
+/// Everywhere rucksack keeps state, on this Mac.
 #[derive(Debug, Clone)]
 pub struct AppPaths {
     pub home: PathBuf,
     pub data_dir: PathBuf,
     pub config_file: PathBuf,
     pub session_file: PathBuf,
-    pub report_file: PathBuf,
-    pub policy_file: PathBuf,
-    pub adapter_manifest_file: PathBuf,
     pub log_dir: PathBuf,
     pub daemon_log: PathBuf,
-    pub codex_hooks: PathBuf,
     pub codex_skill: PathBuf,
-    pub claude_settings: PathBuf,
     pub claude_skill: PathBuf,
-    pub cursor_hooks: PathBuf,
 }
 
 impl AppPaths {
@@ -29,29 +24,28 @@ impl AppPaths {
         let log_dir = log_directory(&home, &base, dirs::data_local_dir());
 
         Ok(Self {
-            home: home.clone(),
-            data_dir: base.clone(),
             config_file: base.join("config.toml"),
             session_file: base.join("session.json"),
-            report_file: base.join("last-report.json"),
-            policy_file: base.join("active-policy.json"),
-            adapter_manifest_file: base.join("adapters.json"),
-            log_dir: log_dir.clone(),
             daemon_log: log_dir.join("daemon.log"),
-            codex_hooks: home.join(".codex/hooks.json"),
-            codex_skill: home.join(".agents/skills/commute-mode/SKILL.md"),
-            claude_settings: home.join(".claude/settings.json"),
-            claude_skill: home.join(".claude/skills/commute-mode/SKILL.md"),
-            cursor_hooks: home.join(".cursor/hooks.json"),
+            codex_skill: home.join(".agents/skills/rucksack/SKILL.md"),
+            claude_skill: home.join(".claude/skills/rucksack/SKILL.md"),
+            home,
+            data_dir: base,
+            log_dir,
         })
     }
 
+    /// Serialises `pack` and `unpack` against each other.
     pub fn terminal_lock_file(&self) -> PathBuf {
         self.session_file.with_extension("terminal.lock")
     }
 
-    pub fn remote_onboarding_file(&self) -> PathBuf {
-        self.data_dir.join("remote-onboarding.json")
+    pub fn legacy_codex_skill(&self) -> PathBuf {
+        self.home.join(".agents/skills/commute-mode/SKILL.md")
+    }
+
+    pub fn legacy_claude_skill(&self) -> PathBuf {
+        self.home.join(".claude/skills/commute-mode/SKILL.md")
     }
 }
 
@@ -62,8 +56,7 @@ fn log_directory(
 ) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
-        let _ = data_dir;
-        let _ = data_local_dir;
+        let _ = (data_dir, data_local_dir);
         home.join("Library/Logs/Rucksack")
     }
     #[cfg(not(target_os = "macos"))]

@@ -6,7 +6,6 @@ basic workflow, and the safety model.
 ## Use rucksack
 
 - [Install from source](../INSTALL.md)
-- [CLI flow and copy](UX.md)
 - [Codex, Claude Code, and Cursor adapters](ADAPTERS.md)
 - [Validation status](../VALIDATION.md)
 
@@ -20,7 +19,6 @@ basic workflow, and the safety model.
 ## Product and project
 
 - [Product decisions](PRODUCT.md)
-- [User stories](USER_STORIES.md)
 - [Roadmap](ROADMAP.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Open-source support](../SUPPORT.md)
