@@ -61,10 +61,10 @@ rucksack   rucksack pack → go
 `packed means you can leave.` names the four gates `pack` actually enforces. every row must be
 one of them; nothing aspirational belongs in this list.
 
-- network — your hotspot actually reaches the internet
+- network — hotspot reaches the internet
 - battery — enough charge to be worth leaving
 - heat — not already throttling
-- sleep — held for 24 hours, or until 15% battery
+- sleep — closed-lid lease active and bounded
 
 the section also states the safety boundary: permissions stay unchanged and rucksack
 never relays repository code.

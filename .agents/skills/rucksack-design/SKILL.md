@@ -122,7 +122,7 @@ Test at the first frame, a middle frame, and the settled frame. Compare element 
 - Lead with the outcome: `packed means you can leave.`
 - Prefer short concrete clauses: `rucksack pack → go`.
 - Use contrast sparingly to clarify a decision: `don’t move the project. move yourself.`
-- Name measured facts, not abstractions: `your hotspot actually reaches the internet`. Every fact
+- Name measured facts, not abstractions: `hotspot reaches the internet`. Every fact
   in an evidence list must be a gate the CLI enforces; aspirational rows are drift.
 - Keep flavor subordinate to instruction.
 - Do not invent product capabilities, safety guarantees, or privacy claims. Check `docs/PRODUCT.md`.
