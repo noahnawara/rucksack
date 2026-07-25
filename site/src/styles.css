@@ -8,7 +8,6 @@
   text-rendering: optimizeLegibility;
 
   --night: #080a07;
-  --field: #10150d;
   --pass: #151a12;
   --ink: #f4f5eb;
   --muted: #a9b09f;
@@ -16,6 +15,7 @@
   --acid-soft: #e0ff82;
   --acid-ink: #0a0d08;
   --line: #3c4535;
+  --chapter-line: rgb(60 69 53 / 58%);
   --error: #ff9f80;
   --gutter: clamp(1.1rem, 4vw, 3.5rem);
   --shell: 70rem;
@@ -172,32 +172,9 @@ svg {
 }
 
 .hero {
-  position: relative;
-  isolation: isolate;
   display: grid;
   gap: 2.4rem;
-  padding-block: 1.65rem 2.2rem;
-}
-
-.hero::before,
-.setup-contrast::before {
-  position: absolute;
-  z-index: -1;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 100vw;
-  content: "";
-  pointer-events: none;
-  transform: translateX(-50%);
-}
-
-.hero::before {
-  background: radial-gradient(
-    26rem 22rem at 72% 56%,
-    rgb(206 255 57 / 8%),
-    transparent 72%
-  );
+  padding-block: 1.65rem 7rem;
 }
 
 .intro {
@@ -232,7 +209,6 @@ h1 {
   width: min(100%, 21.5rem);
   min-width: 0;
   justify-self: center;
-  perspective: 70rem;
 }
 
 .pass {
@@ -253,7 +229,7 @@ h1 {
 }
 
 .pass-stage.is-running .pass {
-  animation: issue-pass 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: focus-pass 480ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .pass-head {
@@ -310,8 +286,7 @@ h1 {
 }
 
 .pass-stage.is-running .pass-body::after {
-  animation: verify-handoff 1450ms 520ms cubic-bezier(0.65, 0, 0.35, 1)
-    both;
+  animation: verify-handoff 1450ms 520ms cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 .route {
@@ -504,26 +479,10 @@ h1 {
 }
 
 .setup-contrast {
-  position: relative;
-  isolation: isolate;
   display: grid;
   gap: 2.4rem;
-  padding-block: 5.5rem 7rem;
-}
-
-.setup-contrast::before {
-  background:
-    radial-gradient(
-      26rem 24rem at 78% 70%,
-      rgb(206 255 57 / 9%),
-      transparent 72%
-    ),
-    linear-gradient(
-      180deg,
-      rgb(8 10 7 / 0%) 0%,
-      #0b0e09 58%,
-      var(--field) 100%
-    );
+  border-block-start: 1px solid var(--chapter-line);
+  padding-block: 9rem 10.5rem;
 }
 
 .setup-copy {
@@ -604,13 +563,14 @@ h1 {
 }
 
 .handoff-proof {
-  background: var(--field);
+  background: var(--night);
 }
 
 .handoff-proof-inner {
   display: grid;
   gap: 3.75rem;
-  padding-block: 6rem;
+  border-block-start: 1px solid var(--chapter-line);
+  padding-block: 10rem;
 }
 
 .proof-copy {
@@ -707,7 +667,7 @@ h1 {
 }
 
 .site-footer {
-  background: linear-gradient(180deg, var(--field) 0%, #131810 100%);
+  background: var(--night);
 }
 
 .site-footer-inner {
@@ -716,6 +676,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 2rem;
+  border-block-start: 1px solid var(--chapter-line);
 }
 
 .footer-wordmark {
@@ -747,40 +708,21 @@ h1 {
   color: var(--ink);
 }
 
-@keyframes issue-pass {
+@keyframes focus-pass {
   from {
-    opacity: 0.2;
-    transform: translate3d(0, 1.8rem, 0) rotateX(-5deg);
-    clip-path: polygon(
-      0 0.7rem,
-      0.7rem 0,
-      52% 0,
-      52% 0.7rem,
-      52% calc(100% - 0.7rem),
-      52% 100%,
-      0.7rem 100%,
-      0 calc(100% - 0.7rem)
-    );
+    opacity: 0.8;
+    filter: blur(1.5px) saturate(0.8);
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) rotateX(0);
-    clip-path: polygon(
-      0 0.7rem,
-      0.7rem 0,
-      calc(100% - 0.7rem) 0,
-      100% 0.7rem,
-      100% calc(100% - 0.7rem),
-      calc(100% - 0.7rem) 100%,
-      0.7rem 100%,
-      0 calc(100% - 0.7rem)
-    );
+    filter: blur(0) saturate(1);
   }
 }
 
 @keyframes verify-handoff {
-  0% {
+  0%,
+  100% {
     opacity: 0;
     transform: translateY(-2px);
   }
@@ -793,11 +735,6 @@ h1 {
   50% {
     opacity: 0.8;
     transform: translateY(13.5rem);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(-2px);
   }
 }
 
@@ -820,29 +757,6 @@ h1 {
 }
 
 @media (min-width: 60rem) {
-  .hero::before {
-    background: radial-gradient(
-      42rem 32rem at 76% 48%,
-      rgb(206 255 57 / 8%),
-      transparent 72%
-    );
-  }
-
-  .setup-contrast::before {
-    background:
-      radial-gradient(
-        50rem 36rem at 72% 66%,
-        rgb(206 255 57 / 10%),
-        transparent 72%
-      ),
-      linear-gradient(
-        180deg,
-        rgb(8 10 7 / 0%) 0%,
-        #0b0e09 58%,
-        var(--field) 100%
-      );
-  }
-
   .site-header {
     min-height: 4.75rem;
   }
@@ -857,7 +771,7 @@ h1 {
   .hero {
     min-height: calc(100svh - 4.75rem);
     align-items: center;
-    padding-block: 2.2rem 4.5rem;
+    padding-block: 2.2rem 8rem;
   }
 
   .pass-stage {
@@ -899,7 +813,7 @@ h1 {
 
   .setup-contrast {
     align-items: end;
-    padding-block: 9rem 11rem;
+    padding-block: 13rem 14.5rem;
   }
 
   .setup-copy h2 {
@@ -912,7 +826,7 @@ h1 {
 
   .handoff-proof-inner {
     align-items: start;
-    padding-block: 9rem;
+    padding-block: 13.5rem;
   }
 
   .proof-copy h2 {
