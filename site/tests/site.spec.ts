@@ -95,12 +95,19 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
       name: "packed means you can leave.",
     }),
   ).toBeVisible();
-  await expect(page.getByText("phone hotspot has internet")).toBeVisible();
-  await expect(page.getByText("current task observed")).toBeVisible();
-  await expect(page.getByText("access confirmed by you")).toBeVisible();
+  // Every row here must be a gate `pack` actually enforces. Two rows once claimed an observed
+  // agent task and a phone confirmation, neither of which the CLI has ever done since the lease
+  // became host-scoped, so this list is the place that drift shows up first.
+  await expect(page.getByText("hotspot reaches the internet")).toBeVisible();
+  await expect(
+    page.getByText("enough charge to be worth leaving"),
+  ).toBeVisible();
+  await expect(page.getByText("not already throttling")).toBeVisible();
   await expect(
     page.getByText("closed-lid lease active and bounded"),
   ).toBeVisible();
+  await expect(page.getByText("current task observed")).toHaveCount(0);
+  await expect(page.getByText("access confirmed by you")).toHaveCount(0);
   await expect(
     page.getByText(
       "permissions stay unchanged. provider-native remotes carry the conversation; rucksack has no code relay.",

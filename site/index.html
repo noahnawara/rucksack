@@ -296,29 +296,25 @@
             <span class="section-label">before you close the lid</span>
             <h2 id="proof-title">packed means you can leave.</h2>
             <p>
-              rucksack checks the MacBook after it leaves power and joins the
-              phone hotspot. it reads the real battery, internet, agent
-              handoff, and closed-lid lease state before it says packed.
+              rucksack reads the real battery, heat, hotspot internet, and
+              closed-lid lease state before it says packed. a working
+              connection is not enough: the network you are leaving works too.
             </p>
           </div>
 
           <div class="proof-details">
             <ol class="proof-list" aria-label="rucksack handoff checks">
               <li>
-                <span>power</span>
-                <strong>running on battery</strong>
+                <span>network</span>
+                <strong>hotspot reaches the internet</strong>
               </li>
               <li>
-                <span>route</span>
-                <strong>phone hotspot has internet</strong>
+                <span>battery</span>
+                <strong>enough charge to be worth leaving</strong>
               </li>
               <li>
-                <span>agent</span>
-                <strong>current task observed</strong>
-              </li>
-              <li>
-                <span>phone</span>
-                <strong>access confirmed by you</strong>
+                <span>heat</span>
+                <strong>not already throttling</strong>
               </li>
               <li>
                 <span>sleep</span>
@@ -346,8 +342,8 @@
           <span class="section-label">closed lid, bounded</span>
           <h2 id="answers-title">what happens when the lid closes.</h2>
           <p>
-            rucksack checks the power, network, and agent state before the
-            same local AI coding agent leaves your desk.
+            rucksack checks the power and the network before the same local AI
+            coding agent leaves your desk.
           </p>
         </div>
 
@@ -369,11 +365,12 @@
               <code>caffeinate</code> only holds off idle sleep. it has no
               effect on the forced sleep that closing the lid on battery
               triggers, so your hotspot still drops. rucksack’s narrow helper
-              uses <code>pmset disablesleep</code> for a bounded lease, then
-              verifies hotspot internet and the phone-facing agent session
-              before it reports packed. an active <code>caffeinate</code> or
-              Amphetamine assertion blocks readiness, because two owners of the
-              sleep setting make cleanup ambiguous. rucksack leaves them alone.
+              uses <code>pmset disablesleep</code> for a bounded lease, and
+              verifies the hotspot really reaches the internet before it
+              reports packed. if something already holds
+              <code>disablesleep</code> — Amphetamine’s closed-display mode,
+              say — rucksack refuses to start, because that value is the
+              baseline it has to hand back. it leaves whatever holds it alone.
             </dd>
           </div>
           <div class="answer">
@@ -396,9 +393,10 @@
           <div class="answer">
             <dt>can I control Codex, Claude Code, or Cursor from my phone?</dt>
             <dd>
-              rucksack guides each provider’s own Remote Control path. setup
-              differs by provider, your existing permission settings stay in
-              place, and rucksack does not relay your code.
+              yes, through each provider’s own Remote Control. rucksack starts
+              Codex’s in the background and prints a pairing code on request;
+              the others you turn on yourself. it changes none of your
+              permission settings and does not relay your code.
             </dd>
           </div>
         </dl>
