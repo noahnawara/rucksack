@@ -1,4 +1,3 @@
-import "@fontsource-variable/dm-sans/wght.css";
 import "@fontsource-variable/doto/wght.css";
 import { inject } from "@vercel/analytics";
 import { injectSpeedInsights } from "@vercel/speed-insights";

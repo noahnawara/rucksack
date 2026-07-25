@@ -9,8 +9,34 @@ const promptPath = fileURLToPath(
   new URL("../src/content/install-agent-prompt.txt", import.meta.url),
 );
 
+type TextLineBounds = {
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+};
+
 const readCanonicalPrompt = async (): Promise<string> =>
   readFile(promptPath, "utf8");
+
+const measureTextLines = (
+  element: HTMLElement,
+): readonly TextLineBounds[] => {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+
+  return Array.from(
+    range.getClientRects(),
+    (bounds: DOMRect): TextLineBounds => {
+      return {
+        height: bounds.height,
+        width: bounds.width,
+        x: bounds.x,
+        y: bounds.y,
+      };
+    },
+  );
+};
 
 test.beforeEach(async ({ page }): Promise<void> => {
   await page.route(
@@ -377,6 +403,143 @@ test("shows the final pass state without motion when reduced motion is requested
   expect(runningAnimations).toBe(0);
 });
 
+test("keeps the hero glyphs fixed when the display font arrives late", async ({
+  page,
+}): Promise<void> => {
+  const displayFont = '700 3rem "DM Sans Variable"';
+  const fontGate = Promise.withResolvers<void>();
+  const fontRequestStarted = Promise.withResolvers<void>();
+
+  await page.route(
+    "**/*dm-sans-latin-wght-normal*.woff2*",
+    async (route): Promise<void> => {
+      fontRequestStarted.resolve();
+      await fontGate.promise;
+      await route.continue();
+    },
+  );
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/", { waitUntil: "commit" });
+
+  const headline = page.locator("#headline");
+  await headline.waitFor({ state: "attached" });
+  await fontRequestStarted.promise;
+  await page.waitForTimeout(250);
+  const beforeFonts = await headline.evaluate(measureTextLines);
+
+  fontGate.resolve();
+  await page.evaluate(async (font: string): Promise<void> => {
+    await document.fonts.load(font);
+    await document.fonts.ready;
+    await new Promise<void>((resolve: () => void): void => {
+      requestAnimationFrame((): void => {
+        requestAnimationFrame((): void => resolve());
+      });
+    });
+  }, displayFont);
+  const afterFonts = await headline.evaluate(measureTextLines);
+
+  expect(afterFonts).toEqual(beforeFonts);
+});
+
+test("brings the complete pass into focus without spatial movement", async ({
+  page,
+}): Promise<void> => {
+  await page.goto("/");
+  await expect(page.locator("#pass-stage")).toHaveClass(/is-running/);
+
+  const focus = await page.locator(".pass").evaluate(
+    (element: HTMLElement): {
+      readonly bounds: readonly {
+        readonly height: number;
+        readonly width: number;
+        readonly x: number;
+        readonly y: number;
+      }[];
+      readonly duration: number;
+      readonly filters: readonly string[];
+      readonly opacities: readonly string[];
+      readonly spatialProperties: readonly string[];
+    } => {
+      element.classList.remove("pass-reveal");
+      void element.offsetWidth;
+      element.classList.add("pass-reveal");
+
+      const animation = element
+        .getAnimations()
+        .find(
+          (candidate: Animation): boolean =>
+            candidate instanceof CSSAnimation &&
+            candidate.animationName === "focus-pass",
+        );
+      if (!(animation?.effect instanceof KeyframeEffect)) {
+        throw new Error("The commute-pass focus animation is missing");
+      }
+
+      const timing = animation.effect.getComputedTiming();
+      if (typeof timing.duration !== "number") {
+        throw new TypeError("The commute-pass focus duration is not numeric");
+      }
+
+      animation.pause();
+      const bounds = [0, 120, timing.duration].map(
+        (
+          currentTime: number,
+        ): {
+          readonly height: number;
+          readonly width: number;
+          readonly x: number;
+          readonly y: number;
+        } => {
+          animation.currentTime = currentTime;
+          const rect = element.getBoundingClientRect();
+          return {
+            height: rect.height,
+            width: rect.width,
+            x: rect.x,
+            y: rect.y,
+          };
+        },
+      );
+      const keyframes = animation.effect.getKeyframes();
+      animation.finish();
+
+      return {
+        bounds,
+        duration: timing.duration,
+        filters: keyframes.flatMap(
+          (keyframe: ComputedKeyframe): readonly string[] =>
+            typeof keyframe.filter === "string" ? [keyframe.filter] : [],
+        ),
+        opacities: keyframes.flatMap(
+          (keyframe: ComputedKeyframe): readonly string[] =>
+            typeof keyframe.opacity === "string" ? [keyframe.opacity] : [],
+        ),
+        spatialProperties: keyframes
+          .flatMap((keyframe: ComputedKeyframe): readonly string[] =>
+            [
+              typeof keyframe.transform === "string" ? "transform" : "",
+              typeof keyframe.clipPath === "string" ? "clip-path" : "",
+            ].filter((property: string): boolean => property !== ""),
+          )
+          .sort(),
+      };
+    },
+  );
+
+  expect(focus.duration).toBe(620);
+  expect(focus.filters).toEqual([
+    "blur(6px) saturate(0.7)",
+    "blur(0px) saturate(1)",
+  ]);
+  expect(focus.opacities).toEqual(["0.62", "1"]);
+  expect(focus.spatialProperties).toEqual([]);
+  expect(focus.bounds[1]).toEqual(focus.bounds[0]);
+  expect(focus.bounds[2]).toEqual(focus.bounds[0]);
+  await expect(page.locator(".pass")).toHaveCSS("filter", "none");
+});
+
 test("scans the complete pass down and back up", async ({
   page,
 }): Promise<void> => {
@@ -385,9 +548,18 @@ test("scans the complete pass down and back up", async ({
 
   const scan = await page.locator(".pass-body").evaluate(
     (element: HTMLElement): {
+      readonly delay: number;
       readonly duration: number;
       readonly transforms: readonly string[];
     } => {
+      const stage = element.closest<HTMLElement>(".pass-stage");
+      if (stage === null) {
+        throw new Error("The commute-pass stage is missing");
+      }
+      stage.classList.remove("is-running");
+      void stage.offsetWidth;
+      stage.classList.add("is-running");
+
       const animation = element
         .getAnimations({ subtree: true })
         .find(
@@ -400,11 +572,17 @@ test("scans the complete pass down and back up", async ({
       }
 
       const timing = animation.effect.getComputedTiming();
-      if (typeof timing.duration !== "number") {
-        throw new TypeError("The commute-pass scan duration is not numeric");
+      if (
+        typeof timing.delay !== "number" ||
+        typeof timing.duration !== "number"
+      ) {
+        throw new TypeError(
+          "The commute-pass scan delay or duration is not numeric",
+        );
       }
 
       return {
+        delay: timing.delay,
         duration: timing.duration,
         transforms: animation.effect
           .getKeyframes()
@@ -417,6 +595,7 @@ test("scans the complete pass down and back up", async ({
     },
   );
 
+  expect(scan.delay).toBe(520);
   expect(scan.duration).toBe(1450);
   expect(scan.transforms).toEqual([
     "translateY(-2px)",
