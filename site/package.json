@@ -2,7 +2,7 @@
   "name": "rucksack-site",
   "private": true,
   "version": "0.1.0",
-  "description": "Verified MacBook commute handoff for local AI coding agents.",
+  "description": "Verified MacBook hotspot handoff for local AI coding agents.",
   "homepage": "https://www.rucksack.wtf/",
   "repository": {
     "type": "git",
@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
+    "social-card": "npm run build && node scripts/build-social-card.mjs",
     "test:e2e": "playwright test",
     "test": "npm run build && npm run test:e2e"
   },

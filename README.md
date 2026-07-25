@@ -1,8 +1,12 @@
 # rucksack
 
-`rucksack` checks that your Mac can stay awake and online after you unplug, switch to a
-phone connection, and close the lid. You continue the same local Codex, Claude Code, or
-Cursor session from your phone.
+Close your laptop and keep your agent running.
+
+`rucksack` is a macOS command-line tool for leaving your desk while a local coding agent is
+still working. It moves your Mac onto your phone hotspot, verifies the handoff, and holds a
+bounded lease that keeps the Mac awake with the lid closed. You keep steering the same
+Codex, Claude Code, or Cursor session from your phone. Switching to the hotspot is one
+step, where moving the work to a cloud agent means standing up a fresh environment.
 
 [Website](https://www.rucksack.wtf/) · [Install](INSTALL.md) · [Security](SECURITY.md)
 
@@ -27,24 +31,74 @@ Codex, Claude Code, or Cursor carries the remote conversation. The `rucksack` CL
 helper have no backend. Their network checks contain no code, prompts, or command output.
 The agent's permission, approval, and sandbox settings stay as you configured them.
 
+## Why caffeinate is not enough
+
+A `caffeinate` assertion prevents *idle* sleep. Closing the lid on battery is a *forced*
+sleep condition evaluated by closed-display policy, so the assertion does not cover it.
+`caffeinate` is useful defense-in-depth while the lid is open; it is not the closed-lid
+primitive.
+
+The setting that does cover it is `SleepDisabled`, and it is global, persistent, and
+root-only. Nothing releases it when a process exits, so leaving it on is how a Mac ends up
+permanently unable to sleep. rucksack takes that stronger setting and gives it the thing
+`caffeinate` had for free: an owner, and an end.
+
+rucksack does not run, wrap, or extend `caffeinate`. An active `caffeinate` or Amphetamine
+assertion blocks readiness, because two owners of the sleep setting make cleanup ambiguous.
+rucksack never stops or modifies them.
+
+## The network half
+
+Two things end a session when you walk away, not one. The Mac sleeps, and the default route
+changes. Keeping the Mac awake solves the first and leaves the second, which is why a
+session can survive the lid and still die at the door.
+
+So `pack` treats the route as a precondition, not an afterthought. It confirms the hotspot
+network, checks the default route and real internet reachability, re-asserts after you
+unplug, and re-checks the provider endpoint before it reports `packed`. The watcher keeps
+comparing the live route against the pinned one for the rest of the session.
+
 ## How it works
 
-The Rust workspace has a CLI, shared core, and a small root-owned helper. A normal
-`caffeinate` assertion does not cover lid-close sleep on battery, so the helper runs the
-fixed command `/usr/bin/pmset -a disablesleep 0|1`.
+The Rust workspace has a CLI, shared core, and a small root-owned helper. The helper runs
+one fixed command, `/usr/bin/pmset -a disablesleep 0|1`, and cannot run anything else. It
+refuses to acquire unless normal sleep is the verified baseline, saves that baseline before
+changing it, and verifies the result afterward.
 
-The helper accepts lease operations over a Unix socket. It cannot run arbitrary commands.
-An unprivileged watcher renews the lease while it checks battery level, thermal pressure,
-the default route, internet access, and the session deadline. If the watcher dies or a
-safety check fails, the helper restores normal sleep.
+The helper accepts lease operations over a Unix socket. An unprivileged watcher renews the
+lease while it checks battery level, thermal pressure, the default route, internet access,
+and the session deadline. The watcher cannot change the sleep setting itself. If it dies or
+a safety check fails, the helper restores normal sleep.
 
 The agent adapters use each tool's hooks, skills, or rules to add the temporary commute
 instruction.
 
-## Build and try it
+## How rucksack compares
 
-A development build needs macOS, Xcode Command Line Tools, Rust 1.86 or newer, and
-administrator access for the helper. Release packaging targets macOS 14 and newer.
+Running `sudo pmset -a disablesleep 1` by hand sets the same value, with no saved baseline,
+no expiry, and no release when the battery or the temperature says stop. It survives a
+crash and a reboot as a machine that no longer sleeps.
+
+Keep-awake apps such as Amphetamine and KeepingYouAwake hold the setting for as long as you
+leave them on. They are the right tool when you are staying. rucksack is the one you run
+when you are leaving: it is a command, it is bounded, and it checks the network and the
+agent as well as the power state.
+
+Cloud agents and remote dev environments solve a different problem. A cloud run starts from
+a clean checkout, while rucksack keeps the session that already has your working tree, your
+uncommitted changes, your local environment, and your permission and sandbox settings.
+
+Provider remotes carry the phone-side conversation: Claude Code's remote control and the
+Codex and Cursor equivalents. rucksack exists to keep them reachable, since they have
+nothing to talk to once the Mac is asleep or off the network.
+
+See [prior art](docs/PRIOR_ART.md) for related projects.
+
+## Install
+
+There is no signed package yet, so you build from source. A development build needs macOS,
+Xcode Command Line Tools, Rust 1.86 or newer, and administrator access for the helper.
+Release packaging targets macOS 14 and newer.
 
 ```sh
 cargo build --workspace --locked
@@ -74,8 +128,10 @@ short grace period. In each case, `rucksack` restores normal sleep.
 
 - [Installation](INSTALL.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Power and hotspot behavior](docs/POWER.md)
 - [Agent support](docs/ADAPTERS.md)
 - [Security policy](SECURITY.md) and [threat model](docs/THREAT_MODEL.md)
+- [Prior art and attribution](docs/PRIOR_ART.md)
 - [Documentation index](docs/README.md)
 - [Contributing](CONTRIBUTING.md)
 

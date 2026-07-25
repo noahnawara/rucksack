@@ -60,7 +60,7 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "switch to your hotspot. keep your agent running.",
+      name: "close your laptop. keep your agent running.",
     }),
   ).toBeVisible();
   await expect(
@@ -77,13 +77,10 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
     page.getByRole("img", { name: "office wifi to phone hotspot" }),
   ).toBeVisible();
   await expect(
-    page.getByText("seamless commute", { exact: true }),
+    page.getByText("handoff verified", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText(
-      "close the lid. keep steering from your phone.",
-      { exact: true },
-    ),
+    page.getByText("lock the Mac, close it, and go.", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", {
@@ -122,6 +119,17 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   ).toBeVisible();
   await expect(
     page.getByText("why doesn’t caffeinate fix it?", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "will Claude Code keep running if I close my laptop?",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText("why not just run the agent in the cloud?", {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     page.getByText(
@@ -538,7 +546,7 @@ test("shows the final pass state without motion when reduced motion is requested
   await expect(page.locator("#pass-stage")).not.toHaveClass(/is-running/);
   await expect(page.locator(".pass-state")).toHaveText("packed");
   await expect(
-    page.getByText("seamless commute", { exact: true }),
+    page.getByText("handoff verified", { exact: true }),
   ).toBeVisible();
 
   const runningAnimations = await page.evaluate(
@@ -762,7 +770,7 @@ test("keeps the page and prompt readable without JavaScript", async ({
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "switch to your hotspot. keep your agent running.",
+      name: "close your laptop. keep your agent running.",
     }),
   ).toBeVisible();
   await expect(page.locator("#install-prompt")).not.toBeEmpty();

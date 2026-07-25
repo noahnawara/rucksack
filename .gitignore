@@ -5,6 +5,8 @@
 *.pid
 *.sock
 .env
+.env.local
+/site/.env*
 .idea/
 .vscode/
 /site/node_modules/
