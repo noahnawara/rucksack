@@ -58,9 +58,4 @@ echo "macOS will request administrator authentication once to install the power 
 
 echo
 echo "rucksack is installed."
-if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-    echo "Starting the guided agent and hotspot setup."
-    /usr/local/bin/rucksack setup </dev/tty
-else
-    echo "Run 'rucksack setup' in an interactive terminal to finish onboarding."
-fi
+echo "Run 'rucksack pack' when you walk out. There is no setup step."

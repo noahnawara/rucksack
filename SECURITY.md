@@ -22,7 +22,7 @@ The helper accepts only typed operations:
 - re-assert the existing lease;
 - release lease;
 - read status;
-- recover.
+- recover an untracked lease owned by the caller.
 
 It never accepts a path to execute, shell source, an environment map, or arbitrary
 arguments. It invokes one fixed command shape:
@@ -31,12 +31,19 @@ arguments. It invokes one fixed command shape:
 /usr/bin/pmset -a disablesleep 0|1
 ```
 
-The socket uses peer credentials. Release helpers also validate the live client process
-with Security.framework against the exact CLI identifier, Developer ID Application
-certificate chain, and compiled Apple Team ID. Renew, re-assert, release, and recovery of
-an active lease are restricted to its owner UID or root; lease-specific operations also
-require the matching lease ID. Renewal cannot extend the persisted session deadline.
-Production packages must be code signed and notarized.
+The socket is owned root:admin with mode 0660, and every caller is identified by peer UID
+through `getpeereid`. Renew, re-assert, release, and recovery of an active lease are
+restricted to its owner UID or root; lease-specific operations also require the matching
+lease ID. Renewal cannot extend the persisted session deadline.
+
+A helper built with `RUCKSACK_TEAM_ID` — which is how the notarized package is built — also
+validates the calling process with Security.framework against the exact CLI identifier, the
+Developer ID Application certificate chain, and that Team ID. A helper built from source has
+no Team ID and therefore authenticates by peer UID alone. That is deliberate: it is what
+makes a source build usable, and it means any process in the admin group on the machine can
+drive the helper. The authority that grants is the authority to switch one `pmset` setting —
+the same authority as running `sudo pmset -a disablesleep` — and it is bounded by the lease
+TTL and the non-renewable session deadline.
 
 Code-signature validation establishes executable identity, not user intent. A process
 running as the lease owner can still invoke the legitimate signed CLI, so normal same-user

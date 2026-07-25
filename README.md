@@ -10,26 +10,57 @@ step, where moving the work to a cloud agent means standing up a fresh environme
 
 [Website](https://www.rucksack.wtf/) · [Install](INSTALL.md) · [Security](SECURITY.md)
 
-> Source-only alpha. CI passes, and short Codex/hotspot desk tests have passed. There is no
-> signed package yet, and all three agent adapters are experimental.
+> Source-only alpha. CI passes, and short hotspot desk tests have passed. There is no signed
+> package yet, and closed-lid behaviour in a bag is not yet verified.
 
 ## What it does
 
-Run `rucksack setup` once to install the helper, add the agent adapters, and save your
-connection. When you need to leave, `rucksack pack`:
+There is no setup command. The first `pack` installs the power helper and remembers the
+network it ended up on.
 
-1. Checks the live agent session and walks you through its phone remote.
-2. Guides the switch to a Wi-Fi hotspot or iPhone USB.
-3. Waits for you to unplug, then checks battery power, the network route, internet access,
-   and the agent again.
-4. Keeps the Mac awake under a timed lease and watches the connection, battery, and thermal
-   state.
-5. Adds a temporary commute instruction to the agent, then removes it when the session
-   ends.
+```text
+$ rucksack pack
 
-Codex, Claude Code, or Cursor carries the remote conversation. The `rucksack` CLI and
-helper have no backend. Their network checks contain no code, prompts, or command output.
-The agent's permission, approval, and sandbox settings stay as you configured them.
+Connecting to Noah…
+Joined.
+Awake for 24 hours, or until the battery hits 15%. Ends 09:14 tomorrow.
+Packed. Close the lid and go.
+```
+
+If macOS cannot join the hotspot itself — the normal case for Apple Instant Hotspot —
+rucksack opens Wi-Fi settings, says what to pick, and waits:
+
+```text
+Choose “Noah” in Wi-Fi. Waiting…
+```
+
+It then carries on by itself. There is nothing to confirm and nothing to re-run.
+
+The lease belongs to the **Mac**, not to one conversation. Closing the lid affects every
+process, so every running task benefits, and a task finishing does not end the lease.
+
+rucksack does not change how your agents behave. It writes no instructions, prompts, or
+policy into them, and installs no hooks; your permission, approval, and sandbox settings
+stay exactly as you configured them. It installs one thing: a `rucksack` skill for Codex and
+Claude Code, so "pack my Mac" works as a sentence in a conversation. Codex, Claude Code, or
+Cursor carries the remote conversation. The CLI and helper have no backend.
+
+When you are back at a desk, `rucksack unpack` restores normal sleep. It is also the recovery
+path, and works from any state.
+
+## The whole command surface
+
+```text
+rucksack pack     switch to your hotspot and hold this Mac awake
+rucksack status   is it still packed?
+rucksack unpack   let this Mac sleep again
+rucksack pair     print a Codex Remote Control pairing code
+rucksack star     star this project on GitHub
+rucksack helper   install or remove the power helper
+```
+
+`pack` takes `--for 90m` to shorten the session, `--hotspot "Name"` to name the network,
+`--usb` for iPhone USB tethering, and `--here` when you are already on the network you want.
 
 ## Why caffeinate is not enough
 
@@ -43,9 +74,9 @@ root-only. Nothing releases it when a process exits, so leaving it on is how a M
 permanently unable to sleep. rucksack takes that stronger setting and gives it the thing
 `caffeinate` had for free: an owner, and an end.
 
-rucksack does not run, wrap, or extend `caffeinate`. An active `caffeinate` or Amphetamine
-assertion blocks readiness, because two owners of the sleep setting make cleanup ambiguous.
-rucksack never stops or modifies them.
+rucksack does not run, wrap, or extend `caffeinate`. It refuses to start when `SleepDisabled`
+is already on, because that value is the baseline it has to hand back, and two owners make
+cleanup ambiguous. rucksack never stops or modifies whatever holds it.
 
 ## The network half
 
@@ -53,10 +84,16 @@ Two things end a session when you walk away, not one. The Mac sleeps, and the de
 changes. Keeping the Mac awake solves the first and leaves the second, which is why a
 session can survive the lid and still die at the door.
 
-So `pack` treats the route as a precondition, not an afterthought. It confirms the hotspot
-network, checks the default route and real internet reachability, re-asserts after you
-unplug, and re-checks the provider endpoint before it reports `packed`. The watcher keeps
-comparing the live route against the pinned one for the rest of the session.
+So `pack` treats the route as a precondition, not an afterthought — and "the internet works"
+is not the test, because the office network you are walking away from also works. rucksack
+accepts a network only once it can show the Mac has actually moved onto the commute one: by
+its name, by an iPhone hotspot gateway, by the default route visibly leaving where it
+started, or because you said so with `--here`. Then it checks that the route really reaches
+the internet, requiring Apple's own captive-network success page so a hotel portal cannot
+pass.
+
+Losing that network later does **not** end the session. A tunnel is exactly when your work
+most needs to stay alive, so an outage is reported by `status` and nothing else.
 
 ## How it works
 
@@ -66,12 +103,9 @@ refuses to acquire unless normal sleep is the verified baseline, saves that base
 changing it, and verifies the result afterward.
 
 The helper accepts lease operations over a Unix socket. An unprivileged watcher renews the
-lease while it checks battery level, thermal pressure, the default route, internet access,
-and the session deadline. The watcher cannot change the sleep setting itself. If it dies or
-a safety check fails, the helper restores normal sleep.
-
-The agent adapters use each tool's hooks, skills, or rules to add the temporary commute
-instruction.
+lease while it checks battery level, thermal pressure, and the session deadline. The watcher
+cannot change the sleep setting itself. If it dies, the lease expires on its own and the
+helper restores normal sleep.
 
 ## How rucksack compares
 
@@ -81,8 +115,8 @@ crash and a reboot as a machine that no longer sleeps.
 
 Keep-awake apps such as Amphetamine and KeepingYouAwake hold the setting for as long as you
 leave them on. They are the right tool when you are staying. rucksack is the one you run
-when you are leaving: it is a command, it is bounded, and it checks the network and the
-agent as well as the power state.
+when you are leaving: it is a command, it is bounded, and it checks the network as well as
+the power state.
 
 Cloud agents and remote dev environments solve a different problem. A cloud run starts from
 a clean checkout, while rucksack keeps the session that already has your working tree, your
@@ -102,36 +136,40 @@ Release packaging targets macOS 14 and newer.
 
 ```sh
 cargo build --workspace --locked
-./target/debug/rucksack setup
-./target/debug/rucksack doctor
-./target/debug/rucksack pack
 ./target/debug/rucksack status
+./target/debug/rucksack pack
 ./target/debug/rucksack unpack
 ```
 
-Use `./target/debug/rucksack recover` if a session was interrupted. Read the
-[installation guide](INSTALL.md) before installing the helper.
+The first `pack` installs the helper, which is where macOS asks for your password. Read the
+[installation guide](INSTALL.md) first. `scripts/e2e.sh` exercises the whole flow against
+real leases and always restores normal sleep.
 
 ## Safety
 
 A closed Mac running builds or other heavy work can get hot. Test your workload on a
 ventilated desk before carrying it.
 
-The lease ends when you unpack, its deadline arrives, the watcher stops heartbeating, the
-battery reaches its floor, macOS reports serious thermal pressure or CPU throttling, or a
-strict hotspot route is replaced. A long network outage also ends the session after a
-short grace period. In each case, `rucksack` restores normal sleep.
+The lease ends for host-level reasons only:
 
-`pack` can end early and let the Mac sleep. That is the safe failure mode.
+- you run `unpack`
+- the time limit arrives
+- the battery reaches its floor (15% by default)
+- macOS reports serious thermal pressure or actual throttling
+- the battery gauge cannot be read three times in a row while on battery
+- the helper stops answering, and its own TTL restores sleep
+
+In each case, `rucksack` restores normal sleep. An agent finishing its task does not end the
+session, and neither does losing the network.
+
+If `pack` cannot finish, it rolls back and lets the Mac sleep. That is the safe failure mode.
 
 ## Documentation
 
 - [Installation](INSTALL.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Power and hotspot behavior](docs/POWER.md)
 - [Agent support](docs/ADAPTERS.md)
 - [Security policy](SECURITY.md) and [threat model](docs/THREAT_MODEL.md)
-- [Prior art and attribution](docs/PRIOR_ART.md)
 - [Documentation index](docs/README.md)
 - [Contributing](CONTRIBUTING.md)
 

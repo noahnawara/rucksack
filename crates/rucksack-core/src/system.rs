@@ -34,6 +34,19 @@ impl CommandResult {
     }
 }
 
+/// Turn a non-zero exit into an error that names the command and what it said.
+pub fn require_success(name: &str, result: &CommandResult) -> Result<()> {
+    if result.success() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "{name} failed with exit code {}: {}",
+            result.code,
+            result.combined_trimmed()
+        ))
+    }
+}
+
 pub fn run(path: impl AsRef<Path>, args: &[&str]) -> Result<CommandResult> {
     let path = path.as_ref();
     let mut command = Command::new(path);
@@ -333,10 +346,6 @@ pub fn current_uid() -> u32 {
     {
         0
     }
-}
-
-pub fn is_macos() -> bool {
-    cfg!(target_os = "macos")
 }
 
 #[cfg(test)]

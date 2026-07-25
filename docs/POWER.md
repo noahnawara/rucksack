@@ -20,9 +20,9 @@ The network loss is downstream of sleep.
 
 ## Why `caffeinate` is not enough
 
-Power assertions prevent idle sleep. Closing a laptop lid is a forced sleep condition.
-`caffeinate` is useful defense-in-depth while the lid is open, but it is not the
-closed-lid primitive.
+Power assertions prevent idle sleep. Closing a laptop lid is a forced sleep condition, so
+`caffeinate` is not the closed-lid primitive. rucksack does not use it, and takes no power
+assertion of its own.
 
 ## What Amphetamine Power Protect actually does
 
@@ -42,8 +42,7 @@ rucksack adopts the mechanism but changes the lifecycle:
 - root-owned lease;
 - heartbeat expiry;
 - power-source reassertion;
-- battery/thermal release;
-- explicit post-unplug validation.
+- battery/thermal release.
 
 ## Why rucksack does not fake AC
 
@@ -62,38 +61,34 @@ Attempting to spoof AC would be the wrong abstraction for four reasons:
 
 rucksack changes only the sleep decision it needs to change.
 
-## Required handoff order
+## What `pack` does
 
-The product should enforce this order:
+In order, from `pack_inner` in `crates/rucksack-cli/src/flow.rs`:
 
-1. Keep the lid open.
-2. Start or verify the agent remote.
-3. Connect the hotspot.
-4. Verify the SSID when available. With the explicit redacted-SSID exception, require
-   either successful exact join-request evidence or interactive Wi-Fi-menu confirmation.
-5. Verify a default route and real internet.
-6. Acquire the closed-lid lease.
-7. Remove external power while the lid is still open.
-8. Observe battery power.
-9. Re-assert `SleepDisabled`.
-10. Re-check the route, internet, and provider endpoint.
-11. Start heartbeat/safety monitoring.
-12. Say “Packed.”
-13. User locks and closes the Mac.
+1. Refuse if rucksack already holds a lease.
+2. Refuse if `SleepDisabled` is already 1.
+3. Read the battery: refuse at or below the sleep floor, warn at or below the warning
+   threshold. A gauge that reports nothing is silence, not a refusal.
+4. Read thermal pressure: refuse only on actual throttling. An unreported level is silence.
+5. Install the power helper if it is absent. This is the one macOS password prompt.
+6. Reach a commute network.
+7. Remember that network as the hotspot if none was saved yet.
+8. Acquire the helper lease.
+9. Start Codex Remote Control as a fire-and-forget child. Failure warns; only
+   `--require-remote` makes it fatal.
+10. Write the session state, spawn the watcher, and wait for its first heartbeat.
+11. Install the rucksack skill, best-effort and never fatal.
+12. Print how long the Mac stays awake, then “Packed. Close the lid and go.”
 
-Unplugging with the lid open is a deliberate race-elimination strategy. The power-change
-observer still exists for later transitions, but the product does not depend on winning a
-sub-second race against sleep for its primary path.
+If any step after the lease fails, `pack` rolls back: it stops the watcher, releases the
+lease, and clears the session state.
 
-For a configured hotspot or USB tether, rucksack persists the verified route interface and
-gateway. A different live SSID, interface, or gateway means the commute route was replaced
-and releases the lease immediately. A missing route may be a transient mobile outage, so it
-uses the configured reconnect grace before release.
+There is no unplug step. Packing while plugged in is allowed, and a later unplug is handled
+by the helper's own power-source observer.
 
-rucksack also inspects active `pmset` assertion owners before starting. Amphetamine and
-`caffeinate` are never stopped or modified, but an active assertion from either utility
-blocks readiness because it would make sleep ownership and cleanup results ambiguous.
-Users do not need another keep-awake utility while rucksack owns its time-limited lease.
+rucksack refuses to start when `SleepDisabled` is already 1, because the recorded baseline
+is what the helper restores on release. Whatever already switched sleep off — Amphetamine's
+closed-display mode, an earlier crash — leaves rucksack no unambiguous state to hand back.
 
 ## Lease invariants
 
@@ -113,13 +108,14 @@ last_reasserted_at
 Invariants:
 
 - only one global lease exists;
-- acquisition requires `previous_sleep_disabled=0` and refuses another owner;
+- acquisition requires `previous_sleep_disabled=0` and refuses while a lease is held;
 - the owner or root can renew, re-assert, release, or recover an active lease;
-- renewable expiry cannot cross `hard_expires_at`;
-- expiry restores `previous_sleep_disabled=0`;
+- renewable expiry cannot cross `hard_expires_at`, which is capped at 24 hours;
+- either deadline elapsing restores `previous_sleep_disabled`;
 - helper restart restores stale state before accepting a new lease;
-- `SleepDisabled=1` with no valid lease is an error;
-- a failed restore leaves recovery state intact and retries.
+- persisted state the helper cannot parse or validate restores `SleepDisabled=0` and is
+  deleted;
+- a restore that fails marks the lease expired so the watchdog retries it.
 
 Heartbeat freshness is represented by the renewable `expires_at`; it is not a separate
 persisted timestamp.
@@ -129,38 +125,48 @@ persisted timestamp.
 The macOS helper uses `IOPSNotificationCreateRunLoopSource` to receive power-source
 changes. On each event while a lease is active:
 
-1. immediately re-apply `pmset -a disablesleep 1`;
-2. verify `pmset -g`;
-3. re-check after a short debounce;
-4. record success or release on repeated failure.
+1. re-apply `pmset -a disablesleep 1` immediately;
+2. re-apply it again after a 250 ms debounce;
+3. verify the setting with `pmset -g`.
 
-A one-second polling fallback is acceptable for diagnostics, not for the primary safety
-claim.
+If any of that fails, the helper restores the recorded baseline: a helper that cannot prove
+the override is active fails safe to ordinary sleep.
+
+A separate watchdog thread ticks every five seconds. It releases the lease once either
+deadline has elapsed, and re-asserts `SleepDisabled` whenever the setting is no longer 1.
+
+## Why a lease ends
+
+A held lease ends for six reasons and no others: `rucksack unpack`, the session's time
+limit, the battery floor, serious or critical thermal pressure or reported throttling, three
+consecutive failed battery reads while on battery, and the helper heartbeat failing — after
+which the helper's own TTL restores sleep. Losing the network is not one of them, and
+neither is an agent finishing its work.
 
 ## Battery
 
 Defaults:
 
-- minimum to start: 35%;
 - warning: 20%;
 - sleep release: 15%.
 
-At the floor, rucksack restores normal sleep. It does not attempt to finish “one last
-build.”
+There is no minimum battery level to start; `pack` refuses only at or below the release
+floor, because such a Mac would sleep the moment the lid closed. At the floor the watcher
+restores normal sleep. It does not attempt to finish “one last build.”
 
 ## Thermal pressure
 
-The current unprivileged daemon parses bounded `pmset -g therm` output as a conservative
-signal. A later field beta should read public `ProcessInfo.thermalState` from the
-unprivileged process through Rust/Objective-C FFI; thermal sampling does not belong in the
-root helper.
+The unprivileged watcher parses bounded `pmset -g therm` output as a conservative signal.
 
-Default behavior:
+Behavior:
 
 - nominal: continue;
 - fair without throttling: continue;
 - serious or critical: release the lease;
 - any reported CPU speed or scheduler throttling: release the lease.
+
+An unreported thermal level is not a release reason: macOS declining to say anything is
+silence, not heat.
 
 High CPU utilization alone is not a thermal signal. rucksack allows task-required work and
 uses macOS thermal pressure and throttling telemetry as the stop condition.
@@ -169,9 +175,9 @@ uses macOS thermal pressure and throttling telemetry as the stop condition.
 
 rucksack allows the display to sleep. It does not use a display-awake assertion.
 
-The user should lock the Mac before closing it. rucksack does not synthesize the lock
-keyboard shortcut because that would require accessibility automation and creates another
-privileged surface.
+rucksack does not lock the screen either. Synthesizing the lock shortcut would require
+accessibility automation and another privileged surface, so locking before the lid closes
+is left to the user.
 
 ## Real external power
 

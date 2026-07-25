@@ -15,15 +15,13 @@ before installing it, and use only the
 - an administrator account for the helper installation
 - Codex, Claude Code, or Cursor with its own remote-control feature
 
-The agent adapters are experimental. Current hardware testing covers short Codex/hotspot
-desk runs on one Apple silicon Mac. See [VALIDATION.md](VALIDATION.md) for the open release
-checks.
+Hardware testing so far covers desk runs on one Apple silicon Mac. See
+[VALIDATION.md](VALIDATION.md) for the open release checks.
 
 ## Build from source
 
-Clone the repository into a directory you plan to keep. Adapter hooks store the absolute
-path to the development binary, so a temporary checkout will break them later. Check out
-the tag or commit you intend to test before recording its hash and building.
+Clone the repository into a directory you plan to keep. Check out the tag or commit you
+intend to test before recording its hash and building.
 
 ```sh
 git clone https://github.com/noahnawara/rucksack.git
@@ -39,27 +37,33 @@ target/debug/rucksack
 target/debug/rucksack-helper
 ```
 
-Run setup from that checkout:
+There is no setup command. `rucksack pack` installs the power helper the first time it runs,
+which is when macOS asks for administrator authorization.
+
+To get that prompt out of the way now instead:
 
 ```sh
-./target/debug/rucksack setup
+./target/debug/rucksack helper install
 ```
 
-Setup asks for administrator authorization when it installs the development helper. It
-also detects supported agents, installs reversible adapters, and saves the hotspot or
-iPhone USB choice.
+The first successful `pack` also remembers the network it ended up on, and installs a `rucksack`
+skill for Codex and Claude Code so "pack my Mac" works inside a conversation. To name the network
+yourself:
+
+```sh
+./target/debug/rucksack pack --hotspot "My iPhone"
+```
 
 ## Check the installation
 
 ```sh
 ./target/debug/rucksack --version
 ./target/debug/rucksack helper status
-./target/debug/rucksack adapters status
-./target/debug/rucksack doctor
+./target/debug/rucksack status
 ```
 
-Use `doctor` as the installation check. Do not run `pack` just to test the install; it
-starts a real closed-lid sleep lease.
+Those three are read-only. Do not run `pack` just to test the install: it joins your hotspot, does
+not put the previous network back, and takes a real closed-lid lease.
 
 ## Use it
 
@@ -69,18 +73,15 @@ starts a real closed-lid sleep lease.
 ./target/debug/rucksack unpack
 ```
 
-If a session was interrupted, restore normal sleep with:
-
-```sh
-./target/debug/rucksack recover
-```
+`unpack` is also the recovery path. It restores normal sleep from any state, including an
+interrupted session or state rucksack can no longer read.
 
 ## Remove a development install
 
-End or recover any active session first. Then remove the adapters and helper:
+Run `unpack` first, then remove the helper:
 
 ```sh
-./target/debug/rucksack adapters remove
+./target/debug/rucksack unpack
 ./target/debug/rucksack helper uninstall
 ```
 

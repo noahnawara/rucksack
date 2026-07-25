@@ -5,21 +5,22 @@
 Implemented in source:
 
 - Rust workspace and typed helper protocol;
-- one-time development helper install;
-- `pack`, `status`, `unpack`, `report`, `doctor`, `recover`;
-- hotspot/unplug handshake;
+- `pack`, `status`, `unpack`, `pair`, `star`, and `helper install`/`status`/`uninstall`;
+- helper install on the first `pack` that needs it, so macOS authenticates once;
+- arrival on a commute network proven by the saved network name, the default route leaving
+  its baseline interface or gateway, the 172.20.10.1 iOS Personal Hotspot gateway, a join
+  macOS confirmed, or `--here` — and in every case an internet probe on that route;
+- waiting for as long as it takes when macOS cannot join, ticking every 30 seconds, with
+  no abort and no re-run;
+- a host-scoped lease that survives later network loss;
 - battery floor and thermal signal;
-- Codex, Claude Code, and Cursor adapter installers;
-- provider-scoped onboarding for pairing, native trust, and baseline phone visibility;
-- temporary policy and hook telemetry;
-- waiting/input/approval lifecycle state;
 - a 24-hour default hard deadline with shorter sessions available through `--for`;
-- machine-readable JSON progress;
-- private completed-session reports with aggregate commute-interface data estimates;
-- strict hotspot/USB route identity with reconnect grace for temporary loss;
-- macOS/Linux CI and parser/merge tests;
-- release-gated universal packaging, signing/notarization workflow, and signed-client
-  helper authorization;
+- `unpack` restoring normal sleep from any state, including session state it cannot parse;
+- one marker-guarded skill file for Codex and Claude Code;
+- macOS and Linux CI with parser and state tests;
+- release-gated universal packaging and a signing/notarization workflow, with helper
+  authorization that verifies the caller's Apple code signature only when the helper was
+  built with a team id, and authenticates by peer UID alone otherwise;
 - stable `rucksack-universal.pkg` assets and checksum-verifying installer script.
 
 Release gate:
@@ -36,10 +37,6 @@ Release gate:
 - public `ProcessInfo.thermalState` FFI;
 - IOKit battery data instead of command parsing;
 - provider/version capability detection;
-- commute-aware orchestration: keep useful independent work parallel, but give every
-  agent, monitor, preview server, and poll loop an owner, purpose, stop condition, and
-  cleanup path; prefer event-driven waits and cached watcher evidence, and terminate work
-  promptly when it completes or becomes irrelevant;
 - optional explicitly configured return Wi-Fi for `unpack`; never guess from the user's
   preferred-network list;
 - Homebrew cask after the first signed release;
@@ -52,13 +49,11 @@ Exit criteria:
 - explicit list of supported macOS and agent versions;
 - no P0/P1 security findings from helper review.
 
-## 0.3 — excellent native adapters
+## 0.3 — better agent status
 
 - Codex App Server status integration;
 - Claude session URL/status extraction where stable;
-- Cursor machine-readable Remote Control integration if published;
-- per-agent test fixtures and compatibility matrix;
-- adapter health self-test.
+- per-agent test fixtures and a compatibility matrix.
 
 ## 0.4 — companion status
 
@@ -78,8 +73,7 @@ transcripts.
 - deterministic rollback;
 - full threat-model review;
 - localization-ready CLI copy;
-- accessibility-tested terminal output;
-- documented API for third-party agent adapters.
+- accessibility-tested terminal output.
 
 ## Later — execution handoff
 

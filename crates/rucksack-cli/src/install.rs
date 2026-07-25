@@ -1,9 +1,10 @@
 use crate::helper_client::HelperClient;
+use crate::output::Output;
 use anyhow::{anyhow, Context, Result};
-use rucksack_core::system::run_owned;
+use rucksack_core::system::run;
 use std::fs::OpenOptions;
 use std::io;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
@@ -15,51 +16,32 @@ const HELPER_LOG: &str = "/var/log/rucksack-helper.log";
 const HELPER_STATE_DIRECTORY: &str = "/var/db/rucksack";
 const HELPER_PLIST: &str = include_str!("../../../assets/launchd/io.rucksack.helper.plist");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HelperInstallationState {
-    Absent,
-    Complete,
-    Partial,
-}
-
-pub fn install_helper() -> Result<()> {
+/// Install the root helper, repairing whatever state it is in.
+///
+/// Reinstalling is safe from any state: `/usr/bin/install` overwrites unconditionally,
+/// bootout/bootstrap/kickstart resets launchd, and a fresh helper verifies the sleep baseline
+/// before it serves. So the only refusal left is a reachable helper that is holding a lease —
+/// replacing that one would leave a Mac that cannot sleep.
+pub fn install_helper(output: &Output) -> Result<()> {
     if !cfg!(target_os = "macos") {
-        anyhow::bail!("The rucksack helper is supported only on macOS");
-    }
-    if !cfg!(debug_assertions) {
-        anyhow::bail!(
-            "Release builds install the signed helper through the notarized rucksack package. Reinstall the package from a tagged GitHub release."
-        );
-    }
-
-    if helper_installation_state() == HelperInstallationState::Partial {
-        anyhow::bail!(
-            "A partial helper installation exists. Refusing to overwrite it without a signed package repair."
-        );
+        anyhow::bail!("The rucksack helper is supported only on macOS.");
     }
 
     if installed_helper_exists() {
-        let client = HelperClient::default();
-        let status = client.status().context(
-            "An existing helper is installed but unreachable. Refusing to replace it without proving that no closed-lid lease is active. Run `rucksack recover`, then retry.",
-        )?;
-        let status = status.context("The installed helper returned no status")?;
-        if status.active {
-            anyhow::bail!(
-                "A closed-lid lease is active. Run `rucksack unpack` before replacing the helper."
-            );
-        }
-        if status.sleep_disabled != Some(0) {
-            anyhow::bail!(
-                "The installed helper cannot prove normal sleep is restored (SleepDisabled={:?}). Run `rucksack recover` before replacing it.",
-                status.sleep_disabled
-            );
+        if let Ok(Some(status)) = HelperClient::default().status() {
+            if status.active {
+                anyhow::bail!(
+                    "This Mac is already packed.\nRun `rucksack unpack` before replacing the helper."
+                );
+            }
         }
     }
 
-    let cli = std::env::current_exe().context("Could not locate the rucksack executable")?;
+    let cli = std::env::current_exe().context("Could not locate the rucksack executable.")?;
     let helper = sibling_helper(&cli)?;
-    let staged_helper = stage_development_helper(&helper)?;
+    let staged_helper = stage_helper(&helper)?;
+
+    output.step("Installing the power helper. macOS will ask for your password once.");
 
     let mut staged_plist = NamedTempFile::new()?;
     std::io::Write::write_all(&mut staged_plist, HELPER_PLIST.as_bytes())?;
@@ -122,7 +104,7 @@ pub fn install_helper() -> Result<()> {
 
     let client = HelperClient::default();
     for _ in 0..20 {
-        if client.is_available() {
+        if client.status().is_ok() {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(150));
@@ -133,14 +115,8 @@ pub fn install_helper() -> Result<()> {
 }
 
 pub fn uninstall_helper() -> Result<()> {
-    match helper_installation_state() {
-        HelperInstallationState::Absent => return Ok(()),
-        HelperInstallationState::Complete => {}
-        HelperInstallationState::Partial => {
-            anyhow::bail!(
-                "A partial helper installation exists. Reinstall the signed package before uninstalling so rucksack can prove the sleep baseline is restored."
-            )
-        }
+    if !any_helper_file_exists() {
+        return Ok(());
     }
 
     let client = HelperClient::default();
@@ -181,49 +157,34 @@ fn sibling_helper(cli: &Path) -> Result<PathBuf> {
     Ok(directory.join("rucksack-helper"))
 }
 
-fn stage_development_helper(helper: &Path) -> Result<NamedTempFile> {
+/// Copy the helper somewhere root can install it from.
+///
+/// `O_NOFOLLOW` keeps a symlink from redirecting what gets installed as root.
+fn stage_helper(helper: &Path) -> Result<NamedTempFile> {
     let mut source = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
         .open(helper)
         .with_context(|| {
             format!(
-                "Could not open {} as a regular file. Build rucksack-helper next to the debug CLI before installation.",
+                "Could not open {}. Build rucksack-helper next to the rucksack binary first.",
                 helper.display()
             )
         })?;
-    let metadata = source.metadata().with_context(|| {
-        format!(
-            "Could not inspect the opened development helper {}",
-            helper.display()
-        )
-    })?;
-    if !metadata.is_file() {
-        anyhow::bail!(
-            "Refusing development helper source that is not a regular file: {}",
-            helper.display()
-        );
-    }
-    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o022 != 0 {
-        anyhow::bail!(
-            "Refusing a development helper that is not owned by the current user or is writable by its group or other users: {}",
-            helper.display()
-        );
-    }
 
-    let mut staged = NamedTempFile::new().context("Could not stage the development helper")?;
+    let mut staged = NamedTempFile::new().context("Could not stage the helper.")?;
     io::copy(&mut source, &mut staged)
         .with_context(|| format!("Could not stage {}", helper.display()))?;
     staged
         .as_file()
         .sync_all()
-        .context("Could not sync the staged development helper")?;
+        .context("Could not sync the staged helper.")?;
     Ok(staged)
 }
 
 fn bootout_helper_if_loaded() -> Result<()> {
     let target = format!("system/{HELPER_LABEL}");
-    let result = run_owned("/bin/launchctl", &["print".to_owned(), target.clone()])?;
+    let result = run("/bin/launchctl", &["print", &target])?;
     if !result.success() {
         return Ok(());
     }
@@ -231,11 +192,7 @@ fn bootout_helper_if_loaded() -> Result<()> {
 }
 
 fn sudo(args: &[&str]) -> Result<()> {
-    let owned = args
-        .iter()
-        .map(|value| (*value).to_owned())
-        .collect::<Vec<_>>();
-    let result = run_owned("/usr/bin/sudo", &owned)?;
+    let result = run("/usr/bin/sudo", args)?;
     if result.success() {
         Ok(())
     } else {
@@ -248,18 +205,12 @@ fn sudo(args: &[&str]) -> Result<()> {
 }
 
 pub fn installed_helper_exists() -> bool {
-    helper_installation_state() == HelperInstallationState::Complete
+    Path::new(HELPER_DESTINATION).exists() && Path::new(PLIST_DESTINATION).exists()
 }
 
-fn helper_installation_state() -> HelperInstallationState {
-    match (
-        Path::new(HELPER_DESTINATION).exists(),
-        Path::new(PLIST_DESTINATION).exists(),
-    ) {
-        (false, false) => HelperInstallationState::Absent,
-        (true, true) => HelperInstallationState::Complete,
-        _ => HelperInstallationState::Partial,
-    }
+/// True when any part of an installation is present, so a half-removed tree still cleans up.
+fn any_helper_file_exists() -> bool {
+    Path::new(HELPER_DESTINATION).exists() || Path::new(PLIST_DESTINATION).exists()
 }
 
 #[cfg(test)]
@@ -269,28 +220,27 @@ mod tests {
     use std::os::unix::fs::{symlink, PermissionsExt};
 
     #[test]
-    fn stages_an_opened_private_helper_snapshot() {
+    fn stages_a_snapshot_of_the_helper() {
         let directory = tempfile::tempdir().unwrap();
         let helper = directory.path().join("rucksack-helper");
         fs::write(&helper, b"trusted helper").unwrap();
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
 
-        let staged = stage_development_helper(&helper).unwrap();
+        let staged = stage_helper(&helper).unwrap();
 
         assert_eq!(fs::read(staged.path()).unwrap(), b"trusted helper");
     }
 
+    /// A symlink here would decide what gets installed as root.
     #[test]
-    fn rejects_symlinked_or_other_writable_helper_sources() {
+    fn rejects_a_symlinked_helper_source() {
         let directory = tempfile::tempdir().unwrap();
         let helper = directory.path().join("rucksack-helper");
         fs::write(&helper, b"helper").unwrap();
-        fs::set_permissions(&helper, fs::Permissions::from_mode(0o777)).unwrap();
-        assert!(stage_development_helper(&helper).is_err());
-
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
         let link = directory.path().join("rucksack-helper-link");
         symlink(&helper, &link).unwrap();
-        assert!(stage_development_helper(&link).is_err());
+
+        assert!(stage_helper(&link).is_err());
     }
 }

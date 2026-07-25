@@ -1,6 +1,5 @@
 use crate::files::{atomic_write_toml, read_toml};
 use crate::paths::AppPaths;
-use crate::policy::Focus;
 use crate::protocol::MAX_HELPER_TTL_SECONDS;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -8,64 +7,52 @@ use std::path::Path;
 
 pub const CONFIG_VERSION: u32 = 1;
 
+/// Configuration written by older releases must keep loading.
+///
+/// Every struct here omits `deny_unknown_fields` on purpose: a config file left behind by a
+/// version that still had `focus`, `idle_grace_seconds`, or `require_verified_ssid` loads and
+/// ignores them instead of failing the command the user is trying to run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Config {
     pub version: u32,
-    pub default_agent: Option<crate::agent::AgentKind>,
     pub hotspot: HotspotConfig,
     pub session: SessionConfig,
     pub safety: SafetyConfig,
-    pub adapters: AdapterConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct HotspotConfig {
+    /// The network `pack` joins. Learned from the first successful pack.
     pub ssid: Option<String>,
-    pub require_verified_ssid: bool,
     pub require_iphone_usb: bool,
     pub probe_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct SessionConfig {
     pub duration_minutes: u64,
-    pub focus: Focus,
     pub heartbeat_seconds: u64,
     pub helper_ttl_seconds: u64,
-    pub network_outage_grace_seconds: u64,
-    pub idle_grace_seconds: u64,
-    #[serde(alias = "stop_owned_remote_on_arrive")]
-    pub stop_owned_remote_on_unpack: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct SafetyConfig {
-    pub minimum_start_battery_percent: u8,
     pub warn_battery_percent: u8,
+    /// The watcher restores normal sleep here, so the Mac never runs itself flat.
     pub sleep_battery_percent: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AdapterConfig {
-    pub codex: bool,
-    pub claude: bool,
-    pub cursor: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             version: CONFIG_VERSION,
-            default_agent: None,
             hotspot: HotspotConfig::default(),
             session: SessionConfig::default(),
             safety: SafetyConfig::default(),
-            adapters: AdapterConfig::default(),
         }
     }
 }
@@ -74,7 +61,6 @@ impl Default for HotspotConfig {
     fn default() -> Self {
         Self {
             ssid: None,
-            require_verified_ssid: true,
             require_iphone_usb: false,
             probe_timeout_seconds: 6,
         }
@@ -85,12 +71,8 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             duration_minutes: 24 * 60,
-            focus: Focus::Continue,
             heartbeat_seconds: 30,
             helper_ttl_seconds: 90,
-            network_outage_grace_seconds: 5 * 60,
-            idle_grace_seconds: 15 * 60,
-            stop_owned_remote_on_unpack: false,
         }
     }
 }
@@ -98,19 +80,8 @@ impl Default for SessionConfig {
 impl Default for SafetyConfig {
     fn default() -> Self {
         Self {
-            minimum_start_battery_percent: 35,
             warn_battery_percent: 20,
             sleep_battery_percent: 15,
-        }
-    }
-}
-
-impl Default for AdapterConfig {
-    fn default() -> Self {
-        Self {
-            codex: true,
-            claude: true,
-            cursor: true,
         }
     }
 }
@@ -135,23 +106,15 @@ impl Config {
     pub fn validate(&self) -> std::result::Result<(), String> {
         if self.version != CONFIG_VERSION {
             return Err(format!(
-                "Unsupported config version {}; expected {}",
-                self.version, CONFIG_VERSION
+                "Unsupported config version {}; expected {CONFIG_VERSION}",
+                self.version
             ));
         }
-        let start = self.safety.minimum_start_battery_percent;
-        let warn = self.safety.warn_battery_percent;
-        let floor = self.safety.sleep_battery_percent;
-        if start > 100 || warn > 100 || floor > 100 {
+        if self.safety.warn_battery_percent > 100 || self.safety.sleep_battery_percent > 100 {
             return Err("Battery thresholds must be between 0 and 100".to_owned());
         }
-        if floor >= warn {
+        if self.safety.sleep_battery_percent >= self.safety.warn_battery_percent {
             return Err("sleep_battery_percent must be lower than warn_battery_percent".to_owned());
-        }
-        if warn >= start {
-            return Err(
-                "warn_battery_percent must be lower than minimum_start_battery_percent".to_owned(),
-            );
         }
         if self.hotspot.probe_timeout_seconds == 0 || self.hotspot.probe_timeout_seconds > 30 {
             return Err("probe_timeout_seconds must be between 1 and 30".to_owned());
@@ -163,16 +126,12 @@ impl Config {
             .is_some_and(|ssid| ssid.trim().is_empty() || ssid.chars().any(char::is_control))
         {
             return Err(
-                "hotspot.ssid must contain a non-empty network name without control characters"
+                "hotspot.ssid must be a non-empty network name without control characters"
                     .to_owned(),
             );
         }
-        if self.hotspot.require_iphone_usb
-            && (self.hotspot.require_verified_ssid || self.hotspot.ssid.is_some())
-        {
-            return Err(
-                "require_iphone_usb cannot be combined with a verified Wi-Fi hotspot".to_owned(),
-            );
+        if self.hotspot.require_iphone_usb && self.hotspot.ssid.is_some() {
+            return Err("require_iphone_usb cannot be combined with a Wi-Fi hotspot".to_owned());
         }
         if self.session.heartbeat_seconds == 0 {
             return Err("heartbeat_seconds must be greater than zero".to_owned());
@@ -189,22 +148,6 @@ impl Config {
             .ok_or_else(|| "heartbeat_seconds is too large".to_owned())?;
         if self.session.helper_ttl_seconds < minimum_ttl {
             return Err("helper_ttl_seconds must be at least twice heartbeat_seconds".to_owned());
-        }
-        let minimum_network_grace = self
-            .session
-            .heartbeat_seconds
-            .checked_mul(2)
-            .ok_or_else(|| "heartbeat_seconds is too large".to_owned())?;
-        if self.session.network_outage_grace_seconds < minimum_network_grace
-            || self.session.network_outage_grace_seconds > 15 * 60
-        {
-            return Err(
-                "network_outage_grace_seconds must be at least twice heartbeat_seconds and no more than 900"
-                    .to_owned(),
-            );
-        }
-        if self.session.idle_grace_seconds == 0 || self.session.idle_grace_seconds > 60 * 60 {
-            return Err("idle_grace_seconds must be between 1 and 3600".to_owned());
         }
         if self.session.duration_minutes == 0 || self.session.duration_minutes > 24 * 60 {
             return Err("duration_minutes must be between 1 and 1440".to_owned());
@@ -225,17 +168,49 @@ mod tests {
         assert_eq!(config.session.duration_minutes, 24 * 60);
     }
 
+    /// A config file from any earlier release must not break the command the user just typed.
     #[test]
-    fn legacy_arrive_config_key_loads_and_serializes_as_unpack() {
-        let current = toml::to_string_pretty(&Config::default()).unwrap();
-        let legacy = current.replace("stop_owned_remote_on_unpack", "stop_owned_remote_on_arrive");
+    fn config_written_by_older_releases_still_loads() {
+        let legacy = "version = 1\n\
+             default_agent = \"codex\"\n\
+             \n\
+             [hotspot]\n\
+             ssid = \"Noah\"\n\
+             require_verified_ssid = true\n\
+             probe_timeout_seconds = 6\n\
+             \n\
+             [session]\n\
+             duration_minutes = 1440\n\
+             focus = \"continue\"\n\
+             heartbeat_seconds = 30\n\
+             helper_ttl_seconds = 90\n\
+             idle_grace_seconds = 900\n\
+             network_outage_grace_seconds = 300\n\
+             stop_owned_remote_on_unpack = false\n\
+             \n\
+             [safety]\n\
+             minimum_start_battery_percent = 35\n\
+             warn_battery_percent = 20\n\
+             sleep_battery_percent = 15\n\
+             \n\
+             [adapters]\n\
+             codex = true\n";
 
-        let parsed = toml::from_str::<Config>(&legacy).unwrap();
-        let serialized = toml::to_string_pretty(&parsed).unwrap();
+        let parsed = toml::from_str::<Config>(legacy).unwrap();
 
-        assert!(!parsed.session.stop_owned_remote_on_unpack);
-        assert!(serialized.contains("stop_owned_remote_on_unpack"));
-        assert!(!serialized.contains("stop_owned_remote_on_arrive"));
+        assert!(parsed.validate().is_ok());
+        assert_eq!(parsed.hotspot.ssid.as_deref(), Some("Noah"));
+        assert_eq!(parsed.session.duration_minutes, 1440);
+    }
+
+    #[test]
+    fn rejects_thresholds_that_would_release_before_warning() {
+        let mut config = Config::default();
+        config.safety.sleep_battery_percent = config.safety.warn_battery_percent;
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .contains("sleep_battery_percent"));
     }
 
     #[test]
@@ -253,65 +228,23 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_probe_timeout() {
-        let mut config = Config::default();
-        config.hotspot.probe_timeout_seconds = 0;
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .contains("probe_timeout_seconds"));
-    }
-
-    #[test]
-    fn rejects_empty_hotspots() {
+    fn rejects_hotspots_that_are_empty_or_carry_control_characters() {
         let mut config = Config::default();
         config.hotspot.ssid = Some("  ".to_owned());
         assert!(config.validate().unwrap_err().contains("hotspot.ssid"));
-    }
 
-    #[test]
-    fn rejects_hotspots_with_control_characters() {
-        let mut config = Config::default();
         config.hotspot.ssid = Some("Noah\nforged".to_owned());
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .contains("control characters"));
+        assert!(config.validate().unwrap_err().contains("hotspot.ssid"));
     }
 
     #[test]
     fn rejects_conflicting_wifi_and_usb_requirements() {
         let mut config = Config::default();
         config.hotspot.require_iphone_usb = true;
+        config.hotspot.ssid = Some("Noah".to_owned());
         assert!(config
             .validate()
             .unwrap_err()
             .contains("require_iphone_usb"));
-    }
-
-    #[test]
-    fn rejects_network_grace_shorter_than_two_heartbeats() {
-        let mut config = Config::default();
-        config.session.network_outage_grace_seconds = config.session.heartbeat_seconds * 2 - 1;
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .contains("network_outage_grace_seconds"));
-    }
-
-    #[test]
-    fn rejects_zero_idle_grace() {
-        let mut config = Config::default();
-        config.session.idle_grace_seconds = 0;
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .contains("idle_grace_seconds"));
-    }
-
-    #[test]
-    fn rejects_unknown_configuration_fields() {
-        let error = toml::from_str::<Config>("version = 1\nunknown_setting = true\n").unwrap_err();
-        assert!(error.to_string().contains("unknown field"));
     }
 }

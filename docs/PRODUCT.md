@@ -1,57 +1,66 @@
-# product: rucksack commute mode
+# product: rucksack
 
 ## one-sentence product
 
-rucksack prepares and verifies the move from office wifi to a phone hotspot so a
-developer can keep steering the same local coding agent from a phone.
+rucksack moves this Mac onto a phone hotspot and holds it awake on battery with the lid
+closed, so work that is already running survives the walk to the train.
 
 ## Primary persona
 
 **The commuter developer**
 
 - senior individual contributor, staff engineer, founder, or hands-on engineering lead;
-- works on a MacBook and already uses Codex, Claude Code, or Cursor;
+- works on a MacBook and already uses Codex or Claude Code;
 - has an iPhone or another phone capable of tethering;
 - starts long refactors, migrations, tests, investigations, and review loops locally;
 - often needs to leave within minutes, not after a clean stopping point;
 - is willing to install one transparent helper, but will not babysit power settings;
 - cares more about certainty and safe recovery than about a maximal feature dashboard.
 
-Typical commute: 20–90 minutes. Typical context: an agent has useful momentum, the user has
-limited attention on the move, and the mobile connection may briefly disappear.
+Typical commute: 20–90 minutes. Typical context: the work has useful momentum, the user
+has limited attention on the move, and the mobile connection may briefly disappear.
 
 ## Job to be done
 
-> When I have to leave while a local coding agent is doing useful work, let me pack the
-> laptop and continue steering from my phone, confident that the Mac will remain awake,
-> online, safe, and recoverable.
+> When I have to leave while something useful is still running, let me pack the laptop
+> and walk out, confident that the Mac stays awake on my hotspot and hands normal sleep
+> back safely on its own.
 
 ## User anxieties
 
 The product is not fundamentally about a `pmset` flag. It is about eliminating five
 specific doubts:
 
-1. **Did the Mac actually survive unplugging?**
-2. **Is it really using my hotspot, with real internet?**
-3. **Can the phone-facing agent remote still reach the host?**
-4. **Will the agent get stuck asking for something I cannot safely approve?**
-5. **Will the laptop overheat or run flat in the bag?**
+1. **Is it really on my hotspot, with real internet?**
+2. **Will it stay awake once the lid is shut and the cable comes out?**
+3. **Can my phone still reach the work?**
+4. **Will the laptop overheat or run flat in the bag?**
+5. **Can I get normal sleep back afterwards?**
 
-the CLI should answer each doubt with measured evidence or an explicit “confirmed by you”
-handoff.
+`pack` answers these by measuring rather than asserting, with two exceptions: `--here`
+takes the user at their word that this network is the commute network, and Remote
+Control is started but only checked under `--require-remote`.
 
 ## First principles
 
 ### 1. Verify the transition, not the configuration
 
-A checked setting is not proof. The failure happens during a state transition:
+A checked setting is not proof. The failure happens during a transition:
 
 ```text
-external power → hotspot → battery → lid closed
+current network → hotspot → lid closed
 ```
 
-rucksack must guide the user through the same transition and re-check the resulting
-system. “Packed” means the transition was observed and validated.
+“The internet works” is not evidence, because the office network the user is walking
+away from also works, and accepting it packs a Mac that goes offline at the front door.
+Arrival is proven by the Wi-Fi name matching the saved hotspot, by the default route
+visibly leaving the interface or gateway it started on, by the gateway `172.20.10.1`
+that only an iOS Personal Hotspot serves, by macOS reporting that it joined the network
+rucksack asked for, or by `--here` — and in every case the route must then actually
+reach the internet.
+
+There is no unplug step. Packing while plugged in is allowed, and the helper re-asserts
+the override when it observes the power source change.
 
 ### 2. Confidence is the primary interface
 
@@ -61,19 +70,15 @@ The CLI should communicate three things only:
 - what the user needs to do now;
 - what will happen automatically.
 
-The packing story has an explicit ownership grammar:
+It has four verbs: `step` for what just happened, `done` for the verdict on the last
+line, `warn` for something worth knowing that did not stop anything, and `detail`, which
+only `--verbose` prints. No narration, no chapters, no house voice.
 
-- rucksack work begins with `→ rucksack is`;
-- user work begins with `your turn`, followed by `→` steps;
-- every wait names what rucksack is waiting for and what continues automatically with `↳`;
-- measured results begin with `✓` and contain facts only;
-- flavor never replaces an instruction.
+Agent models never generate safety-critical CLI copy. The words remain clear when color,
+symbols, animation, and terminal styling are unavailable.
 
-The renderer enforces this grammar. Agent models never generate safety-critical CLI copy.
-The words remain clear when color, symbols, animation, and terminal styling are unavailable.
-
-Internal concepts such as IOKit, root domains, launchd, hook payloads, and network routes
-belong under `--verbose`.
+Internal concepts such as IOKit notifications, `SleepDisabled`, launchd, and network
+routes belong under `--verbose`.
 
 ### 3. One obvious path
 
@@ -83,79 +88,80 @@ The primary command is:
 rucksack pack
 ```
 
-The command discovers the likely agent, applies safe defaults, and asks for one physical
-action at a time. Flags exist for repeatability and automation, not because setup should
-feel like assembling a control panel.
+It takes no arguments and asks nothing: no agent to pick, no network to name, no
+confirmation. When it does need the user it prints exactly one instruction — opening
+Wi-Fi settings when that instruction is about Wi-Fi — and then waits for as long as it
+takes, ticking every 30 seconds. It never aborts and never asks for a re-run. The only
+question rucksack ever asks comes at the end of the first successful `unpack`, when the
+user is back at a desk. Flags exist for repeatability and automation, not because
+packing should feel like assembling a control panel.
 
 ### 4. Temporary capability, never permanent mutation
 
 Closed-lid wakefulness is a lease with:
 
-- an owner;
+- an owner uid;
 - a reason;
-- an expiry;
-- a heartbeat;
+- a hard expiry, plus a shorter helper TTL;
+- a heartbeat that renews it;
 - a saved baseline;
 - a recovery path.
 
-Agent policy is also temporary. rucksack should remove or deactivate every injected rule
-when the session ends.
+The helper refuses to acquire unless sleep is already normal, so its rollback target is
+never ambiguous. Nothing is left behind: deleting the session file is the resting state.
 
 ### 5. Safe failure means sleep
 
 If rucksack cannot prove that its helper, heartbeat, baseline, or safety monitors are
-healthy, it should restore normal sleep. Losing a remote session is inconvenient. Leaving
-a hot Mac awake indefinitely is unacceptable.
+healthy, it restores normal sleep. A `pack` that fails partway rolls back what it did,
+the watcher releases the lease when the host stops being safe, and the helper's own TTL
+restores sleep if heartbeats stop arriving. Losing a remote session is inconvenient.
+Leaving a hot Mac awake indefinitely is unacceptable.
 
-### 6. Commute Mode changes handoff, not capability
+### 6. Integrate through the files an agent already reads
 
-The mobile user has less attention and a less reliable connection. Commute Mode should
-keep the current task moving without narrowing its workload:
+Agent integration is one marker-guarded skill file, written to
+`~/.agents/skills/rucksack/` and `~/.claude/skills/rucksack/`, and only where that
+agent's directory already exists. No hooks, no rules files, no keystrokes injected into
+a terminal, no pixels parsed out of an IDE. A file rucksack does not own is never
+overwritten, and installing retires the older `commute-mode` skill it wrote itself.
 
-- ask fewer non-blocking questions;
-- state reasonable assumptions and concise checkpoints;
-- run every workload required by the task, including builds, broad test suites, Docker,
-  VMs, browser automation, and indexing;
-- use bounded retries for unreliable connections;
-- reduce workload only when the user explicitly selects `--focus low-power`.
-
-### 7. Native integration over screen scraping
-
-Each adapter should use the agent’s own supported extension surface:
-
-- Codex lifecycle hooks, skills, and Remote Control commands;
-- Claude Code hooks, skills, and Remote Control;
-- Cursor rules, hooks, and Remote Control.
-
-rucksack should never inject keystrokes into a terminal or parse pixels from an IDE.
-
-### 8. Local by default
+### 7. Local by default
 
 rucksack does not need to become another remote coding service. Provider-native remotes
 carry the conversation. rucksack manages host health and short operational status. No
-repository content should transit a rucksack relay. Version 0.1 has no rucksack backend,
-relay, or webhook transport.
+repository content should transit a rucksack relay: there is no rucksack backend, relay,
+or webhook transport, and the only request a packed session makes is a captive-portal
+probe to `captive.apple.com`.
 
 ## Product promise
 
-> rucksack says `packed` only after the Mac is on battery, the closed-lid lease is active
-> and bounded, the phone-hotspot route has internet, the exact live task activation has
-> been observed, and phone visibility has been explicitly confirmed by you.
+> rucksack says `Packed.` only after nothing else already owns this Mac's sleep setting,
+> the battery is not at the sleep floor, the Mac is not thermally throttled, the power
+> helper is installed and holding a bounded lease, the route is on a network proven to
+> be the commute network and reaching the internet, and the safety watcher has sent its
+> first heartbeat.
 
-For a strict hotspot or USB session, that promise remains bound to the verified route. A
-confirmed replacement network ends Commute Mode; temporary route loss gets a bounded
-reconnect grace.
+Remote Control is started, not gated: if it does not start, `pack` warns and the Mac is
+still packed, unless `--require-remote` was passed.
+
+After that, the lease survives everything that does not matter. It belongs to the Mac,
+not to a conversation, so losing the network does not end it and an agent finishing its
+task does not end it. Six things end it: `rucksack unpack`, the time limit, the battery
+floor, serious or critical thermal pressure or actual throttling, the helper heartbeat
+failing, and three consecutive failures to read the battery while on battery.
 
 ## Non-goals
 
 - emulating an AC adapter;
-- replacing ChatGPT, Claude, or Cursor mobile interfaces;
-- changing the provider session's permission, approval, or sandbox configuration;
+- replacing the provider's own mobile interface;
+- changing an agent's instructions, tools, or permissions;
+- rejoining a hotspot that drops after the lid closes — the lease survives it, but
+  nothing reconnects the network for you;
 - guaranteeing that any workload avoids macOS thermal pressure or throttling;
 - remote desktop or SSH tunneling;
 - deploying or merging code automatically;
-- supporting unsupported private macOS kernel modifications;
-- pretending Cursor has a CLI pairing API when it does not.
+- supporting unsupported private macOS kernel modifications.
 
 ## Core metrics
 
@@ -164,15 +170,15 @@ reconnect grace.
 - median time from `rucksack pack` to “Packed”;
 - percentage of first sessions completed without documentation;
 - helper-install completion rate;
-- adapter-install success and clean-uninstall rate.
+- helper clean-uninstall rate.
 
 ### Reliability
 
-- percentage of sessions that survive the AC→battery transition;
+- percentage of sessions that survive the unplug into the bag;
 - remote reachability five and fifteen minutes after lid closure;
 - number of false “Packed” states;
 - baseline-restoration success rate;
-- heartbeat-expiry restoration latency.
+- helper-TTL restoration latency.
 
 ### Safety
 
@@ -181,30 +187,25 @@ reconnect grace.
 - machines found with `SleepDisabled=1` and no valid lease;
 - duration between invalid state detection and restoration.
 
-### Agent usefulness
+### Usefulness
 
 - sessions that complete a useful checkpoint;
-- approval/input waits surfaced to the user;
-- sessions whose provider permission configuration remained unchanged;
 - user-rated “I could leave without thinking about it.”
 
 ## Product layers
 
 ### Layer 1: Host survival
 
-Power lease, route verification, hotspot handoff, safety monitors, recovery.
+Power lease, arrival proof, safety watcher, recovery. The load-bearing layer: a failure
+here always stops the pack, and a half-finished pack rolls back.
 
 ### Layer 2: Agent handoff
 
-Start the provider remote where a stable CLI supports it; otherwise guide the user and
-record explicit phone confirmation once during setup. Every pack still observes a fresh
-tokenized activation in the exact live task. Always expose the exact next action.
+Start Codex Remote Control as a fire-and-forget child, and print a pairing code on
+request with `rucksack pair`. A failure here warns rather than fails, unless
+`--require-remote`.
 
-### Layer 3: Agent behavior
+### Layer 3: Vocabulary
 
-Temporary native policy and telemetry adapters.
-
-### Layer 4: Optional orchestration
-
-Future local-to-cloud or local-to-devbox handoff. This is a separate product capability,
-not a prerequisite for the first release.
+One skill file, so “pack my Mac” works as a sentence inside a conversation. No policy,
+no telemetry, no injected rules.

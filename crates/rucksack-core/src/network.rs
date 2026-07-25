@@ -1,85 +1,42 @@
-use crate::agent::AgentKind;
-use crate::system::{run_bounded_cleared, CommandResult};
+use crate::system::{require_success, run_bounded_cleared, CommandResult};
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
 use std::io::Read;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORK_COMMAND_MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub const DEFAULT_INTERNET_PROBE_URL: &str = "http://captive.apple.com/hotspot-detect.html";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The Wi-Fi interface and, when macOS is willing to say, the network it is on.
+///
+/// `ssid` is `None` whenever macOS withholds the name, which it does for any process without
+/// Location Services. That is common, so nothing may treat a missing name as "not connected".
+#[derive(Debug, Clone)]
 pub struct WifiStatus {
     pub device: Option<String>,
-    pub connected: bool,
     pub ssid: Option<String>,
-    pub redacted: bool,
-    pub detail: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteStatus {
     pub interface: Option<String>,
     pub gateway: Option<String>,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InterfaceCounters {
-    pub interface: String,
-    pub received_bytes: u64,
-    pub sent_bytes: u64,
-    pub sampled_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProbeResult {
-    pub url: String,
-    pub reachable: bool,
-    pub status: Option<u16>,
-    pub elapsed_ms: u128,
-    pub detail: String,
 }
 
 pub fn read_wifi_status() -> Result<WifiStatus> {
     let hardware = run_network_command("/usr/sbin/networksetup", &["-listallhardwareports"])?;
     require_success("networksetup -listallhardwareports", &hardware)?;
-    let device = parse_wifi_device(&hardware.stdout);
-    let Some(device_name) = device.clone() else {
+    let Some(device) = parse_wifi_device(&hardware.stdout) else {
         return Ok(WifiStatus {
             device: None,
-            connected: false,
             ssid: None,
-            redacted: false,
-            detail: "No Wi-Fi hardware port found".to_owned(),
         });
     };
-    let current = run_network_command(
-        "/usr/sbin/networksetup",
-        &["-getairportnetwork", &device_name],
-    )?;
-    let mut parsed = parse_current_network(&current.stdout, &current.stderr);
-    if !parsed.0 {
-        let routed_over_wifi =
-            current_route_interface().ok().flatten().as_deref() == Some(device_name.as_str());
-        if routed_over_wifi {
-            parsed.0 = true;
-            parsed.2 = true;
-            parsed.3 = format!(
-                "{}; default route confirms Wi-Fi is active but macOS did not expose the SSID",
-                parsed.3
-            );
-        }
-    }
+    let current = run_network_command("/usr/sbin/networksetup", &["-getairportnetwork", &device])?;
     Ok(WifiStatus {
-        device,
-        connected: parsed.0,
-        ssid: parsed.1,
-        redacted: parsed.2,
-        detail: parsed.3,
+        ssid: parse_ssid(&current.stdout, &current.stderr),
+        device: Some(device),
     })
 }
 
@@ -89,6 +46,11 @@ pub fn read_iphone_usb_device() -> Result<Option<String>> {
     Ok(parse_hardware_device(&hardware.stdout, &["iphone usb"]))
 }
 
+/// Ask macOS to join a network it already has credentials for.
+///
+/// This fails more often than it succeeds: it cannot supply a keychain password and cannot see an
+/// Apple Instant Hotspot at all. A failed attempt can also drop the connection the Mac already
+/// had, so callers should only reach for it when there is nothing to lose.
 pub fn connect_saved_wifi(device: &str, ssid: &str) -> Result<()> {
     let args = saved_wifi_connection_args(device, ssid)?;
     let borrowed = args.iter().map(String::as_str).collect::<Vec<_>>();
@@ -96,7 +58,7 @@ pub fn connect_saved_wifi(device: &str, ssid: &str) -> Result<()> {
     require_wifi_join_success(&result)
 }
 
-pub fn saved_wifi_connection_args(device: &str, ssid: &str) -> Result<Vec<String>> {
+fn saved_wifi_connection_args(device: &str, ssid: &str) -> Result<Vec<String>> {
     let device = device.trim();
     let ssid = ssid.trim();
     if device.is_empty() {
@@ -117,7 +79,7 @@ pub fn saved_wifi_connection_args(device: &str, ssid: &str) -> Result<Vec<String
     ])
 }
 
-pub fn parse_wifi_device(text: &str) -> Option<String> {
+fn parse_wifi_device(text: &str) -> Option<String> {
     parse_hardware_device(text, &["wi-fi", "airport"])
 }
 
@@ -139,29 +101,23 @@ fn parse_hardware_device(text: &str, accepted_ports: &[&str]) -> Option<String> 
     None
 }
 
-pub fn parse_current_network(stdout: &str, stderr: &str) -> (bool, Option<String>, bool, String) {
-    let combined = format!("{}\n{}", stdout.trim(), stderr.trim());
-    let lower = combined.to_ascii_lowercase();
-    if lower.contains("not associated")
-        || lower.contains("not connected")
-        || lower.contains("could not find network")
+/// The current network's name, or `None` when there is not one to report.
+///
+/// macOS says `<redacted>` when the caller lacks Location Services, and reports "not associated"
+/// when Wi-Fi is off or unjoined. Both mean the same thing here: no name to compare against.
+fn parse_ssid(stdout: &str, stderr: &str) -> Option<String> {
+    let combined = format!("{}\n{}", stdout.trim(), stderr.trim()).to_ascii_lowercase();
+    if combined.contains("not associated")
+        || combined.contains("not connected")
+        || combined.contains("could not find network")
     {
-        return (false, None, false, combined.trim().to_owned());
+        return None;
     }
-    let value = stdout.lines().find_map(|line| {
-        line.split_once(':')
-            .map(|(_, value)| value.trim().to_owned())
-    });
-    let redacted = value
-        .as_deref()
-        .is_some_and(|ssid| ssid.is_empty() || ssid.eq_ignore_ascii_case("<redacted>"));
-    let connected = value.is_some();
-    (
-        connected,
-        value.filter(|ssid| !ssid.is_empty() && !ssid.eq_ignore_ascii_case("<redacted>")),
-        redacted,
-        combined.trim().to_owned(),
-    )
+    stdout
+        .lines()
+        .find_map(|line| line.split_once(':').map(|(_, value)| value.trim()))
+        .filter(|ssid| !ssid.is_empty() && !ssid.eq_ignore_ascii_case("<redacted>"))
+        .map(ToOwned::to_owned)
 }
 
 pub fn read_default_route() -> Result<RouteStatus> {
@@ -170,100 +126,11 @@ pub fn read_default_route() -> Result<RouteStatus> {
     Ok(parse_default_route(&result.stdout))
 }
 
-pub fn read_interface_counters(interface: &str) -> Result<InterfaceCounters> {
-    let interface = interface.trim();
-    if interface.is_empty() || interface.chars().any(char::is_control) {
-        return Err(anyhow!(
-            "Network interface name must be non-empty and contain no control characters"
-        ));
-    }
-    let result = run_network_command("/usr/sbin/netstat", &["-ibn", "-I", interface])?;
-    require_success("netstat -ibn -I", &result)?;
-    parse_interface_counters(&result.stdout, interface, Utc::now())
-}
-
-pub fn parse_interface_counters(
-    text: &str,
-    interface: &str,
-    sampled_at: DateTime<Utc>,
-) -> Result<InterfaceCounters> {
-    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
-    let header = lines
-        .next()
-        .ok_or_else(|| anyhow!("netstat returned no interface-counter header"))?;
-    let columns = header.split_whitespace().collect::<Vec<_>>();
-    let network_index = columns
-        .iter()
-        .position(|column| *column == "Network")
-        .ok_or_else(|| anyhow!("netstat output has no Network column"))?;
-    let received_header_index = columns
-        .iter()
-        .position(|column| *column == "Ibytes")
-        .ok_or_else(|| anyhow!("netstat output has no Ibytes column"))?;
-    let sent_header_index = columns
-        .iter()
-        .position(|column| *column == "Obytes")
-        .ok_or_else(|| anyhow!("netstat output has no Obytes column"))?;
-    let received_from_end = columns.len() - received_header_index;
-    let sent_from_end = columns.len() - sent_header_index;
-
-    let mut parsed: Option<(u64, u64)> = None;
-    for line in lines {
-        let values = line.split_whitespace().collect::<Vec<_>>();
-        if values.first().copied() != Some(interface)
-            || !values
-                .get(network_index)
-                .is_some_and(|network| network.starts_with("<Link#"))
-        {
-            continue;
-        }
-        if parsed.is_some() {
-            return Err(anyhow!(
-                "netstat returned multiple link-layer counter rows for interface {interface}"
-            ));
-        }
-        let received_index = values
-            .len()
-            .checked_sub(received_from_end)
-            .ok_or_else(|| anyhow!("netstat link row for {interface} is missing Ibytes"))?;
-        let sent_index = values
-            .len()
-            .checked_sub(sent_from_end)
-            .ok_or_else(|| anyhow!("netstat link row for {interface} is missing Obytes"))?;
-        let received = values
-            .get(received_index)
-            .ok_or_else(|| anyhow!("netstat row for {interface} has no Ibytes value"))?
-            .parse::<u64>()
-            .map_err(|error| anyhow!("Invalid Ibytes value for {interface}: {error}"))?;
-        let sent = values
-            .get(sent_index)
-            .ok_or_else(|| anyhow!("netstat row for {interface} has no Obytes value"))?
-            .parse::<u64>()
-            .map_err(|error| anyhow!("Invalid Obytes value for {interface}: {error}"))?;
-        parsed = Some((received, sent));
-    }
-
-    let (received_bytes, sent_bytes) = parsed.ok_or_else(|| {
-        anyhow!("netstat returned no link-layer byte-counter row for interface {interface}")
-    })?;
-    Ok(InterfaceCounters {
-        interface: interface.to_owned(),
-        received_bytes,
-        sent_bytes,
-        sampled_at,
-    })
-}
-
-pub fn parse_default_route(text: &str) -> RouteStatus {
+fn parse_default_route(text: &str) -> RouteStatus {
     RouteStatus {
         interface: field(text, "interface"),
         gateway: field(text, "gateway"),
-        detail: text.trim().to_owned(),
     }
-}
-
-fn current_route_interface() -> Result<Option<String>> {
-    Ok(read_default_route()?.interface)
 }
 
 fn run_network_command(path: &str, args: &[&str]) -> Result<CommandResult> {
@@ -278,94 +145,44 @@ fn run_network_command(path: &str, args: &[&str]) -> Result<CommandResult> {
 fn field(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let (candidate, value) = line.trim().split_once(':')?;
-        if candidate.trim() == key {
-            Some(value.trim().to_owned())
-        } else {
-            None
-        }
+        (candidate.trim() == key).then(|| value.trim().to_owned())
     })
 }
 
-pub fn probe(url: &str, timeout_seconds: u64) -> ProbeResult {
-    probe_with_policy(url, timeout_seconds, false)
-}
-
-/// Verify an actual internet path, not merely an HTTP response.
+/// Does this route actually reach the internet?
 ///
-/// The default Apple captive-network endpoint is intercepted by many login portals. For that
-/// endpoint, rucksack requires Apple's exact success page and final host. A redirect to a portal,
-/// a 200 response with login HTML, or a truncated response fails the preflight.
-pub fn internet_probe(url: &str, timeout_seconds: u64) -> ProbeResult {
-    probe_with_policy(url, timeout_seconds, true)
-}
-
-fn probe_with_policy(url: &str, timeout_seconds: u64, strict_internet: bool) -> ProbeResult {
-    let started = Instant::now();
-    let client = match Client::builder()
+/// Not merely "did something answer": many hotel and café networks intercept the Apple
+/// captive-network endpoint, so rucksack requires Apple's exact success page from Apple's own
+/// host. A redirect to a portal, a 200 with login HTML, or a truncated body all count as offline,
+/// because a Mac behind a portal is a Mac that cannot be reached from a phone.
+pub fn reaches_internet(url: &str, timeout_seconds: u64) -> bool {
+    let Ok(client) = Client::builder()
         .timeout(Duration::from_secs(timeout_seconds))
         .user_agent("rucksack/0.1")
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            return ProbeResult {
-                url: url.to_owned(),
-                reachable: false,
-                status: None,
-                elapsed_ms: started.elapsed().as_millis(),
-                detail: error.to_string(),
-            }
-        }
+    else {
+        return false;
     };
-    match client.get(url).send() {
-        Ok(mut response) => {
-            let status = response.status();
-            if strict_internet && is_apple_captive_probe(url) {
-                let final_host = response.url().host_str().map(str::to_owned);
-                let mut body = String::new();
-                let body_result = response.by_ref().take(64 * 1024).read_to_string(&mut body);
-                let success_body = apple_captive_success_body(&body);
-                let reachable = status.is_success()
-                    && final_host.as_deref() == Some("captive.apple.com")
-                    && body_result.is_ok()
-                    && success_body;
-                let detail = if reachable {
-                    format!("{} · Apple captive-network success page", status)
-                } else {
-                    format!(
-                        "captive-network verification failed: status={} final_host={:?} success_body={} read_ok={}",
-                        status,
-                        final_host,
-                        success_body,
-                        body_result.is_ok()
-                    )
-                };
-                ProbeResult {
-                    url: url.to_owned(),
-                    reachable,
-                    status: Some(status.as_u16()),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    detail,
-                }
-            } else {
-                ProbeResult {
-                    url: url.to_owned(),
-                    reachable: true,
-                    status: Some(status.as_u16()),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    detail: status.to_string(),
-                }
-            }
-        }
-        Err(error) => ProbeResult {
-            url: url.to_owned(),
-            reachable: false,
-            status: error.status().map(|status| status.as_u16()),
-            elapsed_ms: started.elapsed().as_millis(),
-            detail: error.to_string(),
-        },
+    let Ok(mut response) = client.get(url).send() else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
     }
+    if !is_apple_captive_probe(url) {
+        return true;
+    }
+    if response.url().host_str() != Some("captive.apple.com") {
+        return false;
+    }
+    let mut body = String::new();
+    response
+        .by_ref()
+        .take(64 * 1024)
+        .read_to_string(&mut body)
+        .is_ok()
+        && apple_captive_success_body(&body)
 }
 
 fn is_apple_captive_probe(url: &str) -> bool {
@@ -379,35 +196,15 @@ fn apple_captive_success_body(body: &str) -> bool {
     normalized.contains("<title>success</title>") && normalized.contains("<body>success</body>")
 }
 
-pub fn provider_probe_url(agent: AgentKind) -> &'static str {
-    match agent {
-        AgentKind::Codex => "https://chatgpt.com/",
-        AgentKind::Claude => "https://api.anthropic.com/",
-        AgentKind::Cursor => "https://cursor.com/",
-    }
-}
-
-fn require_success(name: &str, result: &CommandResult) -> Result<()> {
-    if result.success() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "{name} failed with exit code {}: {}",
-            result.code,
-            result.combined_trimmed()
-        ))
-    }
-}
-
+/// `networksetup` reports a failed join on stdout while still exiting 0.
 fn require_wifi_join_success(result: &CommandResult) -> Result<()> {
-    let detail = result.combined_trimmed();
     if result.success() && result.stdout.is_empty() && result.stderr.is_empty() {
         Ok(())
     } else {
         Err(anyhow!(
             "networksetup -setairportnetwork failed with exit code {}: {}",
             result.code,
-            detail
+            result.combined_trimmed()
         ))
     }
 }
@@ -417,20 +214,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_wifi_device() {
+    fn parses_the_wifi_device() {
         let text = "Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa:bb\n";
         assert_eq!(parse_wifi_device(text).as_deref(), Some("en0"));
     }
 
     #[test]
-    fn parses_ssid() {
-        let parsed = parse_current_network("Current Wi-Fi Network: Max's iPhone\n", "");
-        assert!(parsed.0);
-        assert_eq!(parsed.1.as_deref(), Some("Max's iPhone"));
+    fn parses_the_iphone_usb_device() {
+        let text = "Hardware Port: Wi-Fi\nDevice: en0\n\n\
+                    Hardware Port: iPhone USB\nDevice: en7\n";
+        assert_eq!(
+            parse_hardware_device(text, &["iphone usb"]).as_deref(),
+            Some("en7")
+        );
     }
 
     #[test]
-    fn parses_usb_tether_default_route() {
+    fn reads_a_network_name() {
+        assert_eq!(
+            parse_ssid("Current Wi-Fi Network: Max's iPhone\n", "").as_deref(),
+            Some("Max's iPhone")
+        );
+    }
+
+    /// Both of these mean "no name to compare against", and neither means "offline".
+    #[test]
+    fn a_hidden_or_absent_name_is_no_name() {
+        assert_eq!(parse_ssid("Current Wi-Fi Network: <redacted>\n", ""), None);
+        assert_eq!(parse_ssid("Current Wi-Fi Network: \n", ""), None);
+        assert_eq!(
+            parse_ssid("You are not associated with an AirPort network.\n", ""),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_a_usb_tether_default_route() {
         let route = parse_default_route(
             "   route to: default\n\
              destination: default\n\
@@ -441,139 +260,42 @@ mod tests {
         assert_eq!(route.gateway.as_deref(), Some("link#24"));
     }
 
+    /// A password must never reach the process table.
     #[test]
-    fn parses_iphone_usb_device() {
-        let text = "Hardware Port: Wi-Fi\nDevice: en0\n\n\
-                    Hardware Port: iPhone USB\nDevice: en7\n";
-        assert_eq!(
-            parse_hardware_device(text, &["iphone usb"]).as_deref(),
-            Some("en7")
-        );
-    }
-
-    #[test]
-    fn parses_interface_byte_counters_without_double_counting_address_rows() {
-        let sampled_at = DateTime::parse_from_rfc3339("2026-07-24T14:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let text = "Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll\n\
-                    en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 100 0 123456 80 0 654321 0\n\
-                    en0 1500 192.0.0 192.0.0.2 100 - 123456 80 - 654321 -\n";
-
-        let counters = parse_interface_counters(text, "en0", sampled_at).unwrap();
-
-        assert_eq!(counters.interface, "en0");
-        assert_eq!(counters.received_bytes, 123_456);
-        assert_eq!(counters.sent_bytes, 654_321);
-        assert_eq!(counters.sampled_at, sampled_at);
-    }
-
-    #[test]
-    fn parses_link_row_that_omits_the_address_column() {
-        let sampled_at = DateTime::parse_from_rfc3339("2026-07-24T14:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let text = "Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll\n\
-                    utun4 1380 <Link#19> 396 0 55298 462 0 99815 0\n";
-
-        let counters = parse_interface_counters(text, "utun4", sampled_at).unwrap();
-
-        assert_eq!(counters.received_bytes, 55_298);
-        assert_eq!(counters.sent_bytes, 99_815);
-    }
-
-    #[test]
-    fn interface_counter_parser_rejects_missing_byte_columns() {
-        let sampled_at = Utc::now();
-        let error =
-            parse_interface_counters("Name Mtu Network Address\n", "en0", sampled_at).unwrap_err();
-
-        assert!(error.to_string().contains("Ibytes"));
-    }
-
-    #[test]
-    fn interface_counter_parser_rejects_invalid_link_rows() {
-        let sampled_at = Utc::now();
-        let header = "Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll\n";
-
-        let missing = parse_interface_counters(
-            &format!("{header}en0 1500 192.0.0 192.0.0.2 1 - 2 3 - 4 -\n"),
-            "en0",
-            sampled_at,
-        )
-        .unwrap_err();
-        assert!(missing.to_string().contains("no link-layer"));
-
-        let duplicate = parse_interface_counters(
-            &format!(
-                "{header}en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 1 0 2 3 0 4 0\n\
-                 en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 1 0 2 3 0 4 0\n"
-            ),
-            "en0",
-            sampled_at,
-        )
-        .unwrap_err();
-        assert!(duplicate.to_string().contains("multiple link-layer"));
-
-        let overflow = parse_interface_counters(
-            &format!(
-                "{header}en0 1500 <Link#12> aa:bb:cc:dd:ee:ff 1 0 18446744073709551616 3 0 4 0\n"
-            ),
-            "en0",
-            sampled_at,
-        )
-        .unwrap_err();
-        assert!(overflow.to_string().contains("Invalid Ibytes"));
-    }
-
-    #[test]
-    fn saved_wifi_command_never_contains_a_password_argument() {
+    fn the_join_command_carries_no_password() {
         let args = saved_wifi_connection_args("en0", "Noah's iPhone").unwrap();
         assert_eq!(args, vec!["-setairportnetwork", "en0", "Noah's iPhone"]);
-        assert_eq!(args.len(), 3);
     }
 
     #[test]
-    fn saved_wifi_command_rejects_control_characters() {
+    fn the_join_command_rejects_control_characters() {
         assert!(saved_wifi_connection_args("en0", "Noah\nother").is_err());
         assert!(saved_wifi_connection_args("en0\tother", "Noah").is_err());
     }
 
+    /// `networksetup` exits 0 even when it did not join, so the output is the real signal.
     #[test]
-    fn wifi_join_rejects_macos_failure_text_with_zero_exit_code() {
-        let result = CommandResult {
+    fn a_join_that_only_looks_successful_is_rejected() {
+        let refused = CommandResult {
             code: 0,
             stdout: "Could not find network Noah.\n".to_owned(),
             stderr: String::new(),
         };
-        let error = require_wifi_join_success(&result).unwrap_err();
-        assert!(error.to_string().contains("Could not find network Noah."));
-    }
+        assert!(require_wifi_join_success(&refused)
+            .unwrap_err()
+            .to_string()
+            .contains("Could not find network Noah."));
 
-    #[test]
-    fn wifi_join_rejects_unknown_output_with_zero_exit_code() {
-        let result = CommandResult {
-            code: 0,
-            stdout: "Unexpected networksetup diagnostic\n".to_owned(),
-            stderr: String::new(),
-        };
-
-        assert!(require_wifi_join_success(&result).is_err());
-    }
-
-    #[test]
-    fn wifi_join_accepts_silent_zero_exit_code() {
-        let result = CommandResult {
+        let silent = CommandResult {
             code: 0,
             stdout: String::new(),
             stderr: String::new(),
         };
-
-        assert!(require_wifi_join_success(&result).is_ok());
+        assert!(require_wifi_join_success(&silent).is_ok());
     }
 
     #[test]
-    fn recognizes_only_the_expected_apple_probe() {
+    fn only_apples_own_probe_gets_the_strict_body_check() {
         assert!(is_apple_captive_probe(
             "http://captive.apple.com/hotspot-detect.html"
         ));
@@ -583,8 +305,9 @@ mod tests {
         assert!(!is_apple_captive_probe("http://captive.apple.com/other"));
     }
 
+    /// A captive portal that returns 200 with its own page is still offline.
     #[test]
-    fn validates_apple_success_page() {
+    fn a_portal_page_is_not_success() {
         assert!(apple_captive_success_body(
             "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"
         ));
