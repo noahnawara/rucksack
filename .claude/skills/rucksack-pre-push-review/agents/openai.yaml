@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rucksack Pre-Push Review"
+  short_description: "Review a rucksack branch before pushing"
+  default_prompt: "Use $rucksack-pre-push-review on what I am about to push."
