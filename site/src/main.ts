@@ -71,7 +71,7 @@ const showCopyFailure = (elements: CopyElements): void => {
   elements.status.textContent =
     "rucksack stopped copying the setup prompt.\n\n" +
     "your browser blocked clipboard access.\n\n" +
-    "you — select the prompt and copy it.";
+    "select the prompt below and copy it.";
   selectPrompt(elements);
 };
 

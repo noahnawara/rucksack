@@ -264,7 +264,7 @@
 
       <section class="setup-contrast page-shell" aria-labelledby="setup-title">
         <div class="setup-copy">
-          <h2 id="setup-title">don’t move the project. move yourself.</h2>
+          <h2 id="setup-title">no second environment to set up.</h2>
           <p>
             rucksack is a source-only macOS 14+ alpha for Codex, Claude Code,
             and Cursor. your project, secrets, and local agent session stay on
@@ -297,8 +297,8 @@
             <h2 id="proof-title">packed means you can leave.</h2>
             <p>
               rucksack checks the MacBook after it leaves power and joins the
-              phone hotspot. battery, internet, agent handoff, and the bounded
-              closed-lid lease are observed—not just requested.
+              phone hotspot. it reads the real battery, internet, agent
+              handoff, and closed-lid lease state before it says packed.
             </p>
           </div>
 
@@ -344,32 +344,34 @@
       <section class="handoff-answers page-shell" aria-labelledby="answers-title">
         <div class="answers-copy">
           <span class="section-label">closed lid, bounded</span>
-          <h2 id="answers-title">keep a MacBook awake—with limits.</h2>
+          <h2 id="answers-title">what happens when the lid closes.</h2>
           <p>
-            rucksack verifies more than a sleep setting before the same local
-            AI coding agent leaves your desk.
+            rucksack checks the power, network, and agent state before the
+            same local AI coding agent leaves your desk.
           </p>
         </div>
 
         <dl class="answer-list">
           <div class="answer">
-            <dt>can a MacBook stay awake with the lid closed on battery?</dt>
+            <dt>why does my hotspot drop when I close the lid?</dt>
             <dd>
-              temporarily. rucksack holds a time-limited macOS closed-lid
-              lease, then checks battery power, the iPhone Personal Hotspot or
-              other phone-tethering route, and your phone handoff. a deadline,
-              battery floor, serious thermal pressure, or lost heartbeat
-              releases the lease.
+              closing the lid on battery puts the Mac into forced sleep, so
+              the wifi link to your phone goes down and the agent stops
+              working. rucksack holds a time-limited macOS closed-lid lease so
+              the Mac keeps running on battery with the hotspot connected. a
+              deadline, battery floor, serious thermal pressure, or lost
+              heartbeat releases the lease.
             </dd>
           </div>
           <div class="answer">
-            <dt>why isn’t caffeinate enough?</dt>
+            <dt>why doesn’t caffeinate fix it?</dt>
             <dd>
-              <code>caffeinate</code> handles idle-sleep assertions; closing
-              the lid on battery follows forced sleep. rucksack’s narrow
-              helper uses <code>pmset disablesleep</code> only for a bounded
-              lease, then verifies hotspot internet and the phone-facing agent
-              session before it reports packed.
+              <code>caffeinate</code> only holds off idle sleep. it has no
+              effect on the forced sleep that closing the lid on battery
+              triggers, so your hotspot still drops. rucksack’s narrow helper
+              uses <code>pmset disablesleep</code> for a bounded lease, then
+              verifies hotspot internet and the phone-facing agent session
+              before it reports packed.
             </dd>
           </div>
           <div class="answer">
