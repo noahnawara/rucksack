@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rucksack Design"
+  short_description: "Build and review Rucksack interfaces"
+  default_prompt: "Use $rucksack-design to design or review this Rucksack interface."
