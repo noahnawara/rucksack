@@ -49,13 +49,11 @@ Exit criteria:
 - explicit list of supported macOS and agent versions;
 - no P0/P1 security findings from helper review.
 
-## 0.3 — excellent native adapters
+## 0.3 — better agent status
 
 - Codex App Server status integration;
 - Claude session URL/status extraction where stable;
-- Cursor machine-readable Remote Control integration if published;
-- per-agent test fixtures and compatibility matrix;
-- adapter health self-test.
+- per-agent test fixtures and a compatibility matrix.
 
 ## 0.4 — companion status
 
@@ -75,8 +73,7 @@ transcripts.
 - deterministic rollback;
 - full threat-model review;
 - localization-ready CLI copy;
-- accessibility-tested terminal output;
-- documented API for third-party agent adapters.
+- accessibility-tested terminal output.
 
 ## Later — execution handoff
 

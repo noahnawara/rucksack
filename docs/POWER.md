@@ -135,6 +135,14 @@ the override is active fails safe to ordinary sleep.
 A separate watchdog thread ticks every five seconds. It releases the lease once either
 deadline has elapsed, and re-asserts `SleepDisabled` whenever the setting is no longer 1.
 
+## Why a lease ends
+
+A held lease ends for six reasons and no others: `rucksack unpack`, the session's time
+limit, the battery floor, serious or critical thermal pressure or reported throttling, three
+consecutive failed battery reads while on battery, and the helper heartbeat failing — after
+which the helper's own TTL restores sleep. Losing the network is not one of them, and
+neither is an agent finishing its work.
+
 ## Battery
 
 Defaults:

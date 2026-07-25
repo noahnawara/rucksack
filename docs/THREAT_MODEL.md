@@ -4,8 +4,8 @@
 
 - root execution boundary;
 - global sleep configuration;
-- user’s agent hook/rule configuration;
-- repository path and operational state;
+- the agent skill file rucksack writes;
+- session and configuration state on this Mac;
 - remote-session availability;
 - battery and thermal safety.
 
@@ -13,9 +13,9 @@
 
 1. A malicious local process running as the same user.
 2. Another local user.
-3. A compromised hook payload or project.
-4. A malicious repository attempting prompt injection.
-5. An attacker on the mobile network.
+3. Any administrator-group process, which can reach the helper socket.
+4. Text in an agent’s context attempting to use rucksack to change what that agent may do.
+5. An attacker on the network the Mac is probing.
 6. Accidental crashes, partial writes, stale state, and power loss.
 
 ## Trust boundaries
@@ -25,16 +25,15 @@
 Trusted to run one fixed power command. It must not trust request-supplied commands,
 paths, environment, or baseline values.
 
-### User daemon
+### Safety watcher
 
 Trusted with user files and network probes, but not root. It may request release; it cannot
 choose an arbitrary `pmset` argument.
 
-### Agent hooks
+### Agent skill
 
-Untrusted input. Hook JSON can contain repository-controlled strings and must never be
-used to construct shell commands. rucksack parses only fields needed for operational
-state.
+Outbound only. rucksack writes one marker-guarded document and reads nothing back: there are
+no hooks, no decisions returned to any provider, and no permission changes.
 
 ### Provider remote
 
@@ -44,129 +43,121 @@ authentication, pairing, and organization policy.
 ## Root helper controls
 
 - Unix peer credentials via `getpeereid`;
-- dynamic peer-process validation through Security.framework in release builds;
-- exact `io.rucksack.cli` code identifier, Developer ID Application chain, and compiled
-  Apple Team ID requirement;
-- socket owned by root and an administrator group;
+- socket owned by root and the administrator group, mode `0660`;
 - one live lease;
-- renew, re-assert, release, and active recovery restricted to owner UID or root;
+- renew, re-assert, release, and recovery restricted to the owner UID or root;
 - matching lease ID required for lease-specific mutations;
 - protocol versioning;
-- maximum reason length;
-- bounded TTL;
-- a persisted session deadline that renewal cannot extend;
+- maximum reason length of 256 bytes;
+- TTL bounded to 30–300 seconds;
+- a persisted session deadline, capped at 24 hours, that renewal cannot extend;
 - fixed absolute executable path;
 - fixed arguments;
 - cleared environment;
-- timeout and output bounds;
+- a five-second timeout and a 64 KiB output bound on the power command;
+- request size, concurrent connection, and per-connection I/O limits;
 - root-owned state with `0600` permissions;
-- fail-safe startup recovery;
+- fail-safe restoration on startup, and on persisted state that does not validate;
 - no request-directed executable, library, or plugin loading;
 - no network access.
 
-The unsigned development helper is deliberately not a production security boundary. It
-is available only from debug builds, emits a warning, and exists for local inspection.
-The signed package builds the helper with a Team ID, verifies both binaries report that
-Team ID after signing, and makes the release helper reject unsigned or differently signed
-clients.
+A helper compiled with `RUCKSACK_TEAM_ID` — which is how the notarized package is built —
+also validates the calling process through Security.framework against the exact
+`io.rucksack.cli` identifier, the Developer ID Application certificate chain, and that Team
+ID. A helper built from source has no Team ID and authenticates by peer UID alone, and says
+so at startup. That is deliberate: it is what makes `cargo build --release` usable, and it
+means any administrator-group process on such an installation can drive the helper. What that
+grants is the authority to switch one `pmset` setting — the same authority as running
+`sudo pmset -a disablesleep` — bounded by the lease TTL and the non-renewable deadline.
 
-## Configuration controls
+Code-signature validation establishes executable identity, not user intent: a process running
+as the lease owner can still invoke the legitimate signed CLI.
 
-- parse before backup/write;
-- atomic rename;
-- `0600` operational files;
-- stable rucksack marker;
-- backup before first mutation;
-- no symlink following for reserved files;
-- ownership check;
-- Cursor policy state remains inactive during activation and cleanup, and its durable
-  project locator is retained until every managed artifact is removed;
-- clean removal of marked entries only.
+## State controls
 
-## Hook controls
-
-- permission hooks return no decision and do not alter provider settings;
-- a fresh one-time token in the exact Commute Mode prompt atomically binds the canonical
-  project and provider session; project identity alone is insufficient;
-- later context and lifecycle hooks require both correlation values and otherwise fail closed;
-- no pack path, including `--allow-unverified-remote`, creates a durable session before
-  the fresh token-bearing prompt binds the exact provider session;
-- provider-scoped onboarding stores only typed evidence, timestamps, and SHA-256 bases in
-  an owner-only file; pairing codes, prompts, transcripts, credentials, and task IDs are
-  never stored there;
-- no shell construction from hook input;
-- stdin size limit;
-- output is generated from compiled policy and fixed schemas;
-- transcripts and tool output are not persisted by default;
-- event log stores event name, timestamp, state, and optional redacted tool category only.
+- atomic replace, then `fsync` of the file and its directory;
+- `0600` operational files inside `0700` directories;
+- refusal to modify a symlinked state path;
+- a version field on config and session state, rejected rather than guessed at when unknown;
+- an advisory lock serialising `pack`, `unpack`, and watcher updates;
+- configuration keys from older releases load and are ignored rather than failing a command;
+- session state rucksack cannot parse never blocks `unpack`, which deletes it;
+- a stable `rucksack-managed` marker on the skill file: rucksack refuses to overwrite a file
+  it does not own, and removes only files carrying that marker.
 
 ## Network controls
 
-- probes do not include repository data;
-- HTTPS for provider probes;
-- captive-portal probe contains no secrets;
-- `--allow-unverified-ssid` still requires exact join-request evidence or interactive
-  Wi-Fi-menu confirmation for a configured privacy-redacted SSID;
-- strict hotspot/USB sessions bind the verified SSID, route interface, and gateway;
-- a different live route identity releases immediately, while route loss receives only
-  the bounded reconnect grace;
-- version 0.1 has no rucksack-operated backend, relay, webhook, or notification transport.
+- the probe carries no user, session, or repository data: it is a plain GET with a
+  `rucksack/0.1` user agent;
+- arrival on the commute network is proven by the Wi-Fi name matching the saved hotspot, by
+  the default route leaving its baseline interface or gateway, by the `172.20.10.1` gateway
+  that only an iOS Personal Hotspot serves, by a join macOS confirmed, or by `--here`, which
+  is the user saying this network is the commute network — and in every case the route must
+  then actually reach the internet;
+- "the internet works" is never proof on its own, because the office network the user is
+  walking away from also works;
+- the probe is plain HTTP to `captive.apple.com` and requires Apple’s exact success page and
+  final host, so whoever controls the network can make it pass or fail. That decides only
+  whether `pack` proceeds and what `status` reports; a probe result never releases, extends,
+  or acquires a lease;
+- the lease is host-scoped, so no network change ever releases it. Losing the network is
+  recorded in the session and nothing more: a train entering a tunnel must not put the Mac to
+  sleep;
+- rucksack operates no backend, relay, webhook, or notification transport.
 
 ## Prompt-injection posture
 
-The policy is guidance, not a security boundary. The active provider session's existing
-instructions, sandbox, approval, and permission configuration remain the boundary, including
-any bypass mode the user deliberately selected. A repository can attempt to override
-guidance; therefore:
+The skill is guidance, not a security boundary. The agent’s existing instructions, sandbox,
+approval, and permission configuration remain the boundary, including any bypass mode the
+user deliberately selected. Therefore:
 
-- rucksack neither grants nor revokes provider permissions;
-- Commute Mode adds no rucksack-specific approval or deny rules;
-- permission lifecycle hooks observe state but return no decision;
+- rucksack neither grants nor revokes agent permissions;
+- rucksack installs no hooks and returns no decision to any provider;
+- the skill says which command to run and to relay one line of its output, and states that
+  the lease covers the whole Mac; it changes nothing about how an agent may act;
 - user documentation must not claim prompt text alone guarantees safety.
 
 ## Denial of service
 
-A local same-user process can kill the user daemon. The helper lease then expires and
-restores sleep. In a release installation, an unsigned or differently signed process
-cannot call the helper directly. This validates executable identity, not user intent: a
-process running as the lease owner can still invoke the legitimate signed CLI.
+A local same-user process can kill the watcher. The lease then expires within its TTL and the
+helper restores the sleep setting it recorded before acquiring. The same baseline is restored
+when the helper cannot re-arm the override after a power-source change.
 
-A same-user process could invoke the hook command repeatedly; rate-limit logs and bound
-input.
+In a signed package installation, a process that is not the signed CLI cannot call the helper
+at all. In a source build any administrator-group process can, and the worst it achieves is
+holding sleep off until the TTL or the 24-hour deadline elapses. Flooding the socket is
+bounded to refused connections rather than unbounded work, and refusing service to the CLI
+does not keep the Mac awake: an unrenewed lease expires on its own.
 
 ## Privacy
 
-Default rucksack state should not contain:
+rucksack’s own state records operational facts only: the saved network name, the current route
+interface, battery percentage, timestamps, the owning UID, the watcher PID, and the last event
+or release reason. It does not contain:
 
 - prompt text;
 - assistant responses;
-- command output;
 - file contents;
 - credentials;
-- pairing codes after display;
-- repository remote URLs.
+- pairing codes, which are printed and never written.
 
-The active policy temporarily stores a one-time confirmation token until the matching hook
-consumes it. rucksack never stores the submitted prompt text; the token is cleared when the
-provider session binds.
+One exception is worth naming: Codex Remote Control is started as a child process with
+rucksack’s daemon log as its standard output and error, so whatever that command writes lands
+in `~/Library/Logs/Rucksack/daemon.log`.
 
-The completed-session report may store local operational metadata and aggregate start/end
-byte counters for the verified commute interface. rucksack does not capture packets,
-destinations, hostnames, URLs, payloads, prompts, responses, command output, file contents,
-or repository content for reporting.
-
-Project directory and reports remain local and are never uploaded by rucksack. The mobile
-data value can include macOS and unrelated-app traffic, can omit traffic on other
-interfaces, and is neither per-agent attribution nor carrier billing.
+Session state and logs stay on this Mac and are never uploaded by rucksack.
 
 ## Residual risks
 
-- undocumented macOS behavior may change;
-- `pmset disablesleep` is a global setting;
-- thermal sampling is not a substitute for ventilation;
+- undocumented macOS behaviour may change;
+- `pmset disablesleep` is global: rucksack refuses to start when something else already owns
+  it, and reasserts the override every five seconds while a lease is held, so rucksack and a
+  second closed-lid utility would contend for one switch;
+- thermal sampling is not a substitute for ventilation, and a Mac closed in a bag can become
+  warm between samples;
 - a hardware fault can prevent cleanup;
-- provider hook semantics may change;
-- Cursor Remote Control may remain UI-only;
-- a Mac closed in a bag can still become warm before the next sample.
+- the internet probe is plaintext HTTP and can be spoofed by whoever controls the network;
+- Codex Remote Control is not supervised after it starts, so it can stop without rucksack
+  noticing.
 
 These risks belong in release notes, not hidden in legal text.

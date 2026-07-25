@@ -95,7 +95,7 @@ exact developer context through `hookSpecificOutput.additionalContext`. The latt
 before every submitted prompt, which lets a stable hook read the current atomic rucksack
 policy without rewriting the trusted hook definition for each commute. Non-managed hooks
 must be reviewed and trusted in `/hooks`. User skills live in
-`$HOME/.agents/skills/<name>/SKILL.md` and provide the explicit `$commute-mode` path for an
+`$HOME/.agents/skills/<name>/SKILL.md` and provide the explicit `$rucksack` path for an
 already-open conversation.
 
 Primary sources:
@@ -173,7 +173,7 @@ Project rules live in `.cursor/rules`. Cursor's file-backed global-home rule pat
 supported; global User Rules are configured through Cursor itself. rucksack therefore uses
 a temporary project rule plus a project command, excludes both locally through
 `.git/info/exclude`, and removes them when the lease ends. `AGENTS.md` is not edited because
-Commute Mode is transient host state, not repository policy.
+A rucksack session is transient host state, not repository policy.
 
 Primary source:
 

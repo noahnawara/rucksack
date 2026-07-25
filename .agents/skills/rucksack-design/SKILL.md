@@ -13,7 +13,8 @@ Use Impeccable for the design and critique workflow when it is available. Treat 
 
 Before changing a Rucksack surface:
 
-1. Read `docs/PRODUCT.md` for the promise, persona, anxieties, and safety boundaries.
+1. Read `docs/PRODUCT.md` for the promise, persona, anxieties, and safety boundaries. The CLI's own
+   copy contract is the strings in `crates/rucksack-cli/src/flow.rs`; there is no separate copy doc.
 2. Inspect `site/src/styles.css` and `site/index.html` for the incumbent visual truth.
 3. Inspect the target at desktop and mobile sizes. Preserve the existing identity unless the user explicitly asks to replace it.
 4. State the user-visible goal and the invariants that must survive.
@@ -119,9 +120,10 @@ Test at the first frame, a middle frame, and the settled frame. Compare element 
 ## Write with operational clarity
 
 - Lead with the outcome: `packed means you can leave.`
-- Prefer short concrete clauses: `pack → connect hotspot → go`.
+- Prefer short concrete clauses: `rucksack pack → go`.
 - Use contrast sparingly to clarify a decision: `don’t move the project. move yourself.`
-- Name measured facts, not abstractions: `phone hotspot has internet`.
+- Name measured facts, not abstractions: `your hotspot actually reaches the internet`. Every fact
+  in an evidence list must be a gate the CLI enforces; aspirational rows are drift.
 - Keep flavor subordinate to instruction.
 - Do not invent product capabilities, safety guarantees, or privacy claims. Check `docs/PRODUCT.md`.
 - On persuasive entry surfaces, keep one promise, one distilled proof object, and one action in the first viewport.

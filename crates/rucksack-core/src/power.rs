@@ -45,21 +45,6 @@ pub struct ThermalStatus {
     pub raw: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KnownSleepUtility {
-    Amphetamine,
-    Caffeinate,
-}
-
-impl KnownSleepUtility {
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Amphetamine => "Amphetamine",
-            Self::Caffeinate => "caffeinate",
-        }
-    }
-}
-
 pub fn read_power_status() -> Result<PowerStatus> {
     let result = run_pmset(&["-g", "batt"])?;
     require_success("pmset -g batt", &result)?;
@@ -190,42 +175,6 @@ pub fn parse_thermal(text: &str) -> ThermalStatus {
     }
 }
 
-pub fn read_active_sleep_utilities() -> Result<Vec<KnownSleepUtility>> {
-    let result = run_pmset(&["-g", "assertions"])?;
-    require_success("pmset -g assertions", &result)?;
-    Ok(parse_active_sleep_utilities(&result.stdout))
-}
-
-pub fn parse_active_sleep_utilities(text: &str) -> Vec<KnownSleepUtility> {
-    let mut amphetamine_active = false;
-    let mut caffeinate_active = false;
-
-    for owner in text.lines().filter_map(assertion_owner) {
-        let normalized = owner.trim().to_ascii_lowercase();
-        amphetamine_active |= normalized == "amphetamine" || normalized.starts_with("amphetamine ");
-        caffeinate_active |= normalized == "caffeinate";
-    }
-
-    [
-        amphetamine_active.then_some(KnownSleepUtility::Amphetamine),
-        caffeinate_active.then_some(KnownSleepUtility::Caffeinate),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-fn assertion_owner(line: &str) -> Option<&str> {
-    let line = line.trim_start();
-    if !line.starts_with("pid ") {
-        return None;
-    }
-    let owner_start = line.find('(')? + 1;
-    let owner_tail = &line[owner_start..];
-    let owner_end = owner_tail.find("):")?;
-    Some(&owner_tail[..owner_end])
-}
-
 fn run_pmset(args: &[&str]) -> Result<CommandResult> {
     run_bounded_cleared(
         "/usr/bin/pmset",
@@ -306,35 +255,5 @@ mod tests {
         );
         assert!(!thermal.throttled);
         assert_eq!(thermal.level, ThermalLevel::Nominal);
-    }
-
-    #[test]
-    fn finds_and_deduplicates_known_sleep_assertion_owners() {
-        let utilities = parse_active_sleep_utilities(
-            "Listed by owning process:\n\
-             pid 101(caffeinate): [0x1] PreventUserIdleSystemSleep named: \"caffeinate\"\n\
-             pid 202(Amphetamine): [0x2] PreventSystemSleep named: \"Amphetamine\"\n\
-             pid 202(Amphetamine): [0x3] PreventUserIdleSystemSleep named: \"session\"\n",
-        );
-
-        assert_eq!(
-            utilities,
-            vec![
-                KnownSleepUtility::Amphetamine,
-                KnownSleepUtility::Caffeinate
-            ]
-        );
-    }
-
-    #[test]
-    fn ignores_known_names_outside_the_assertion_owner() {
-        let utilities = parse_active_sleep_utilities(
-            "Listed by owning process:\n\
-             pid 303(powerd): [0x4] PreventUserIdleSystemSleep named: \"caffeinate\"\n\
-             pid 404(NotAmphetamine): [0x5] PreventSystemSleep named: \"Amphetamine\"\n\
-             Kernel Assertions: owner=caffeinate\n",
-        );
-
-        assert!(utilities.is_empty());
     }
 }

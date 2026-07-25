@@ -5,24 +5,27 @@
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │ rucksack CLI                                                │
-│ setup · doctor · pack · status · unpack · report · recover  │
+│ pack · status · unpack · pair · star · helper               │
 └───────────────┬─────────────────────────────────────────────┘
                 │ typed JSON over Unix socket
 ┌───────────────▼─────────────────────────────────────────────┐
 │ rucksack-helper (root LaunchDaemon)                         │
-│ signed-client auth · lease · pmset · power events · watchdog│
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
+│ peer-UID auth · lease · pmset · power events · watchdog     │
+└───────────────▲─────────────────────────────────────────────┘
+                │ renew · release
+┌───────────────┴─────────────────────────────────────────────┐
 │ rucksack daemon (user)                                      │
-│ heartbeats · battery · thermal · route · probes · policy    │
+│ heartbeats · battery · thermal · route · internet probe     │
 └───────────────┬─────────────────────────────────────────────┘
-                │ files / hook stdio
+                │ session.json under an advisory lock
 ┌───────────────▼─────────────────────────────────────────────┐
-│ Codex hooks + skill · Claude hooks + skill · Cursor hooks   │
-│ + temporary rule                                            │
+│ session state, read by status and unpack                    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+`pack` also spawns Codex Remote Control as a child it never waits for, and writes one
+marker-guarded `SKILL.md` into each agent's skills directory that already exists. There are
+no hooks and no editor rules.
 
 ## Crates
 
@@ -30,39 +33,48 @@
 
 No privilege. Shared types and pure logic:
 
-- configuration;
-- paths and atomic files;
-- power/network parsers;
-- policy rendering;
-- agent detection and adapter documents;
-- session state;
-- helper protocol.
+- `config` — the on-disk configuration, which ignores keys older releases wrote;
+- `paths` and `files` — where state lives, plus atomic writes and advisory locks;
+- `power` and `network` — `pmset`, battery, thermal, Wi-Fi, route, and probe parsers;
+- `state` — the host session record and its phases;
+- `protocol` — the helper request, response, and status types;
+- `skill` — the marker-guarded agent skill file;
+- `codex` — finding Codex and building its Remote Control arguments;
+- `system` — bounded command execution, `which`, process listing, and the current UID.
+
+There is no agent module and no adapter machinery.
 
 ### `rucksack-cli`
 
 User-facing binary:
 
-- interactive flow;
-- helper installation client;
-- daemon mode;
-- hook mode;
-- adapter install/remove;
-- remote-provider commands.
+- `cli` and `app` — six visible verbs plus a hidden `daemon`, and their dispatch;
+- `flow` — `pack`, `status`, and `unpack`;
+- `daemon` — the safety watcher;
+- `install` — installing and removing the root helper through one `sudo` prompt;
+- `helper_client` — one request and one response per socket connection;
+- `output` — `step`, `done`, `warn`, and a `detail` only `--verbose` prints;
+- `star` — the GitHub star, offered once after a successful `unpack`.
 
 ### `rucksack-helper`
 
 Small root binary:
 
-- Unix socket;
-- peer credential validation plus release-build code-signature and Team ID validation;
-- single lease;
-- fixed `pmset` calls;
-- persisted baseline;
-- expiry watchdog;
-- power-source notifications.
+- `server` — the Unix socket, peer authentication, connection limits, and the two
+  background threads;
+- `lease` — one lease, its persisted baseline, the fixed `pmset` calls, and expiry;
+- `power_events` — IOKit power-source notifications on a run loop.
 
-It contains no HTTP client, agent adapter, config merger, shell interpreter, or arbitrary
-filesystem API.
+It contains no HTTP client, config merger, shell interpreter, or arbitrary filesystem API.
+
+### Privileged boundary
+
+The helper authenticates a caller by peer UID through `getpeereid`, on a `root:admin` `0660`
+socket, and checks lease ownership on every operation. It also verifies the calling binary's
+Apple code signature — identifier, Developer ID chain, and Team ID — but only when it was
+compiled with `RUCKSACK_TEAM_ID`, which is set for signed release packages. A build from
+source has no team ID and authenticates by UID alone, which is what makes
+`cargo build --release` usable; such a helper says so on startup.
 
 ## State locations
 
@@ -71,23 +83,21 @@ User state:
 ```text
 ~/Library/Application Support/Rucksack/config.toml
 ~/Library/Application Support/Rucksack/session.json
-~/Library/Application Support/Rucksack/last-report.json
-~/Library/Application Support/Rucksack/active-policy.json
-~/Library/Application Support/Rucksack/remote-onboarding.json
+~/Library/Application Support/Rucksack/session.lock
+~/Library/Application Support/Rucksack/session.terminal.lock
+~/Library/Application Support/Rucksack/asked-about-star
 ~/Library/Logs/Rucksack/daemon.log
 ```
 
-`remote-onboarding.json` is a strict versioned registry written atomically under an
-advisory lock. It contains only provider kind, typed measured/user-confirmed evidence,
-timestamps, invalidation reasons, and SHA-256 bases. It is owner-only (`0600`) inside the
-owner-only data directory (`0700`) and contains no pairing code, credential, prompt,
-transcript, repository content, or durable provider task ID.
+The data directory is created `0700` and everything rucksack writes into it is `0600`. No
+session file is the resting state: `unpack` deletes `session.json`.
 
 Root state:
 
 ```text
 /var/db/rucksack/helper-state.json
 /var/run/rucksack-helper.sock
+/var/log/rucksack-helper.log
 /Library/PrivilegedHelperTools/io.rucksack.helper
 /Library/LaunchDaemons/io.rucksack.helper.plist
 ```
@@ -95,39 +105,32 @@ Root state:
 ## Session state machine
 
 ```text
-inactive
-   │
-   ▼
-preflight
-   │ agent + network + battery pass
-   ▼
-policy_active
-   │ lease acquired
-   ▼
-waiting_for_hotspot
-   │ route + internet pass
-   ▼
-waiting_for_unplug
-   │ battery observed + reassert + re-probe
-   ▼
 ready
-   │ daemon heartbeats
+   │ the watcher's first heartbeat
    ▼
-active ──────────────┬──────────────┬───────────────┐
-   │                 │              │               │
-   │ user unpacks    │ timeout      │ battery floor │ thermal
-   ▼                 ▼              ▼               ▼
-releasing ◄─────────────────────────────────────────┘
-   │ baseline verified, report saved, policy removed
+active
+   │ unpack, the time limit, the battery floor, real heat, or a battery
+   │ gauge that went silent on battery
    ▼
-inactive
+released
+   │ unpack clears the record
+   ▼
+no session
 ```
 
-Any internal inconsistency goes to `releasing`, not back to `active`.
+A lease belongs to this Mac, so nothing about a conversation appears in the record and
+nothing about a conversation ends it. Losing the network and an agent finishing its work are
+recorded and neither releases the lease.
+
+When the helper stops answering a renewal, the watcher exits with that error and leaves the
+record `active`; the helper's own TTL restores sleep, and the next `unpack` clears the
+record.
 
 ## Helper protocol
 
-One newline-delimited JSON request per connection.
+One newline-delimited JSON request per connection, at most 32 connections at once, 256 KiB
+per request, and a ten-second read and write timeout. The operations are `acquire`, `renew`,
+`reassert`, `release`, `recover`, and `status`.
 
 ```json
 {
@@ -138,7 +141,7 @@ One newline-delimited JSON request per connection.
     "lease_id": "uuid",
     "ttl_seconds": 90,
     "hard_expires_at": "2026-07-24T19:42:00Z",
-    "reason": "Claude Code commute"
+    "reason": "rucksack"
   }
 }
 ```
@@ -151,6 +154,7 @@ Responses include the observed state, not only command success:
   "request_id": "uuid",
   "ok": true,
   "status": {
+    "active": true,
     "lease_id": "uuid",
     "owner_uid": 501,
     "expires_at": "2026-07-24T18:42:00Z",
@@ -165,89 +169,83 @@ Responses include the observed state, not only command success:
 
 ### Acquire
 
-1. Validate the peer UID and, in release builds, its dynamic code signature, identifier,
-   Developer ID chain, and Team ID.
-2. Reject a live lease owned by another UID.
-3. Validate and persist the non-renewable session deadline.
-4. Read `SleepDisabled`.
-5. Require the verified normal baseline `SleepDisabled=0`; refuse to coexist with another
-   owner.
-6. Persist the baseline and requested lease before mutation.
+1. Validate the peer UID and, where a Team ID was compiled in, the peer's code signature.
+2. Require a TTL of 30 to 300 seconds and a reason of no more than 256 bytes.
+3. Reject a live lease; the same owner asking again for the same lease ID renews instead,
+   and cannot move its hard deadline.
+4. Require a hard deadline that is in the future and no more than 24 hours away.
+5. Read `SleepDisabled` and require the normal baseline `0`, so there is an unambiguous
+   rollback target and no coexistence with another owner.
+6. Persist the baseline and the lease before mutating anything.
 7. Run the fixed `pmset` command.
 8. Verify `SleepDisabled=1`.
 
-If verification fails, restore baseline and retain error state until recovery is verified.
+If verification fails, the helper restores the baseline. When that works it drops the lease
+and deletes its state; when it does not, it marks the lease expired so the watchdog keeps
+trying, and says both things failed.
 
 ### Renew
 
-- require owner UID and matching lease ID;
-- cap TTL to a compiled maximum;
-- update persisted expiry without crossing the hard session deadline;
-- verify/reassert `SleepDisabled=1`.
+- require the owner UID and a matching lease ID;
+- release, and refuse the renewal, when either deadline has already passed;
+- cap the TTL at the compiled maximum and clamp it to the hard deadline;
+- reassert and verify `SleepDisabled=1` when it is no longer `1`.
+
+### Watchdog
+
+Every five seconds: release when the lease TTL or the hard deadline has passed, and reassert
+when `SleepDisabled` is not `1`.
 
 ### Power change
 
-- event callback wakes helper;
-- helper reasserts immediately;
-- helper verifies immediately and after a short debounce;
-- repeated failure releases/restores.
+- an IOKit power-source notification wakes the helper;
+- it writes the setting immediately, again after a short debounce, and then verifies;
+- any failure restores the baseline and reports that it did.
 
 ### Release
 
-1. retain the persisted lease until restoration succeeds;
+1. keep the persisted lease until restoration succeeds;
 2. restore the saved normal baseline;
 3. verify;
 4. delete persisted helper state;
-5. return final status.
+5. return the final status.
+
+`recover` is the same path without a lease ID, for the owner UID or root.
 
 ### Startup
 
-If a persisted state file exists, restore its baseline before opening the socket. A restart
-therefore fails safe even if the user daemon is still running.
+If a persisted state file exists, restore its baseline before opening the socket; a state
+file that will not parse or does not validate is restored to `SleepDisabled=0` and deleted.
+A restart therefore fails safe even if the user daemon is still running.
 
 ## User daemon
 
 The daemon is deliberately unprivileged. Every heartbeat:
 
-- renew helper lease;
-- read battery;
-- read thermal signal;
-- check hard deadline;
-- check Wi-Fi/default route;
-- for strict hotspot/USB sessions, compare live SSID, route interface, and gateway with the
-  verified handoff route;
-- make a bounded internet/provider probe;
-- sample aggregate byte counters on the verified commute interface;
-- update local session state;
-- atomically replace the private local `last-report.json` before terminal session cleanup;
-- remove temporary policy after a terminal release.
+- check the hard deadline, the battery floor, thermal pressure, and whether the battery is
+  readable at all, and release when one of those says to;
+- renew the helper lease;
+- read the battery, the default route, and the Wi-Fi name;
+- make a bounded internet probe;
+- update the session record, including whether the network came or went.
 
 It cannot set `SleepDisabled` directly.
 
-A different live SSID, interface, or gateway proves the strict commute route was replaced
-and triggers immediate release. A missing route is treated as a temporary outage and uses
-the configured reconnect grace before release.
-
-The completed-session report retains only the latest session. Mobile-data accounting is a
-start/end delta of macOS interface byte counters and is explicitly an estimate of aggregate
-Mac traffic on that interface. A missing baseline or final sample, interface change, or
-counter reset produces a partial/unavailable result instead of a fabricated value. No
-packet capture or destination-level logging is involved. Report writes are serialized and
-a stale writer that no longer owns current session state cannot replace the latest report.
+The probe and the route only feed `status`. Three consecutive failures to read the battery
+while on battery end the session, because a Mac flying blind on battery is the one case
+where staying awake is unsafe; a silent gauge on AC power is ordinary and means nothing.
 
 ## Concurrency
 
 - helper lease state is guarded by one mutex;
 - helper operations are serialized;
-- event and watchdog threads enqueue work against the same state;
-- user state mutations use short advisory-lock transactions, revision checks, and atomic
-  temp-file + rename writes;
-- `pack`, daemon release, `unpack`, and `recover` share one terminal-operation lock, so only
-  one path can start or finalize a session;
-- same-session report writes are idempotent, and a different session can replace the latest
-  report only while it owns the current session state;
+- the watchdog and power-event threads take the same lock as request threads;
+- user state changes are read-modify-write under one advisory lock, written to a temporary
+  file and renamed into place, and ignored when the session on disk is a different one;
+- `pack`, daemon release, and `unpack` share one terminal-operation lock, so only one path
+  can start or finish a session;
 - one user session is allowed per account;
-- helper allows one global lease because `SleepDisabled` is global.
+- the helper allows one global lease because `SleepDisabled` is global.
 
 ## Packaging
 
@@ -256,13 +254,12 @@ The release-gated distribution pipeline implements:
 - universal macOS binaries;
 - Developer ID signing;
 - hardened runtime;
-- a notarized `.pkg` workflow;
+- a notarized and stapled `.pkg` workflow;
 - stable `rucksack-universal.pkg` and checksum asset names;
 - a checksum-, signature-, and Gatekeeper-verifying `scripts/install.sh`;
 - signed root helper;
 - launchd plist;
 - deterministic release metadata and checksums.
 
-It has not yet completed a production-credential notarization run or the hardware gate.
-A Homebrew cask remains future work. The alpha’s `helper install` command is for debug
-development and review, not release authorization.
+It has not yet completed a production-credential notarization run or the hardware gate. A
+Homebrew cask remains future work.
