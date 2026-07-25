@@ -25,6 +25,19 @@ cargo test --workspace --locked
 Power and launchd integration tests must run on a disposable or dedicated Mac. Never run
 closed-lid tests inside an insulated bag. Use a ventilated desk setup and a short lease.
 
+For the site, run the browser tests before opening a pull request, and check the deployed
+result rather than assuming it:
+
+```bash
+cd site && npm test
+site/scripts/verify-deployment.sh <preview-url>
+```
+
+Preview deployments require Vercel sign-in, so the verification script sends the project's
+automation bypass secret instead. It reads that secret from the signed-in Vercel CLI, or
+from `VERCEL_AUTOMATION_BYPASS_SECRET`, and never prints it. With no argument the script
+checks production.
+
 ## Pull requests
 
 Describe:

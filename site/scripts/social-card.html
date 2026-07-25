@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>rucksack social card</title>
+    <link rel="stylesheet" href="/assets/CARD_STYLESHEET" />
+    <style>
+      /* Layout for the share card only. Colors, fonts, and geometry come from
+         the site stylesheet above so this asset cannot drift from the system. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--night);
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        box-sizing: border-box;
+        width: var(--card-width);
+        height: var(--card-height);
+        padding: 2.6% 5.8%;
+        background: var(--night);
+        color: var(--ink);
+        font-family: "DM Sans Variable", system-ui, sans-serif;
+      }
+
+      .card-rule {
+        border-top: 1px solid var(--chapter-line);
+      }
+
+      .card-head,
+      .card-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-block: 1.4rem;
+      }
+
+      .card-mark {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        font-size: 1.55rem;
+        font-weight: 700;
+        letter-spacing: -0.035em;
+      }
+
+      .card-mark svg {
+        width: 2.05rem;
+        height: 2.05rem;
+        fill: var(--acid);
+        shape-rendering: crispEdges;
+      }
+
+      .machine {
+        color: var(--muted);
+        font-family: "Doto Variable", ui-monospace, monospace;
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .card-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 25.5rem;
+        gap: 4rem;
+        align-items: center;
+      }
+
+      .card-body h1 {
+        max-width: 20ch;
+        margin: 0;
+        font-size: 3.35rem;
+        font-weight: 700;
+        letter-spacing: -0.035em;
+        line-height: 1.2;
+        text-wrap: balance;
+      }
+
+      .card-body p {
+        margin: 1.35rem 0 0;
+        color: #d5d8cc;
+        font-size: 1.32rem;
+        line-height: 1.42;
+      }
+
+      .card-pass {
+        background: var(--pass);
+        border: 1px solid var(--line);
+        clip-path: polygon(
+          0 0.7rem,
+          0.7rem 0,
+          calc(100% - 0.7rem) 0,
+          100% 0.7rem,
+          100% calc(100% - 0.7rem),
+          calc(100% - 0.7rem) 100%,
+          0.7rem 100%,
+          0 calc(100% - 0.7rem)
+        );
+      }
+
+      .card-pass-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.35rem 1.6rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .card-pass-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .card-pass-state {
+        color: var(--acid);
+        font-family: "Doto Variable", ui-monospace, monospace;
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .card-pass-body {
+        padding: 1.75rem 1.6rem 1.9rem;
+      }
+
+      .card-route {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 2.1rem;
+      }
+
+      .card-route span:not(.card-route-pack) {
+        color: var(--muted);
+        font-family: "Doto Variable", ui-monospace, monospace;
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.035em;
+      }
+
+      .card-route-pack svg {
+        display: block;
+        width: 2.1rem;
+        height: 2.1rem;
+        padding: 0.22rem;
+        background: var(--acid);
+        fill: var(--acid-ink);
+        shape-rendering: crispEdges;
+      }
+
+      .card-result {
+        display: block;
+        font-size: 1.72rem;
+        font-weight: 700;
+        letter-spacing: -0.028em;
+      }
+
+      .card-support {
+        margin: 0.55rem 0 0;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+
+      .card-action {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.15rem 1.6rem;
+        background: var(--acid);
+        color: var(--acid-ink);
+        font-size: 1.2rem;
+        font-weight: 700;
+      }
+
+      .card-action svg {
+        width: 1.35rem;
+        height: 1.35rem;
+        fill: var(--acid-ink);
+        shape-rendering: crispEdges;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div>
+        <div class="card-head">
+          <span class="card-mark">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 6h14v2H5zM3 8h2v12H3zm2 12h14v2H5zM19 8h2v12h-2z" />
+              <path
+                d="M7 16h2v6H7zm8 0h2v6h-2zm-6-2h6v2H9zm-2-4h10v2H7zm1-6h2v2H8zm6 0h2v2h-2zm-4-2h4v2h-4z"
+              />
+            </svg>
+            <span>rucksack</span>
+          </span>
+          <span class="machine">commute mode</span>
+        </div>
+        <div class="card-rule"></div>
+      </div>
+
+      <div class="card-body">
+        <div>
+          <h1>close your laptop. keep your agent running.</h1>
+          <p>switch to your hotspot in one step. skip the cloud setup.</p>
+        </div>
+
+        <div class="card-pass">
+          <div class="card-pass-head">
+            <span class="card-pass-title">commute pass</span>
+            <span class="card-pass-state">packed</span>
+          </div>
+          <div class="card-pass-body">
+            <div class="card-route">
+              <span>office wifi</span>
+              <span class="card-route-pack">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M5 6h14v2H5zM3 8h2v12H3zm2 12h14v2H5zM19 8h2v12h-2z"
+                  />
+                  <path
+                    d="M7 16h2v6H7zm8 0h2v6h-2zm-6-2h6v2H9zm-2-4h10v2H7zm1-6h2v2H8zm6 0h2v2h-2zm-4-2h4v2h-4z"
+                  />
+                </svg>
+              </span>
+              <span>phone hotspot</span>
+            </div>
+            <strong class="card-result">handoff verified</strong>
+            <p class="card-support">same local agent session.</p>
+          </div>
+          <div class="card-action">
+            <span>setup prompt</span>
+            <svg viewBox="0 0 24 24">
+              <path d="M7 5h12v2H7zm10 2h2v12h-2z" />
+              <path d="M7 15h2v2H7zm2-2h2v2H9zm2-2h2v2h-2zm2-2h2v2h-2zm2-2h2v2h-2z" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card-rule"></div>
+        <div class="card-foot">
+          <span class="machine">macOS · Codex · Claude Code · Cursor</span>
+          <span class="machine">rucksack.wtf</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
