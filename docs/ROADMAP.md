@@ -34,6 +34,18 @@ Release gate:
 - public `ProcessInfo.thermalState` FFI;
 - IOKit battery data instead of command parsing;
 - provider/version capability detection;
+- persisted per-provider remote onboarding: installation, pairing, native trust, and baseline
+  phone visibility are confirmed once during `setup`; later `pack` runs still bind and
+  activate the exact live session, but repeat onboarding proof only when the provider
+  account, paired device, adapter/trust state, or detected provider capability materially
+  changes;
+- make the helper's 24-hour safety horizon the default hard deadline; keep `rucksack pack
+  --for <duration>` for intentionally shorter sessions and keep active hard deadlines
+  non-renewable;
+- commute-aware orchestration: keep useful independent work parallel, but give every
+  agent, monitor, preview server, and poll loop an owner, purpose, stop condition, and
+  cleanup path; prefer event-driven waits and cached watcher evidence, and terminate work
+  promptly when it completes or becomes irrelevant;
 - optional explicitly configured return Wi-Fi for `unpack`; never guess from the user's
   preferred-network list;
 - Homebrew cask after the first signed release;
@@ -58,7 +70,7 @@ Exit criteria:
 
 - local encrypted relay or provider-native deep links only;
 - optional iOS/Watch companion for health, not code transport;
-- extend/end lease;
+- view/end lease;
 - battery/thermal/link notifications;
 - multiple Macs.
 
