@@ -88,7 +88,7 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   await expect(
     page.getByRole("heading", {
       level: 2,
-      name: "don’t move the project. move yourself.",
+      name: "no second environment to set up.",
     }),
   ).toBeVisible();
   await expect(page.getByText("pack → connect hotspot → go")).toBeVisible();
@@ -112,11 +112,16 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   await expect(
     page.getByRole("heading", {
       level: 2,
-      name: "keep a MacBook awake—with limits.",
+      name: "what happens when the lid closes.",
     }),
   ).toBeVisible();
   await expect(
-    page.getByText("why isn’t caffeinate enough?", { exact: true }),
+    page.getByText("why does my hotspot drop when I close the lid?", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("why doesn’t caffeinate fix it?", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText(
@@ -239,7 +244,7 @@ test("publishes crawl discovery files and a valid manifest", async ({
   }
 
   expect(manifest).toMatchObject({
-    name: "rucksack — Commute Mode for AI coding agents",
+    name: "rucksack: Commute Mode for AI coding agents",
     start_url: "/",
     categories: ["productivity", "utilities"],
   });
@@ -296,7 +301,7 @@ test("gives a direct manual-copy handoff when clipboard access fails", async ({
     "your browser blocked clipboard access.",
   );
   await expect(status).toContainText(
-    "you — select the prompt and copy it.",
+    "select the prompt below and copy it.",
   );
   await expect(page.locator("#manual-copy")).toBeVisible();
   await expect(page.locator("#install-prompt-details")).toHaveAttribute(
