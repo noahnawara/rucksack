@@ -97,6 +97,30 @@ network yourself:
 rucksack pack --hotspot "My iPhone"
 ```
 
+## Make departures actually happen
+
+Add these two lines to whatever file your agent always loads — `~/.claude/CLAUDE.md` for Claude Code,
+`~/.codex/AGENTS.md` for Codex:
+
+```text
+When I say I'm leaving, heading out, or have to go: run `rucksack pack` before carrying on, and
+tell me the last line it prints. When I say I'm back: run `rucksack unpack`.
+```
+
+Do not skip this, and do not assume the skill covers it. The skill is what makes "pack my Mac" work
+as a sentence. It does not reliably make an agent act on "I have to go, catch my train", because a
+skill list is consulted when an agent is choosing a tool for the task in front of it, and your
+departure is not that task.
+
+That is tested, not supposed. An agent with the skill installed and correctly described was told
+"i have to go now, catch my train, keep going on the wordcount thing while i'm out". It kept coding
+and never packed the Mac. Asked afterwards, it had read the skill list and simply never compared it
+to what the user said.
+
+An always-loaded instruction is part of every conversation, so it does not depend on the agent making
+that connection. rucksack writes nothing into these files itself — your instructions to your agents
+stay yours.
+
 ## Check the installation
 
 ```sh
