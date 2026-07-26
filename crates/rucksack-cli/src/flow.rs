@@ -2,6 +2,7 @@ use crate::cli::{PackArgs, StatusArgs};
 use crate::helper_client::HelperClient;
 use crate::install;
 use crate::output::Output;
+use crate::thermal::{ends_a_lease, read_thermal_state};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
@@ -89,7 +90,7 @@ fn pack_inner(
 
     require_normal_sleep()?;
     let battery = require_enough_battery(&config, output)?;
-    require_no_thermal_throttling()?;
+    require_no_thermal_pressure()?;
 
     let helper = ensure_helper(HelperClient::default(), output)?;
     let network = ensure_commute_network(args, &config, output)?;
@@ -193,14 +194,21 @@ fn require_enough_battery(config: &Config, output: &Output) -> Result<Option<u8>
     Ok(power.percent)
 }
 
-/// Only actual throttling is a reason to refuse.
+/// Refuse to pack a Mac the watcher would release on its first heartbeat.
 ///
-/// macOS declining to report thermal pressure means silence, not heat.
-fn require_no_thermal_throttling() -> Result<()> {
+/// This asks exactly what the watcher asks, from both sources, so the two cannot disagree.
+/// Accepting a pack under heat that ends a lease would put the Mac to sleep seconds later, having
+/// already changed the network — the opposite of what the user asked for.
+///
+/// macOS declining to report thermal pressure still means silence, not heat.
+fn require_no_thermal_pressure() -> Result<()> {
     let thermal = read_thermal_status().context("Could not read thermal pressure.")?;
-    if thermal.throttled {
+    if thermal.throttled
+        || ends_a_lease(thermal.level)
+        || read_thermal_state().is_some_and(ends_a_lease)
+    {
         anyhow::bail!(
-            "This Mac is already thermally throttled, so a closed lid would make it worse.\nLet it cool down, then run `rucksack pack` again."
+            "This Mac is already too hot, so a closed lid would make it worse.\nLet it cool down, then run `rucksack pack` again."
         );
     }
     Ok(())

@@ -13,7 +13,7 @@ be described as production-ready until those checks pass.
 Counts include repository dotfiles and exclude `.git`, `target`, `site/node_modules`, and
 `site/test-results`:
 
-- 25 Rust source files;
+- 26 Rust source files;
 - 8 TOML files;
 - 4 JSON files;
 - 1 launchd plist;
@@ -39,8 +39,8 @@ cd site && npm run test:e2e
 
 Test results:
 
-- 100 debug tests: CLI 36, CLI contract 7, core 46, helper 11;
-- 101 release tests: the same set plus one macOS release-only helper test;
+- 105 debug tests: CLI 40, CLI contract 7, core 47, helper 11;
+- 106 release tests: the same set plus one macOS release-only helper test;
 - 43 end-to-end assertions from `scripts/e2e.sh`, against real leases on this hardware;
 - 16 browser tests and 0 vulnerabilities reported by `npm audit`;
 - 0 failures.
@@ -59,6 +59,11 @@ The tests and the structural review cover the invariants that make a closed lid 
   answering the heartbeat, after which the helper's own TTL restores sleep;
 - the release decision is a pure function, so "a healthy Mac keeps its lease" is a test
   rather than a hope, including a silent battery gauge on AC power;
+- thermal pressure is read from public `ProcessInfo.thermalState` as well as `pmset -g
+  therm`, because the `pmset` counters are Intel-era and Apple silicon leaves them empty at
+  every temperature; absent counters parse to `Unknown` rather than nominal, so no thermal
+  level is ever claimed that was not measured, and `pack` refuses whatever the watcher
+  would release on;
 - `pack` proves it reached a commute network instead of accepting that the internet works:
   the Wi-Fi name matching the saved hotspot, the default route leaving its baseline
   interface or gateway, an iOS Personal Hotspot gateway (`172.20.10.1`, or `192.0.0.1` on
@@ -187,7 +192,9 @@ The test must include:
 3. post-transition `SleepDisabled`, route, and captive-network verification;
 4. lid closure and at least a 15-minute session;
 5. battery-floor release;
-6. thermal release or a controlled thermal-state fixture;
+6. thermal release or a controlled thermal-state fixture. The signal is now
+   `ProcessInfo.thermalState`, which does move on Apple silicon, so this case is reachable
+   on the targeted hardware for the first time; it has not yet been run under real heat;
 7. watcher termination;
 8. helper termination/restart;
 9. reboot with persisted helper state;

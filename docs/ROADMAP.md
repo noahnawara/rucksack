@@ -14,7 +14,9 @@ Implemented in source:
 - waiting for as long as it takes when macOS cannot join, ticking every 30 seconds, with
   no abort and no re-run;
 - a host-scoped lease that survives later network loss;
-- battery floor and thermal signal;
+- battery floor, and a thermal signal read from public `ProcessInfo.thermalState` in the
+  unprivileged watcher, because the `pmset -g therm` counters are Intel-era and Apple silicon
+  never populates them;
 - a 24-hour default hard deadline with shorter sessions available through `--for`;
 - `unpack` restoring normal sleep from any state, including session state it cannot parse;
 - one marker-guarded skill file for Codex and Claude Code;
@@ -35,7 +37,6 @@ Release gate:
 
 ## 0.2 — signed field beta
 
-- public `ProcessInfo.thermalState` FFI;
 - IOKit battery data instead of command parsing;
 - provider/version capability detection;
 - optional explicitly configured return Wi-Fi for `unpack`; never guess from the user's

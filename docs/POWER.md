@@ -69,7 +69,8 @@ In order, from `pack_inner` in `crates/rucksack-cli/src/flow.rs`:
 2. Refuse if `SleepDisabled` is already 1.
 3. Read the battery: refuse at or below the sleep floor, warn at or below the warning
    threshold. A gauge that reports nothing is silence, not a refusal.
-4. Read thermal pressure: refuse only on actual throttling. An unreported level is silence.
+4. Read thermal pressure: refuse on anything that would end a lease, so `pack` cannot accept
+   a Mac the watcher would release on its first heartbeat. An unreported level is silence.
 5. Install the power helper if it is absent. This is the one macOS password prompt.
 6. Reach a commute network.
 7. Remember that network as the hotspot if none was saved yet.
@@ -156,9 +157,20 @@ restores normal sleep. It does not attempt to finish “one last build.”
 
 ## Thermal pressure
 
-The unprivileged watcher parses bounded `pmset -g therm` output as a conservative signal.
+The unprivileged watcher reads two sources, because neither covers every Mac on its own.
 
-Behavior:
+`ProcessInfo.thermalState` is the primary signal, read over a small Objective-C FFI in
+`crates/rucksack-cli/src/thermal.rs`. It is public, documented, needs no privilege, and is
+the only one of the two that moves on Apple silicon.
+
+Bounded `pmset -g therm` output is still parsed for `CPU_Speed_Limit` and
+`CPU_Scheduler_Limit`. Those are Intel-era counters. Apple silicon never populates them, so
+on that hardware `pmset -g therm` prints three "has been recorded" notes at every
+temperature and reports no level at all. Absent counters therefore parse to `Unknown`, an
+unread sensor rather than a healthy one; reading them as nominal would state a level that
+was never measured, and would have been the only level the watcher ever saw.
+
+Behavior, taking whichever source reports the worse state:
 
 - nominal: continue;
 - fair without throttling: continue;
@@ -166,7 +178,11 @@ Behavior:
 - any reported CPU speed or scheduler throttling: release the lease.
 
 An unreported thermal level is not a release reason: macOS declining to say anything is
-silence, not heat.
+silence, not heat. That now means both sources declining to answer, which on a working Mac
+does not happen.
+
+The FFI lives in the watcher rather than the helper, so the privileged process links no
+Foundation and samples no temperature.
 
 High CPU utilization alone is not a thermal signal. rucksack allows task-required work and
 uses macOS thermal pressure and throttling telemetry as the stop condition.

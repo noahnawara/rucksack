@@ -6,6 +6,7 @@ mod helper_client;
 mod install;
 mod output;
 mod star;
+mod thermal;
 
 use clap::Parser;
 
