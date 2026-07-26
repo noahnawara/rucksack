@@ -1,3 +1,5 @@
+Paste this to your coding agent — Claude Code, Codex, or Cursor. Not into a terminal.
+
 Install rucksack on this Mac by running exactly this, both crate names included:
 
 cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.6 rucksack-cli rucksack-helper

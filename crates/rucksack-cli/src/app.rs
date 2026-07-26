@@ -76,6 +76,7 @@ fn helper(command: HelperCommand, output: &Output) -> Result<()> {
                 output.done("The power helper is installed and idle.");
             }
             if let Some(warning) = stale_helper_warning(
+                install::installed_helper_matches_source(),
                 status.as_ref().and_then(|status| status.version.as_deref()),
                 env!("CARGO_PKG_VERSION"),
             ) {
@@ -105,16 +106,27 @@ fn helper(command: HelperCommand, output: &Output) -> Result<()> {
 /// Deliberately pure, and deliberately not an error. A skew is worth saying out loud, but the helper
 /// still holds leases and refusing to talk to it would strand someone mid-commute over a mismatch
 /// that, today, still works.
-pub fn stale_helper_warning(installed: Option<&str>, running: &str) -> Option<String> {
+pub fn stale_helper_warning(
+    matches_source: Option<bool>,
+    installed: Option<&str>,
+    running: &str,
+) -> Option<String> {
     let action = "Run `rucksack helper install` to update it.";
-    match installed {
-        Some(installed) if installed == running => None,
-        Some(installed) => Some(format!(
+    match (matches_source, installed) {
+        // The bytes are the whole answer when they can be read.
+        (Some(true), _) => None,
+        (Some(false), Some(installed)) if installed != running => Some(format!(
             "The installed helper is {installed}, but this is rucksack {running}. {action}"
         )),
-        None => Some(format!(
-            "The installed helper is older than this rucksack — it cannot say which version it is. {action}"
+        (Some(false), _) => Some(format!(
+            "The installed helper is a different build of {running} than this one. {action}"
         )),
+        // No bytes to compare, so fall back to what the helper says about itself.
+        (None, Some(installed)) if installed == running => None,
+        (None, Some(installed)) => Some(format!(
+            "The installed helper is {installed}, but this is rucksack {running}. {action}"
+        )),
+        (None, None) => None,
     }
 }
 
@@ -125,16 +137,45 @@ mod tests {
     #[test]
     fn a_matching_helper_is_not_worth_mentioning() {
         assert_eq!(
-            stale_helper_warning(Some("0.1.0-alpha.6"), "0.1.0-alpha.6"),
+            stale_helper_warning(Some(true), Some("0.1.0-alpha.6"), "0.1.0-alpha.6"),
             None
         );
+    }
+
+    /// The case a version comparison cannot see, and the reason the bytes lead.
+    ///
+    /// `helper install` followed by `cargo install --force` leaves two different binaries that both
+    /// call themselves the same release. Observed twice on one machine in one evening, and reported
+    /// as a match both times by the version check this now backs up.
+    #[test]
+    fn a_different_build_of_the_same_version_is_still_stale() {
+        let warning = stale_helper_warning(Some(false), Some("0.1.0-alpha.6"), "0.1.0-alpha.6")
+            .expect("different bytes are a skew whatever the version says");
+
+        assert!(warning.contains("a different build"));
+        assert!(warning.contains("rucksack helper install"));
+    }
+
+    /// Bytes outrank the version, so matching bytes end the question.
+    #[test]
+    fn matching_bytes_settle_it() {
+        assert_eq!(
+            stale_helper_warning(Some(true), Some("0.1.0-alpha.4"), "0.1.0-alpha.6"),
+            None
+        );
+    }
+
+    /// Neither signal available is not evidence of a fault, so it accuses nobody.
+    #[test]
+    fn nothing_to_compare_says_nothing() {
+        assert_eq!(stale_helper_warning(None, None, "0.1.0-alpha.6"), None);
     }
 
     /// The state this Mac was actually in: updated CLI, helper left behind by an update that
     /// stopped after `cargo install`.
     #[test]
     fn a_helper_from_another_release_says_both_versions_and_what_to_do() {
-        let warning = stale_helper_warning(Some("0.1.0-alpha.4"), "0.1.0-alpha.6")
+        let warning = stale_helper_warning(Some(false), Some("0.1.0-alpha.4"), "0.1.0-alpha.6")
             .expect("a skew is worth reporting");
 
         assert!(warning.contains("0.1.0-alpha.4"), "names what is installed");
@@ -142,20 +183,15 @@ mod tests {
         assert!(warning.contains("rucksack helper install"), "says the fix");
     }
 
-    /// A helper old enough to predate the version field is stale by definition.
-    ///
-    /// It does not claim a version relationship it cannot know. During the release that added the
-    /// field the two sides carry the same version number and still differ, so naming the running
-    /// version here would have read as a contradiction to anyone who checked.
+    /// The bytes cannot always be read — no helper installed, no sibling binary to compare — and
+    /// the version is still worth asking in that case.
     #[test]
-    fn a_helper_that_cannot_say_its_version_is_stale() {
-        let warning = stale_helper_warning(None, "0.1.0-alpha.6").expect("silence is not a match");
+    fn the_version_still_answers_when_the_bytes_cannot() {
+        let warning = stale_helper_warning(None, Some("0.1.0-alpha.4"), "0.1.0-alpha.6")
+            .expect("a version mismatch is a skew even with no bytes to weigh it against");
 
-        assert!(warning.contains("older than this rucksack"));
+        assert!(warning.contains("0.1.0-alpha.4"), "names what is installed");
+        assert!(warning.contains("0.1.0-alpha.6"), "names what is running");
         assert!(warning.contains("rucksack helper install"));
-        assert!(
-            !warning.contains("0.1.0-alpha.6"),
-            "no version it cannot know"
-        );
     }
 }
