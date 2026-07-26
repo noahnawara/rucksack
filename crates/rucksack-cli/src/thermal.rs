@@ -65,6 +65,18 @@ mod macos {
     /// `None` means macOS did not answer. That is silence rather than heat, and no caller may
     /// treat it as a reason to end a lease.
     pub fn read_thermal_state() -> Option<ThermalLevel> {
+        // SAFETY: `objc_msgSend` has no single C signature — the ABI requires calling it through a
+        // pointer typed exactly like the method being sent, which is why each send is transmuted
+        // rather than declared. `processInfo` is a class method returning `id`, matching
+        // `SendObject`; `thermalState` returns `NSInteger`, which is `isize` on both architectures
+        // this ships for. Getting either wrong would corrupt the call, so the two are kept
+        // separate rather than shared.
+        //
+        // `processInfo` returns a shared singleton, not an owned or autoreleased object, and the
+        // only value read out is a scalar, so there is nothing to release and no autorelease pool
+        // is needed: a million calls moved RSS by 64 KB, which is page noise rather than a leak.
+        // No pointer is dereferenced here and none is retained past the call.
+        //
         // `thermalState` has existed since macOS 10.10.3 and release packaging targets macOS 14,
         // so the selector is always present. The null checks cover the runtime failing to hand
         // back the class or its shared instance at all, which is the only way this can go wrong.

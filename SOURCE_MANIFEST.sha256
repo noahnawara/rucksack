@@ -25,7 +25,7 @@ f29425a46f9c4bb52a0f4ff274d0b9209df350f74be11f334d682fa2668230db  ./crates/rucks
 2d2cc5e8c45603da30ac165556b24058658ead1e74db28387b0c7a7a5cced637  ./crates/rucksack-cli/src/main.rs
 877128d9a78575d42ffebe437966eb6cdb855833b046a5c5daae9deddd32e6c2  ./crates/rucksack-cli/src/output.rs
 0c0a4bfdfd16af3a944b950c6d7be65a32b4c78d6daa759443a098e0188acb4d  ./crates/rucksack-cli/src/star.rs
-556822adce68ae476f7ddaaa1f4bf4336afdfab27d6c369891754f5a51f5c79d  ./crates/rucksack-cli/src/thermal.rs
+c932f08444951bfcadf43ba81661d45733e716695efe46e25f6e366fc093ae9c  ./crates/rucksack-cli/src/thermal.rs
 68ca6d8df975eda09e6d4dff7970a29e69d15249d6028f54a08e0271017122be  ./crates/rucksack-cli/tests/cli.rs
 23a1aaee3db8a8008881a0456a7b6cbc0d3ae8b681040b949cc8b4ea1858f798  ./crates/rucksack-core/Cargo.toml
 43f8da1c6a2b4444260e532c2e6a2482da2c35c76cf0e137d0fc80c17f60534e  ./crates/rucksack-core/src/codex.rs
