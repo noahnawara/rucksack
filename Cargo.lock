@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "rucksack-cli"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "rucksack-core"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "rucksack-helper"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "chrono",
