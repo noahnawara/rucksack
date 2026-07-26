@@ -3,7 +3,7 @@
 //! Everything here is read-only: taking a real lease disables system sleep, so that belongs in
 //! `scripts/e2e.sh`, which restores it. These tests must be safe to run anywhere, including CI.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn rucksack(arguments: &[&str], home: &Path) -> Output {
@@ -22,6 +22,19 @@ fn stdout(output: &Output) -> String {
 
 fn home() -> tempfile::TempDir {
     tempfile::tempdir().expect("a temporary home")
+}
+
+/// Where the binary looks for its state under the `HOME` these tests hand it.
+///
+/// A test that plants a session file has to plant it where rucksack reads from, and that is not the
+/// same place on the Linux runner as it is on a Mac. Writing to the wrong one leaves the test
+/// passing against a rucksack that never opened the file.
+fn state_directory(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Rucksack")
+    } else {
+        home.join(".local/share/Rucksack")
+    }
 }
 
 #[test]
@@ -161,7 +174,7 @@ fn unreadable_session_state_never_dead_ends() {
 #[test]
 fn a_session_whose_watcher_died_is_never_reported_as_packed() {
     let home = home();
-    let directory = home.path().join("Library/Application Support/Rucksack");
+    let directory = state_directory(home.path());
     std::fs::create_dir_all(&directory).expect("state directory");
     std::fs::write(
         directory.join("session.json"),
