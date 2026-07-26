@@ -133,6 +133,62 @@ fn parse_default_route(text: &str) -> RouteStatus {
     }
 }
 
+/// Bytes an interface has carried since it came up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterfaceTraffic {
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+}
+
+impl InterfaceTraffic {
+    pub fn total(self) -> u64 {
+        self.bytes_in.saturating_add(self.bytes_out)
+    }
+}
+
+/// How much this interface has carried, or `None` when macOS reports nothing usable for it.
+///
+/// The counters are cumulative since the interface came up, not since anyone started watching, so a
+/// caller who wants "during the trip" has to difference two readings — and has to treat a decrease
+/// as unavailable, because an interface that cycles starts again from zero. What makes the
+/// difference meaningful at all is that the counters *do* survive changing network on the same
+/// interface, which is the ordinary case for a Mac that goes from Wi-Fi to a phone and back.
+pub fn read_interface_traffic(interface: &str) -> Result<Option<InterfaceTraffic>> {
+    if interface.is_empty() || !interface.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(anyhow!(
+            "Interface name must be ASCII alphanumeric, got {interface:?}"
+        ));
+    }
+    let result = run_network_command("/usr/sbin/netstat", &["-ibnI", interface])?;
+    require_success("netstat -ibnI", &result)?;
+    Ok(parse_interface_traffic(&result.stdout))
+}
+
+/// Read the byte columns out of `netstat -ibn`, anchored on the right.
+///
+/// Anchoring right is not fussiness. A real NIC's link row carries an Address column and has eleven
+/// fields; `lo0`, `gif0` and every `utun` leave that column empty and have ten. Counting from the
+/// left therefore reads the wrong column for half the interfaces on a Mac — `Ierrs` instead of
+/// `Ibytes`, a plausible small number rather than an obvious failure. The final seven fields are
+/// always the counters, so the shape is verified rather than assumed, and anything else is no
+/// answer instead of a wrong one.
+fn parse_interface_traffic(text: &str) -> Option<InterfaceTraffic> {
+    text.lines().find_map(|line| {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if !matches!(fields.len(), 10 | 11) || !fields.get(2)?.starts_with("<Link") {
+            return None;
+        }
+        let counters = fields[fields.len() - 7..]
+            .iter()
+            .map(|field| field.parse::<u64>().ok())
+            .collect::<Option<Vec<_>>>()?;
+        Some(InterfaceTraffic {
+            bytes_in: counters[2],
+            bytes_out: counters[5],
+        })
+    })
+}
+
 fn run_network_command(path: &str, args: &[&str]) -> Result<CommandResult> {
     run_bounded_cleared(
         path,
@@ -292,6 +348,49 @@ mod tests {
             stderr: String::new(),
         };
         assert!(require_wifi_join_success(&silent).is_ok());
+    }
+
+    /// Both real row widths, from a real Mac. A left-to-right parser reads `Ierrs` as `Ibytes` on
+    /// the narrow one and reports a handful of bytes for a whole commute.
+    #[test]
+    fn reads_the_byte_columns_at_either_row_width() {
+        let wide = "Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll\n\
+                    en0        1500  <Link#12>   8a:b7:b8:89:4f:67 30128622     0 23308376472 29417243     0 26102435913     0\n";
+        assert_eq!(
+            parse_interface_traffic(wide),
+            Some(InterfaceTraffic {
+                bytes_in: 23_308_376_472,
+                bytes_out: 26_102_435_913,
+            })
+        );
+
+        let narrow = "Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll\n\
+                      lo0        16384 <Link#1>                      25758690     0 12175663798 25758690     0 12175663798     0\n";
+        assert_eq!(
+            parse_interface_traffic(narrow),
+            Some(InterfaceTraffic {
+                bytes_in: 12_175_663_798,
+                bytes_out: 12_175_663_798,
+            })
+        );
+    }
+
+    /// An unknown interface exits 0 with only a header. That is no answer, not zero bytes.
+    #[test]
+    fn no_link_row_is_no_answer() {
+        let header = "Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll\n";
+        assert_eq!(parse_interface_traffic(header), None);
+        assert_eq!(parse_interface_traffic(""), None);
+        assert_eq!(
+            parse_interface_traffic("en0 1500 <Link#12> junk here\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn an_interface_name_never_reaches_argv_unchecked() {
+        assert!(read_interface_traffic("en0; rm -rf /").is_err());
+        assert!(read_interface_traffic("").is_err());
     }
 
     #[test]

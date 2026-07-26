@@ -1,6 +1,6 @@
 # Validation status
 
-Validation date: **2026-07-25**.
+Validation date: **2026-07-26**.
 
 This source tree has been compiled and tested on macOS. The compiler gate below passes,
 including strict Clippy and the release profile. A real privileged helper and a short
@@ -18,7 +18,7 @@ Counts include repository dotfiles and exclude `.git`, `target`, `site/node_modu
 - 4 JSON files;
 - 1 launchd plist;
 - 4 YAML configuration files, including 2 GitHub Actions workflows;
-- 22 Markdown files.
+- 23 Markdown files.
 
 ## Completed automated checks
 
@@ -39,9 +39,10 @@ cd site && npm run test:e2e
 
 Test results:
 
-- 76 debug tests: CLI 22, CLI contract 7, core 36, helper 11;
-- 77 release tests: the same set plus one macOS release-only helper test;
-- 13 browser tests and 0 vulnerabilities reported by `npm audit`;
+- 96 debug tests: CLI 32, CLI contract 7, core 46, helper 11;
+- 97 release tests: the same set plus one macOS release-only helper test;
+- 41 end-to-end assertions from `scripts/e2e.sh`, against real leases on this hardware;
+- 16 browser tests and 0 vulnerabilities reported by `npm audit`;
 - 0 failures.
 
 ## What the checks certify

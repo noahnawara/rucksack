@@ -38,6 +38,17 @@ pub struct SessionState {
     pub online: bool,
     pub last_event: Option<String>,
     pub release_reason: Option<String>,
+    /// The battery when the trip began, so the end has something to be compared against.
+    ///
+    /// Added after version 2 shipped, and deliberately `#[serde(default)]` rather than a version
+    /// bump: `load` refuses a version it does not know, so bumping would strand every session that
+    /// was already running when the user upgraded — a Mac awake in a bag with a state file its own
+    /// binary will not read. An older binary meeting a newer file simply ignores the extra fields.
+    #[serde(default)]
+    pub started_battery_percent: Option<u8>,
+    /// Bytes carried over the commute interface, or `None` when that cannot be said honestly.
+    #[serde(default)]
+    pub bytes_moved: Option<u64>,
 }
 
 impl SessionState {
@@ -58,6 +69,8 @@ impl SessionState {
             online: true,
             last_event: None,
             release_reason: None,
+            started_battery_percent: None,
+            bytes_moved: None,
         }
     }
 
@@ -139,6 +152,7 @@ mod tests {
             daemon_log: root.join("logs/daemon.log"),
             codex_skill: root.join(".agents/skills/rucksack/SKILL.md"),
             claude_skill: root.join(".claude/skills/rucksack/SKILL.md"),
+            cursor_skill: root.join(".cursor/skills-cursor/rucksack/SKILL.md"),
         }
     }
 

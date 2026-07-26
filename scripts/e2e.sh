@@ -160,7 +160,9 @@ if [ "$(gateway)" != "" ] && [ "$(gateway)" != "172.20.10.1" ] && [ "$(gateway)"
     check $? "pack refuses to accept the current network and waits" "$OUT"
     kill -0 "$WAIT_PID" 2>/dev/null
     check $? "pack is still running rather than aborting"
-    ! contains "$OUT" "Packed."
+    # The verdict itself, not the word: the waiting instruction legitimately says "until this says
+    # Packed", so matching the bare word would fail on copy that is doing its job.
+    ! contains "$OUT" "Close the lid and go"
     check $? "pack never claimed success on the network being left" "$OUT"
     [ "$(sleep_disabled)" = "0" ]
     check $? "no lease is taken before the network is ready"
@@ -216,26 +218,54 @@ else
     OUT=$("$RUCKSACK" unpack 2>&1)
     [ $? -eq 0 ] && contains "$OUT" "sleeps normally"
     check $? "unpack succeeds and says so" "$OUT"
-    [ "$(lines "$OUT")" -le 3 ]
-    check $? "unpack is at most three lines" "$OUT"
+    contains "$OUT" "Packed for"
+    check $? "unpack reports the trip it just ended" "$OUT"
+    contains "$OUT" "First trip"
+    check $? "the first completed trip is the one that mentions starring" "$OUT"
+    [ "$(lines "$OUT")" -le 4 ]
+    check $? "unpack is three lines, plus the one-time first-trip line (got $(lines "$OUT"))" "$OUT"
     [ "$(sleep_disabled)" = "0" ]
     check $? "unpack restored normal sleep"
+
+    # Once, ever. A mention on every trip would be nagging, which is the thing this product is not.
+    "$RUCKSACK" pack "${PACK_ARGS[@]}" --for 20m >/dev/null 2>&1
+    OUT=$("$RUCKSACK" unpack 2>&1)
+    ! contains "$OUT" "First trip" && [ "$(lines "$OUT")" -le 3 ]
+    check $? "a later unpack never mentions it again, and stays at three lines" "$OUT"
+    [ "$(sleep_disabled)" = "0" ]
+    check $? "the second trip also restored normal sleep"
 fi
 
 # --------------------------------------------------------------- the skill
 
 new_home
-mkdir -p "$HOME/.agents/skills/commute-mode" "$HOME/.claude/skills"
+mkdir -p "$HOME/.agents/skills/commute-mode" "$HOME/.claude/skills" "$HOME/.cursor/skills-cursor"
 printf '<!-- rucksack-managed -->\nlegacy\n' >"$HOME/.agents/skills/commute-mode/SKILL.md"
+# The backups an older release left beside its skill, which used to keep the directory alive.
+printf 'older\n' >"$HOME/.agents/skills/commute-mode/SKILL.md.rucksack-managed.20260724T141740Z.bak"
 if [ "$LIFECYCLE_READY" = "no" ]; then
     skip "skill install (needs a successful pack)"
+    skip "skill frontmatter"
+    skip "skill install for every agent present"
 else
     "$RUCKSACK" pack "${PACK_ARGS[@]}" --for 20m >/dev/null 2>&1
     [ -f "$HOME/.agents/skills/rucksack/SKILL.md" ] \
         && [ ! -d "$HOME/.agents/skills/commute-mode" ]
-    check $? "pack installs the rucksack skill and retires commute-mode"
-    grep -q "name: rucksack" "$HOME/.agents/skills/rucksack/SKILL.md"
+    check $? "pack installs the rucksack skill and retires commute-mode, backups and all"
+
+    SKILL_FILE="$HOME/.agents/skills/rucksack/SKILL.md"
+    # The frontmatter has to open the file. A comment above it stops an agent reading the
+    # description, which is the only thing that makes "I'm leaving" reach this skill at all.
+    [ "$(/usr/bin/head -1 "$SKILL_FILE")" = "---" ] \
+        && /usr/bin/grep -q '^description:.*leaving' "$SKILL_FILE"
+    check $? "the skill leads with frontmatter and declares its triggers"
+    /usr/bin/grep -q "name: rucksack" "$SKILL_FILE"
     check $? "the installed skill is named rucksack"
+
+    [ -f "$HOME/.claude/skills/rucksack/SKILL.md" ] \
+        && [ -f "$HOME/.cursor/skills-cursor/rucksack/SKILL.md" ]
+    check $? "every agent present on this Mac gets the skill"
+
     "$RUCKSACK" unpack >/dev/null 2>&1
 fi
 

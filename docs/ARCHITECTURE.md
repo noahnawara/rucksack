@@ -54,7 +54,9 @@ User-facing binary:
 - `install` — installing and removing the root helper through one `sudo` prompt;
 - `helper_client` — one request and one response per socket connection;
 - `output` — `step`, `done`, `warn`, and a `detail` only `--verbose` prints;
-- `star` — the GitHub star, offered once after a successful `unpack`.
+- `star` — the GitHub star, through the `gh` CLI the user is already signed in to, or by opening the
+  page. The first completed `unpack` mentions it once, ever; the asking is left to the agent, which
+  is the only party in a conversation and can put a real question in front of the user.
 
 ### `rucksack-helper`
 

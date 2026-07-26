@@ -12,6 +12,7 @@ pub struct AppPaths {
     pub daemon_log: PathBuf,
     pub codex_skill: PathBuf,
     pub claude_skill: PathBuf,
+    pub cursor_skill: PathBuf,
 }
 
 impl AppPaths {
@@ -29,6 +30,7 @@ impl AppPaths {
             daemon_log: log_dir.join("daemon.log"),
             codex_skill: home.join(".agents/skills/rucksack/SKILL.md"),
             claude_skill: home.join(".claude/skills/rucksack/SKILL.md"),
+            cursor_skill: home.join(".cursor/skills-cursor/rucksack/SKILL.md"),
             home,
             data_dir: base,
             log_dir,
