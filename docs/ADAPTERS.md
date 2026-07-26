@@ -7,6 +7,7 @@ rules, no settings changes.
 | --- | --- |
 | Codex | `~/.agents/skills/rucksack/SKILL.md` |
 | Claude Code | `~/.claude/skills/rucksack/SKILL.md` |
+| Cursor | `~/.cursor/skills-cursor/rucksack/SKILL.md` |
 
 The file is a skill named `rucksack`. Its only job is to make "I'm leaving, pack my Mac" work as a
 sentence inside a conversation: it tells the agent to run `rucksack pack`, to relay the last line,
@@ -29,6 +30,34 @@ and never to re-run it while it is waiting for a network.
   which named an internal state rather than the product. Installing removes rucksack's own
   `commute-mode` file, and the timestamped backups an older release left beside it, so one product
   does not ship two skills and the confusing directory name does not survive on disk.
+
+## Switching one off
+
+`config.toml` carries a flag per agent, all on by default:
+
+```toml
+[adapters]
+codex = true
+claude = true
+cursor = true
+```
+
+Setting one to `false` means rucksack does nothing for that agent: no skill is written, and for
+Codex nothing asks its CLI anything — `pack` starts no Remote Control and `rucksack pair` says so
+rather than trying. A skill an earlier pack already wrote is left in place; delete it if you want it
+gone.
+
+## An agent that is not there
+
+None of this can end a session. rucksack ships to people who run one of these three, so a missing
+agent is the ordinary case: `pack` warns, skips it, and keeps the lease. Codex specifically is only
+considered found when the standalone CLI is on `PATH` or installed at
+`~/.codex/packages/standalone/current/codex` — the copy inside ChatGPT.app refuses
+`remote-control` outright, so treating it as a usable Codex reported success and then failed every
+time. `pack --require-remote` is the one way to ask for the opposite, and it fails the pack.
+
+Remote Control is spawned and forgotten, so what it says goes to `~/Library/Logs/Rucksack/remote-control.log`
+rather than into the watcher's `daemon.log`.
 
 ## What rucksack never does
 

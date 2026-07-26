@@ -91,6 +91,7 @@ User state:
 ~/Library/Application Support/Rucksack/session.terminal.lock
 ~/Library/Application Support/Rucksack/asked-about-star
 ~/Library/Logs/Rucksack/daemon.log
+~/Library/Logs/Rucksack/remote-control.log
 ```
 
 The data directory is created `0700` and everything rucksack writes into it is `0600`. No

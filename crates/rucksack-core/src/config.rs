@@ -19,6 +19,21 @@ pub struct Config {
     pub hotspot: HotspotConfig,
     pub session: SessionConfig,
     pub safety: SafetyConfig,
+    pub adapters: AdaptersConfig,
+}
+
+/// Which coding agents rucksack is allowed to touch.
+///
+/// All three default to on, because rucksack cannot know which agents a Mac has until it looks and
+/// the look is cheap. Setting one to `false` is how someone says "I do not use that one", and it
+/// must be taken literally: nothing for that agent runs, not even asking its CLI whether it is
+/// there. Nothing here is a safety setting — no combination of these flags can affect the lease.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdaptersConfig {
+    pub codex: bool,
+    pub claude: bool,
+    pub cursor: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +68,17 @@ impl Default for Config {
             hotspot: HotspotConfig::default(),
             session: SessionConfig::default(),
             safety: SafetyConfig::default(),
+            adapters: AdaptersConfig::default(),
+        }
+    }
+}
+
+impl Default for AdaptersConfig {
+    fn default() -> Self {
+        Self {
+            codex: true,
+            claude: true,
+            cursor: true,
         }
     }
 }
@@ -166,6 +192,28 @@ mod tests {
 
         assert!(config.validate().is_ok());
         assert_eq!(config.session.duration_minutes, 24 * 60);
+        // A fresh install has every adapter on, so a Mac with one agent is not asked to configure
+        // anything before `pack` works.
+        assert!(config.adapters.codex);
+        assert!(config.adapters.claude);
+        assert!(config.adapters.cursor);
+    }
+
+    /// The setting exists to be obeyed, so it has to survive the round trip a user relies on.
+    #[test]
+    fn an_adapter_switched_off_stays_off() {
+        let written = "version = 1\n\n[adapters]\ncodex = false\n";
+
+        let parsed = toml::from_str::<Config>(written).unwrap();
+
+        assert!(parsed.validate().is_ok());
+        assert!(!parsed.adapters.codex);
+        // Only what was named is changed.
+        assert!(parsed.adapters.claude);
+        assert!(parsed.adapters.cursor);
+
+        let round_tripped = toml::from_str::<Config>(&toml::to_string(&parsed).unwrap()).unwrap();
+        assert!(!round_tripped.adapters.codex);
     }
 
     /// A config file from any earlier release must not break the command the user just typed.
@@ -201,6 +249,7 @@ mod tests {
         assert!(parsed.validate().is_ok());
         assert_eq!(parsed.hotspot.ssid.as_deref(), Some("Noah"));
         assert_eq!(parsed.session.duration_minutes, 1440);
+        assert!(parsed.adapters.codex);
     }
 
     #[test]
