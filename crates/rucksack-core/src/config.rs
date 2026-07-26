@@ -107,7 +107,7 @@ impl Default for SafetyConfig {
     fn default() -> Self {
         Self {
             warn_battery_percent: 20,
-            sleep_battery_percent: 15,
+            sleep_battery_percent: 10,
         }
     }
 }

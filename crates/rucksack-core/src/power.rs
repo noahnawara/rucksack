@@ -22,6 +22,11 @@ pub struct PowerStatus {
     pub source_label: String,
     pub percent: Option<u8>,
     pub charging: bool,
+    /// What macOS thinks is left before the battery is empty, when it is willing to say.
+    ///
+    /// Only ever read while discharging. The same field carries time-to-full while charging, and a
+    /// Mac twenty minutes from a full battery is not a Mac twenty minutes from sleep.
+    pub minutes_to_empty: Option<u64>,
     pub raw: String,
 }
 
@@ -86,8 +91,45 @@ pub fn parse_battery(text: &str) -> Result<PowerStatus> {
         source_label,
         percent,
         charging,
+        minutes_to_empty: parse_minutes_to_empty(text, charging),
         raw: text.to_owned(),
     })
+}
+
+/// macOS's own estimate of how long the battery has left, in minutes.
+///
+/// `pmset` prints `H:MM remaining` on the battery row, and `(no estimate)` while it is still working
+/// one out — which it also does for a minute or so after waking or after the load changes sharply.
+///
+/// Read only while discharging, because the same field means time-to-full while charging. `0:00` is
+/// how macOS spells "no estimate yet" rather than "empty now", so it is not an answer either.
+fn parse_minutes_to_empty(text: &str, charging: bool) -> Option<u64> {
+    if charging {
+        return None;
+    }
+    let remaining = Regex::new(r"(?P<hours>\d{1,2}):(?P<minutes>\d{2})\s+remaining").ok()?;
+    let captures = remaining.captures(text)?;
+    let hours = captures.name("hours")?.as_str().parse::<u64>().ok()?;
+    let minutes = captures.name("minutes")?.as_str().parse::<u64>().ok()?;
+    let total = hours.checked_mul(60)?.checked_add(minutes)?;
+    (total > 0).then_some(total)
+}
+
+/// Turn "minutes until empty" into "minutes until the floor", which is the figure rucksack reports.
+///
+/// macOS measures to 0%. rucksack stops at the floor, so the two answer different questions and the
+/// difference is not small: at 57% with a 10% floor, three hours to empty is about two and a half
+/// hours to sleep. Reporting the macOS number as-is would over-promise, in exactly the direction
+/// this whole projection exists to prevent.
+///
+/// Straight-line scaling on the remaining charge. It assumes the rate that produced the estimate
+/// holds, which is the same assumption macOS already made, so this adds no optimism of its own.
+pub fn minutes_until_floor(minutes_to_empty: u64, percent: u8, floor_percent: u8) -> Option<u64> {
+    if percent == 0 || percent <= floor_percent {
+        return Some(0);
+    }
+    let headroom = u64::from(percent - floor_percent);
+    Some(minutes_to_empty.saturating_mul(headroom) / u64::from(percent))
 }
 
 pub fn read_sleep_disabled() -> Result<u8> {
@@ -205,6 +247,61 @@ mod tests {
         assert_eq!(status.source, PowerSource::Battery);
         assert_eq!(status.percent, Some(78));
         assert!(!status.charging);
+    }
+
+    /// The line this exists for, exactly as a discharging Mac prints it.
+    #[test]
+    fn reads_the_estimate_macos_already_made() {
+        let status = parse_battery(
+            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t57%; discharging; 3:09 remaining present: true",
+        )
+        .unwrap();
+        assert_eq!(status.minutes_to_empty, Some(189));
+    }
+
+    /// The same field means time-to-full while charging, and twenty minutes from a full battery is
+    /// not twenty minutes from sleep.
+    #[test]
+    fn a_charging_estimate_is_not_time_left() {
+        let status = parse_battery(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t57%; charging; 1:23 remaining present: true",
+        )
+        .unwrap();
+        assert_eq!(status.minutes_to_empty, None);
+    }
+
+    /// macOS says this for a minute or so after a wake, and after any sharp change in load.
+    #[test]
+    fn no_estimate_is_not_an_estimate() {
+        let status = parse_battery(
+            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t57%; discharging; (no estimate) present: true",
+        )
+        .unwrap();
+        assert_eq!(status.minutes_to_empty, None);
+    }
+
+    /// `0:00` is how macOS spells "still working it out", not "empty now".
+    #[test]
+    fn a_zero_estimate_is_withheld_rather_than_reported_as_none_left() {
+        let status = parse_battery(
+            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t57%; discharging; 0:00 remaining present: true",
+        )
+        .unwrap();
+        assert_eq!(status.minutes_to_empty, None);
+    }
+
+    /// The conversion that keeps the borrowed number honest: macOS measures to empty, rucksack
+    /// stops at the floor, so the session is always shorter than the battery.
+    #[test]
+    fn the_floor_is_nearer_than_empty() {
+        assert_eq!(minutes_until_floor(189, 57, 10), Some(155));
+    }
+
+    /// A Mac already at or below the floor has no minutes left, and that is a real answer.
+    #[test]
+    fn at_the_floor_there_is_nothing_left_to_scale() {
+        assert_eq!(minutes_until_floor(120, 10, 10), Some(0));
+        assert_eq!(minutes_until_floor(120, 4, 10), Some(0));
     }
 
     #[test]

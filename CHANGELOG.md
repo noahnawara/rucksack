@@ -26,6 +26,13 @@ all notable changes to rucksack will be documented here.
 
 ### Changed
 
+- The battery floor is 10%, down from 15%. The old floor ended a commute with a sixth of the
+  battery unused, and macOS does not begin its own low-power warnings until 10% either.
+- `status` has a battery figure from the first heartbeat. Measuring a rate takes three readings,
+  so the opening minutes of a session had only the lease clock to report — the one number certain
+  to be wrong, at the moment someone is deciding whether to walk away. macOS has an estimate by
+  then and `pmset` is already read every heartbeat, so that figure is borrowed until rucksack has
+  measured one of its own, scaled first from time-to-empty to time-to-floor.
 - `status` reports whichever limit ends the session first, rather than the lease clock alone. On
   a commute the battery is nearly always the smaller of the two, and a day of lease on an
   afternoon of charge was reported as a day. The battery figure is projected from drain actually
