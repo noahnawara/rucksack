@@ -19,7 +19,7 @@ cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  ./assets/launc
 cfc6be92fac78c3ed871eb5c022d347286cd1427ac62072f8b12fa4fbc323f30  ./crates/rucksack-cli/src/app.rs
 792d314780f9156816609c307b0f5b33a890a063efb97847d0061070f2ad4530  ./crates/rucksack-cli/src/cli.rs
 aca68933de26921b1f2ef040f9c1c2ce19c8c5931e837cb2169d9fcc43bee7a3  ./crates/rucksack-cli/src/daemon.rs
-6042c041195ea92fcbb239973cb69e637d5bab0b998c7dc9435c3c1f7f14a244  ./crates/rucksack-cli/src/flow.rs
+e7247c52c378a82ae21397cd35c2cf3786351eee48dc174a6e9359ff3765b69e  ./crates/rucksack-cli/src/flow.rs
 f29425a46f9c4bb52a0f4ff274d0b9209df350f74be11f334d682fa2668230db  ./crates/rucksack-cli/src/helper_client.rs
 37dace3d13908e27e51224b2e784e8e5efe4a8620df16473c3d31f164d8ac38e  ./crates/rucksack-cli/src/install.rs
 2d2cc5e8c45603da30ac165556b24058658ead1e74db28387b0c7a7a5cced637  ./crates/rucksack-cli/src/main.rs
