@@ -1400,7 +1400,7 @@ mod tests {
         let mut session = trip(now, 300);
         session.phase = SessionPhase::Released;
         session.ended_at = Some(session.started_at + ChronoDuration::hours(1));
-        session.release_reason = Some("the battery reached the 15% floor".to_owned());
+        session.release_reason = Some("the battery reached the 10% floor".to_owned());
 
         assert_eq!(trip_line(&session, now), "Packed for 1 hour");
     }

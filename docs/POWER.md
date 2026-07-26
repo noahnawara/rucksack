@@ -149,7 +149,7 @@ neither is an agent finishing its work.
 Defaults:
 
 - warning: 20%;
-- sleep release: 15%.
+- sleep release: 10%.
 
 There is no minimum battery level to start; `pack` refuses only at or below the release
 floor, because such a Mac would sleep the moment the lid closed. At the floor the watcher
@@ -172,9 +172,19 @@ heartbeats means the Mac slept, and sleep advances the wall clock while the batt
 moves. Charging clears it, because there is no drain left to project. A heartbeat that could
 not read the gauge is a tunnel rather than a discontinuity and carries the window forward.
 
-Nothing is claimed before it has been measured. Until two drops have been seen the lease
-clock is reported alone, and a session whose heartbeat has gone quiet stops claiming a
-battery figure nobody is still taking.
+Measuring a rate takes three readings — the first is a baseline and makes no drop — so for
+the opening minutes of a session there is nothing of this Mac's own to report. macOS has an
+estimate by then, and `pmset` is already being read every heartbeat, so that figure is used
+until rucksack has one of its own. It is scaled first: macOS measures to empty and rucksack
+stops at the floor, so the session is always shorter than the battery, and reporting the
+borrowed number unscaled would over-promise.
+
+A measurement of this Mac's actual workload always outranks a general-purpose estimate, so
+the borrowed figure is dropped the moment two drops exist. Neither is dressed up as the
+other; both are estimates, and both are marked `~`.
+
+A session whose heartbeat has gone quiet stops claiming a battery figure nobody is still
+taking.
 
 ## Thermal pressure
 

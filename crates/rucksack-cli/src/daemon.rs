@@ -8,7 +8,9 @@ use rucksack_core::network::{
     reaches_internet, read_default_route, read_interface_traffic, read_wifi_status,
     InterfaceTraffic, DEFAULT_INTERNET_PROBE_URL,
 };
-use rucksack_core::power::{read_power_status, read_thermal_status, PowerSource};
+use rucksack_core::power::{
+    minutes_until_floor, read_power_status, read_thermal_status, PowerSource,
+};
 use rucksack_core::state::{silence_tolerance, SessionPhase, SessionState};
 use rucksack_core::{AppPaths, Config};
 use std::thread;
@@ -56,7 +58,8 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
 
         let health = read_health(&mut blind_reads);
         drain = drain.advance(Utc::now(), health.battery_percent, sleep_gap);
-        let battery_minutes_remaining = drain.minutes_until(config.safety.sleep_battery_percent);
+        let battery_minutes_remaining =
+            battery_minutes_remaining(&drain, &health, config.safety.sleep_battery_percent);
         if let Some(reason) = release_reason(&session, config, &health, blind_reads) {
             release(&helper, paths, session_id, &reason, health.battery_percent)?;
             log(paths, &format!("released: {reason}"))?;
@@ -97,6 +100,8 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 struct Health {
     battery_percent: Option<u8>,
+    /// What macOS estimates is left before empty, when it is willing to say and discharging.
+    minutes_to_empty: Option<u64>,
     too_hot: bool,
 }
 
@@ -120,12 +125,35 @@ fn read_health(consecutive_blind_reads: &mut u8) -> Health {
     } else {
         consecutive_blind_reads.saturating_add(1)
     };
+    let power = power.ok();
     Health {
-        battery_percent: power.ok().and_then(|power| power.percent),
+        battery_percent: power.as_ref().and_then(|power| power.percent),
+        minutes_to_empty: power.as_ref().and_then(|power| power.minutes_to_empty),
         too_hot: read_thermal_status()
             .is_ok_and(|thermal| thermal.throttled || ends_a_lease(thermal.level))
             || read_thermal_state().is_some_and(ends_a_lease),
     }
+}
+
+/// How long the battery has left, measured if rucksack can, borrowed from macOS until it can.
+///
+/// The drain model needs three readings before it can name a rate: the first is a baseline and
+/// produces no drop, and two drops are needed to measure between. On a commute that is eight to ten
+/// minutes of a session reporting only the lease clock — which is the one number certain to be
+/// wrong, at the exact moment someone is deciding whether to walk away from the machine.
+///
+/// macOS has an answer in the meantime, so use it rather than saying nothing, and stop using it the
+/// moment there is a measurement of this Mac's actual workload. Neither figure is dressed up as the
+/// other; both are estimates, and `status` marks them as such.
+fn battery_minutes_remaining(drain: &Drain, health: &Health, floor_percent: u8) -> Option<u64> {
+    if let Some(measured) = drain.minutes_until(floor_percent) {
+        return Some(measured);
+    }
+    minutes_until_floor(
+        health.minutes_to_empty?,
+        health.battery_percent?,
+        floor_percent,
+    )
 }
 
 /// The only reasons a host lease ends by itself.
@@ -323,6 +351,7 @@ mod tests {
     fn healthy() -> Health {
         Health {
             battery_percent: Some(80),
+            minutes_to_empty: None,
             too_hot: false,
         }
     }
@@ -402,7 +431,7 @@ mod tests {
 
         // Nor do any of the things that used to end it.
         let offline_and_idle = Health {
-            battery_percent: Some(16),
+            battery_percent: Some(11),
             ..healthy()
         };
         assert_eq!(
@@ -435,13 +464,13 @@ mod tests {
     fn the_battery_floor_ends_the_lease() {
         let live = session(chrono::Duration::hours(1));
         let flat = Health {
-            battery_percent: Some(15),
+            battery_percent: Some(10),
             ..healthy()
         };
 
         assert_eq!(
             reason(&live, flat, 0).as_deref(),
-            Some("the battery reached the 15% floor")
+            Some("the battery reached the 10% floor")
         );
     }
 
@@ -471,6 +500,80 @@ mod tests {
         assert_eq!(
             reason(&live, hot, 0).as_deref(),
             Some("this Mac got too hot")
+        );
+    }
+
+    fn at(minute: i64) -> chrono::DateTime<Utc> {
+        chrono::DateTime::from_timestamp(minute * 60, 0).unwrap()
+    }
+
+    fn gap() -> chrono::Duration {
+        chrono::Duration::minutes(2)
+    }
+
+    /// The opening minutes of every session, which used to report nothing.
+    ///
+    /// macOS says three hours to empty; the floor is nearer than empty, so the session is shorter
+    /// than the battery.
+    #[test]
+    fn macos_answers_until_this_mac_has_been_measured() {
+        let health = Health {
+            battery_percent: Some(57),
+            minutes_to_empty: Some(189),
+            too_hot: false,
+        };
+
+        assert_eq!(
+            battery_minutes_remaining(&Drain::default(), &health, 15),
+            Some(139)
+        );
+    }
+
+    /// Once there is a rate measured from this Mac's own workload, the borrowed figure stops being
+    /// used — a general-purpose estimate should not outrank a measurement of the actual machine.
+    #[test]
+    fn a_measured_rate_outranks_the_borrowed_one() {
+        let drain = Drain::default()
+            .advance(at(0), Some(57), gap())
+            .advance(at(1), Some(56), gap())
+            .advance(at(2), Some(55), gap());
+        let health = Health {
+            battery_percent: Some(55),
+            minutes_to_empty: Some(189),
+            too_hot: false,
+        };
+
+        // Forty percent of headroom at a percent a minute, not macOS's slower guess.
+        assert_eq!(battery_minutes_remaining(&drain, &health, 15), Some(40));
+    }
+
+    /// On mains power, and in the minute after a wake, macOS offers nothing. Neither does rucksack.
+    #[test]
+    fn nothing_is_claimed_when_neither_source_has_an_answer() {
+        let health = Health {
+            battery_percent: Some(57),
+            minutes_to_empty: None,
+            too_hot: false,
+        };
+
+        assert_eq!(
+            battery_minutes_remaining(&Drain::default(), &health, 15),
+            None
+        );
+    }
+
+    /// A gauge that cannot be read cannot be scaled against, however confident macOS sounds.
+    #[test]
+    fn an_unreadable_gauge_borrows_nothing() {
+        let health = Health {
+            battery_percent: None,
+            minutes_to_empty: Some(189),
+            too_hot: false,
+        };
+
+        assert_eq!(
+            battery_minutes_remaining(&Drain::default(), &health, 15),
+            None
         );
     }
 }

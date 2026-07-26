@@ -57,7 +57,7 @@ $ rucksack pack
 
 Connecting to Noah…
 Joined.
-Awake for 24 hours, or until the battery hits 15%. Ends 09:14 tomorrow.
+Awake for 24 hours, or until the battery hits 10%. Ends 09:14 tomorrow.
 Packed. Close the lid and go.
 ```
 
@@ -190,7 +190,7 @@ The lease ends for host-level reasons only:
 
 - you run `unpack`
 - the time limit arrives
-- the battery reaches its floor (15% by default)
+- the battery reaches its floor (10% by default)
 - macOS reports serious thermal pressure or actual throttling
 - the battery gauge cannot be read three times in a row while on battery
 - the helper stops answering, and its own TTL restores sleep
