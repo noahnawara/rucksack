@@ -391,19 +391,28 @@ mod tests {
         assert!(error.to_string().contains("timed out"));
     }
 
+    /// The child exits at once, but the grandchild it backgrounds holds the inherited stdout and
+    /// stderr pipes far longer than the deadline. `run_bounded_cleared` has to give up on those
+    /// pipes at the deadline instead of blocking until the grandchild is gone.
+    ///
+    /// Both timings carry deliberate slack. A one-second deadline is around twenty times the worst
+    /// child-exit latency measured on a loaded Mac, so `sh` is reaped well before the deadline and
+    /// the error names the pipe rather than a timeout. The ten-second bound leaves room for a
+    /// stalled machine while staying a third of the grandchild's lifetime, so a version that
+    /// waited on the pipe would miss it by a wide margin.
     #[cfg(unix)]
     #[test]
     fn bounded_command_does_not_wait_for_inherited_output_pipe() {
         let started = Instant::now();
         let error = run_bounded_cleared(
             "/bin/sh",
-            &["-c", "/bin/sleep 2 &"],
-            Duration::from_millis(100),
+            &["-c", "/bin/sleep 30 &"],
+            Duration::from_secs(1),
             64,
         )
         .unwrap_err();
 
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(started.elapsed() < Duration::from_secs(10));
         assert!(error.to_string().contains("pipe did not close"));
     }
 }
