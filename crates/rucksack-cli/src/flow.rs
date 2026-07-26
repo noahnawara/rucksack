@@ -875,48 +875,67 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
 ///
 /// Only from a hotspot, because that is the only connection worth interrupting. Never fails the
 /// unpack: sleep is the only thing that command promises and it has already happened, and unpack is
-/// also the recovery path. What it could not finish, it says.
+/// also the recovery path. What it could not finish, it says — including the one instruction left
+/// for the user, which lives here rather than in the trip report because this is the code that
+/// knows whether it is still needed.
 fn release_the_hotspot(output: &Output) {
     if !read_default_route().is_ok_and(|route| is_personal_hotspot(&route)) {
         return;
     }
     let Some(device) = read_wifi_status().ok().and_then(|status| status.device) else {
+        output.warn(STILL_ON_THE_PHONE);
         return;
     };
     output.step("Letting go of your phone…");
     if let Err(error) = set_wifi_power(&device, false).and_then(|()| set_wifi_power(&device, true))
     {
         output.detail(format!("Could not cycle Wi-Fi: {error:#}"));
-        output.warn("Still on your phone. Pick a network in Wi-Fi.");
+        output.warn(STILL_ON_THE_PHONE);
         return;
     }
     match wait_for_any_network(WIFI_REJOIN_TIMEOUT) {
-        Some(ssid) => output.step(format!("On “{ssid}” now.")),
-        None => {
+        Landed::Named(ssid) => output.step(format!("Back on “{ssid}”.")),
+        Landed::Unnamed => output.step("Back on Wi-Fi."),
+        Landed::Nothing => {
             output.warn("Wi-Fi is still looking for a network. Pick one if it does not settle.")
         }
     }
 }
 
-/// Wait for macOS to land on something, and report only a network it actually named.
+/// The one thing left for the user when rucksack could not do it, said in one place.
+const STILL_ON_THE_PHONE: &str = "Still on your phone. Pick a Wi-Fi network when you can.";
+
+/// Where macOS settled after the radio came back.
+enum Landed {
+    /// A network macOS was willing to name.
+    Named(String),
+    /// Routed, but the name is withheld — which macOS does for any process without Location
+    /// Services, so it is the ordinary case rather than the odd one.
+    Unnamed,
+    /// Nothing yet.
+    Nothing,
+}
+
+/// Wait for macOS to land on something, and distinguish "no name" from "no network".
 ///
-/// A Mac with no Location Services permission reports no name, so an unnamed but routed network is
-/// reported as the interface rather than guessed at. Nothing found in time is not a failure worth
-/// an error — the radio is on and still scanning — but it is worth saying.
-fn wait_for_any_network(timeout: Duration) -> Option<String> {
+/// Those are different facts and only one of them is a problem. Collapsing them — by reporting the
+/// interface when the name is missing — puts `en0` where a person expects `Home`, which reads as
+/// something leaking out rather than as an answer.
+fn wait_for_any_network(timeout: Duration) -> Landed {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        let route = read_default_route().ok();
-        let routed = route
-            .as_ref()
+        let routed = read_default_route()
+            .ok()
             .is_some_and(|route| route.interface.is_some());
         if routed {
-            let named = read_wifi_status().ok().and_then(|status| status.ssid);
-            return named.or_else(|| route.and_then(|route| route.interface));
+            return match read_wifi_status().ok().and_then(|status| status.ssid) {
+                Some(ssid) => Landed::Named(ssid),
+                None => Landed::Unnamed,
+            };
         }
         thread::sleep(NETWORK_POLL_INTERVAL);
     }
-    None
+    Landed::Nothing
 }
 
 /// Give sleep back, escalating until something works.
@@ -972,7 +991,7 @@ fn report_outcome(session: &SessionState, released: bool, output: &Output) {
         return;
     }
     output.step(trip_line(session, Utc::now()));
-    if let Some(line) = closing_line(session, read_default_route().ok().as_ref()) {
+    if let Some(line) = closing_line(session) {
         output.step(line);
     }
 }
@@ -1003,7 +1022,7 @@ fn trip_line(session: &SessionState, now: DateTime<Utc>) -> String {
 /// One line, never two: `unpack` gets three in total and the verdict owns the last. A release reason
 /// wins over the network hint, because "your battery ran out" is both more important and the reason
 /// the user is reading this at all.
-fn closing_line(session: &SessionState, route: Option<&RouteStatus>) -> Option<String> {
+fn closing_line(session: &SessionState) -> Option<String> {
     if !session.is_holding_a_lease() {
         if let Some(reason) = &session.release_reason {
             let when = session
@@ -1013,10 +1032,10 @@ fn closing_line(session: &SessionState, route: Option<&RouteStatus>) -> Option<S
             return Some(format!("This Mac went back to sleep at {when} — {reason}."));
         }
     }
-    // Nobody notices they are still on cellular until the bill does.
-    route
-        .filter(|route| is_personal_hotspot(route))
-        .map(|_| "Still on your phone. Pick a Wi-Fi network when you can.".to_owned())
+    // Being left on the phone is `release_the_hotspot`'s to report. It runs straight after this and
+    // usually fixes it, so advising the user here told them to do a thing they were about to watch
+    // rucksack do — and said it first, which read as the instruction rather than the fallback.
+    None
 }
 
 /// Bytes as a person would say them.
@@ -1405,28 +1424,23 @@ mod tests {
         assert_eq!(trip_line(&session, now), "Packed for 1 hour");
     }
 
-    /// Three lines total, so the closing slot holds one fact and the release reason outranks it.
+    /// The closing slot carries why the Mac stopped, and nothing about the network.
+    ///
+    /// It used to advise picking a Wi-Fi network, which `release_the_hotspot` now does by itself —
+    /// and said it first, so a user was told to do the thing they then watched rucksack do. The
+    /// code that acts is the only code that knows whether the instruction is still needed.
     #[test]
     fn a_closing_line_is_never_two_facts() {
         let now = Utc::now();
-        let hotspot = route("en0", "192.0.0.1");
 
         let live = trip(now, 30);
-        assert_eq!(
-            closing_line(&live, Some(&hotspot)).as_deref(),
-            Some("Still on your phone. Pick a Wi-Fi network when you can.")
-        );
-        assert_eq!(
-            closing_line(&live, Some(&route("en0", "192.168.1.1"))),
-            None
-        );
-        assert_eq!(closing_line(&live, None), None);
+        assert_eq!(closing_line(&live), None);
 
         let mut ended = trip(now, 30);
         ended.phase = SessionPhase::Released;
         ended.release_reason = Some("this Mac got too hot".to_owned());
         ended.ended_at = Some(now);
-        let closing = closing_line(&ended, Some(&hotspot)).expect("a reason to report");
+        let closing = closing_line(&ended).expect("a reason to report");
         assert!(closing.contains("too hot"));
         assert!(!closing.contains("phone"), "one fact, not two");
     }
