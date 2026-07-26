@@ -2,13 +2,14 @@ use crate::helper_client::HelperClient;
 use crate::thermal::{ends_a_lease, read_thermal_state};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use rucksack_core::drain::Drain;
 use rucksack_core::files::{append_line, with_advisory_lock};
 use rucksack_core::network::{
     reaches_internet, read_default_route, read_interface_traffic, read_wifi_status,
     InterfaceTraffic, DEFAULT_INTERNET_PROBE_URL,
 };
 use rucksack_core::power::{read_power_status, read_thermal_status, PowerSource};
-use rucksack_core::state::{SessionPhase, SessionState};
+use rucksack_core::state::{silence_tolerance, SessionPhase, SessionState};
 use rucksack_core::{AppPaths, Config};
 use std::thread;
 use std::time::Duration;
@@ -30,6 +31,8 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
     let helper = HelperClient::default();
     let mut blind_reads = 0u8;
     let mut traffic = Traffic::Waiting;
+    let mut drain = Drain::default();
+    let sleep_gap = silence_tolerance(config.session.heartbeat_seconds);
 
     log(paths, &format!("watching session {session_id}"))?;
     let established = SessionState::update(paths, session_id, |session| {
@@ -52,6 +55,8 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
         }
 
         let health = read_health(&mut blind_reads);
+        drain = drain.advance(Utc::now(), health.battery_percent, sleep_gap);
+        let battery_minutes_remaining = drain.minutes_until(config.safety.sleep_battery_percent);
         if let Some(reason) = release_reason(&session, config, &health, blind_reads) {
             release(&helper, paths, session_id, &reason, health.battery_percent)?;
             log(paths, &format!("released: {reason}"))?;
@@ -67,6 +72,7 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
         SessionState::update(paths, session_id, |session| {
             session.last_heartbeat_at = Some(Utc::now());
             session.battery_percent = observed.battery_percent;
+            session.battery_minutes_remaining = battery_minutes_remaining;
             session.bytes_moved = traffic.moved();
             session.route_interface = observed.route_interface.clone();
             session.hotspot = observed.hotspot.clone().or_else(|| session.hotspot.clone());

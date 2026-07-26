@@ -1,12 +1,31 @@
 use crate::files::{atomic_write_json, read_json_if_exists, remove_if_exists, with_advisory_lock};
 use crate::paths::AppPaths;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
 const SESSION_STATE_VERSION: u32 = 2;
+
+/// How many heartbeats of silence mean nobody is writing this session any more.
+///
+/// Shared so the watcher's sleep-gap detection and `status`'s staleness check cannot drift apart.
+/// Both ask the same question — is anyone still measuring — and a session file answers it the same
+/// way whether the silence came from sleep, a crash, or a watcher that was killed.
+const SILENT_HEARTBEATS: u64 = 3;
+
+/// The longest silence that can still be a running watcher, whatever the heartbeat is set to.
+const MAX_SILENCE_SECONDS: u64 = 3600;
+
+/// How long a session may go quiet before its recorded figures stop being current.
+pub fn silence_tolerance(heartbeat_seconds: u64) -> Duration {
+    Duration::seconds(
+        heartbeat_seconds
+            .saturating_mul(SILENT_HEARTBEATS)
+            .min(MAX_SILENCE_SECONDS) as i64,
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -14,6 +33,15 @@ pub enum SessionPhase {
     Ready,
     Active,
     Released,
+}
+
+/// What ends a session first, and how many minutes of it are left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limit {
+    /// The configured lease clock.
+    Lease(u64),
+    /// The battery reaching its floor, projected from the drain observed so far.
+    Battery(u64),
 }
 
 /// A lease on this Mac staying awake.
@@ -49,6 +77,16 @@ pub struct SessionState {
     /// Bytes carried over the commute interface, or `None` when that cannot be said honestly.
     #[serde(default)]
     pub bytes_moved: Option<u64>,
+    /// Minutes until the battery reaches its floor, projected from the drops observed so far.
+    ///
+    /// `None` until enough has been seen to measure a rate, and again whenever the Mac is charging.
+    /// Written by the watcher rather than computed on read, because the drops it is measured from
+    /// only exist in the running daemon; `status` is a separate process with no history of its own.
+    ///
+    /// `#[serde(default)]` for the same reason as `started_battery_percent`: a version bump would
+    /// strand a session that was already running when the user upgraded.
+    #[serde(default)]
+    pub battery_minutes_remaining: Option<u64>,
 }
 
 impl SessionState {
@@ -71,6 +109,7 @@ impl SessionState {
             release_reason: None,
             started_battery_percent: None,
             bytes_moved: None,
+            battery_minutes_remaining: None,
         }
     }
 
@@ -124,6 +163,28 @@ impl SessionState {
 
     pub fn remaining_minutes(&self, now: DateTime<Utc>) -> u64 {
         (self.expires_at - now).num_minutes().max(0) as u64
+    }
+
+    /// Whichever limit ends this session first.
+    ///
+    /// The lease is a configured ceiling and the battery is a measured one, and on a commute the
+    /// battery is nearly always the smaller. Reporting the lease alone tells someone they have a day
+    /// when they have an afternoon, which is the wrong number to plan a journey around.
+    ///
+    /// The projection is only reported while the watcher is still taking it. A session file keeps
+    /// its last written figure forever, so a watcher that died an hour ago would otherwise have
+    /// `status` reading out a stale estimate in the present tense — the same over-promising this
+    /// exists to remove, in a new place. Past `tolerance`, only the lease clock is claimed, because
+    /// that one is arithmetic on a deadline rather than a measurement somebody has to keep taking.
+    pub fn binding_limit(&self, now: DateTime<Utc>, tolerance: Duration) -> Limit {
+        let lease_minutes = self.remaining_minutes(now);
+        let still_measuring = self
+            .last_heartbeat_at
+            .is_some_and(|beat| now - beat <= tolerance);
+        match self.battery_minutes_remaining {
+            Some(minutes) if still_measuring && minutes < lease_minutes => Limit::Battery(minutes),
+            _ => Limit::Lease(lease_minutes),
+        }
     }
 
     pub fn is_holding_a_lease(&self) -> bool {
@@ -191,6 +252,63 @@ mod tests {
             SessionState::load(&paths).unwrap().unwrap().phase,
             SessionPhase::Ready
         );
+    }
+
+    fn tolerance() -> Duration {
+        silence_tolerance(30)
+    }
+
+    /// The whole point: a day of lease on an afternoon of charge reports the afternoon.
+    #[test]
+    fn the_battery_binds_when_it_runs_out_first() {
+        let now = Utc::now();
+        let mut session = SessionState::new(Uuid::new_v4(), now, now + Duration::hours(24));
+        session.last_heartbeat_at = Some(now);
+        session.battery_minutes_remaining = Some(260);
+
+        assert_eq!(session.binding_limit(now, tolerance()), Limit::Battery(260));
+    }
+
+    /// A short trip on a full battery is limited by what the user asked for, not by the charge.
+    #[test]
+    fn the_lease_binds_when_it_expires_first() {
+        let now = Utc::now();
+        let mut session = SessionState::new(Uuid::new_v4(), now, now + Duration::hours(1));
+        session.last_heartbeat_at = Some(now);
+        session.battery_minutes_remaining = Some(260);
+
+        assert_eq!(session.binding_limit(now, tolerance()), Limit::Lease(60));
+    }
+
+    /// Before the drain has been measured there is only one limit to report, and it is the lease.
+    #[test]
+    fn an_unmeasured_battery_leaves_the_lease_in_charge() {
+        let now = Utc::now();
+        let session = SessionState::new(Uuid::new_v4(), now, now + Duration::hours(2));
+
+        assert_eq!(session.binding_limit(now, tolerance()), Limit::Lease(120));
+    }
+
+    /// A watcher that stopped leaves its last estimate behind, and it must not be read out as if
+    /// somebody were still taking it. This is the failure that started the whole change.
+    #[test]
+    fn a_stale_session_stops_claiming_a_battery_it_is_no_longer_watching() {
+        let now = Utc::now();
+        let mut session = SessionState::new(Uuid::new_v4(), now, now + Duration::hours(24));
+        session.last_heartbeat_at = Some(now - Duration::minutes(9));
+        session.battery_minutes_remaining = Some(260);
+
+        assert_eq!(session.binding_limit(now, tolerance()), Limit::Lease(1440));
+    }
+
+    /// A session that has never beaten has nothing to go stale, and equally nothing to claim.
+    #[test]
+    fn a_session_that_never_beat_claims_no_battery() {
+        let now = Utc::now();
+        let mut session = SessionState::new(Uuid::new_v4(), now, now + Duration::hours(24));
+        session.battery_minutes_remaining = Some(260);
+
+        assert_eq!(session.binding_limit(now, tolerance()), Limit::Lease(1440));
     }
 
     #[test]

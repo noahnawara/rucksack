@@ -11,7 +11,7 @@ use rucksack_core::network::{
     read_wifi_status, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
 };
 use rucksack_core::power::{read_power_status, read_sleep_disabled, read_thermal_status};
-use rucksack_core::state::SessionState;
+use rucksack_core::state::{silence_tolerance, Limit, SessionState};
 use rucksack_core::system::{processes, run, ProcessInfo};
 use rucksack_core::{codex, skill, AdaptersConfig, AppPaths, Config};
 use std::fs::OpenOptions;
@@ -668,7 +668,7 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths, config: &Con
             return Ok(());
         }
         output.done(format!(
-            "Packed · {} · battery {} · {} left",
+            "Packed · {} · battery {} · {}",
             session
                 .hotspot
                 .as_deref()
@@ -678,7 +678,10 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths, config: &Con
                 .battery_percent
                 .map(|percent| format!("{percent}%"))
                 .unwrap_or_else(|| "unknown".to_owned()),
-            format_duration(session.remaining_minutes(Utc::now()))
+            format_limit(session.binding_limit(
+                Utc::now(),
+                silence_tolerance(config.session.heartbeat_seconds)
+            ))
         ));
         if !session.online {
             output.step("Offline right now. This Mac is still awake, but nothing can reach it.");
@@ -990,6 +993,18 @@ fn format_duration(minutes: u64) -> String {
         (1, 0) => "1 hour".to_owned(),
         (hours, 0) => format!("{hours} hours"),
         (hours, minutes) => format!("{hours}h {minutes}m"),
+    }
+}
+
+/// Say which limit is being reported, and only claim precision for the one that has it.
+///
+/// The lease clock is arithmetic on a known deadline. The battery is projected from drain that is
+/// still being measured and will move with the workload, so it is marked as an estimate rather than
+/// dressed up as the same kind of number.
+fn format_limit(limit: Limit) -> String {
+    match limit {
+        Limit::Lease(minutes) => format!("{} left", format_duration(minutes)),
+        Limit::Battery(minutes) => format!("~{} of charge left", format_duration(minutes)),
     }
 }
 
