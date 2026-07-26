@@ -65,3 +65,4 @@ ce51b705ab1f6172f12bbf32471615cab3d1a4e407acff815b22bb44c1e63e8e  ./scripts/e2e.
 cf139b79c32a21ec1566b424b05e7a78a14160263ea4bf53085700236a3681ff  ./scripts/install.sh
 46aa0d2307ba07f9667c259fe78df65177e884fb98de22bf5468255394184b01  ./scripts/package/macos/postinstall
 71984962110bb2a52b0e04e059f48e0cab1efb337f0c80c1f14e59c6e2ada6f0  ./scripts/package/macos/preinstall
+aa49e47b55b101dcb0400e8c30410c779f1b7fa637d4212f9710843e190cae0e  ./scripts/set-version.sh
