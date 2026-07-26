@@ -637,6 +637,28 @@ pub fn unpack(output: &Output, paths: &AppPaths) -> Result<()> {
     with_terminal_operation(paths, || unpack_locked(output, paths))
 }
 
+/// What `unpack` did to this Mac, so each outcome gets its own honest sentence.
+///
+/// "Sleep is normal now" and "rucksack let go of something" are different facts. A Mac that was
+/// never packed reaches normal sleep with nothing released, and reporting that as a release would
+/// describe a state nobody measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restore {
+    /// The lease the session file named was released.
+    ReleasedOurs,
+    /// A lease was standing that no session file named, and it was released.
+    ReleasedUntracked,
+    /// Nothing was holding sleep off: this Mac already slept normally.
+    AlreadyNormal,
+}
+
+impl Restore {
+    /// Did rucksack hand sleep back just now, rather than find it already normal?
+    fn released(self) -> bool {
+        matches!(self, Self::ReleasedOurs | Self::ReleasedUntracked)
+    }
+}
+
 /// Let this Mac sleep again, from any state.
 ///
 /// This is also the recovery path: an unreadable session file, a lease whose id no longer matches,
@@ -652,13 +674,13 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
         }
     };
 
-    let released = restore_normal_sleep(&helper, session.as_ref())?;
+    let restored = restore_normal_sleep(&helper, session.as_ref())?;
     if let Some(session) = session.as_ref() {
         if let Some(pid) = session.daemon_pid {
             stop_watcher(pid, session.id);
         }
-        report_outcome(session, released, output);
-    } else if released {
+        report_outcome(session, restored.released(), output);
+    } else if restored == Restore::ReleasedUntracked {
         output.step("Released a power lease rucksack was not tracking.");
     }
 
@@ -668,13 +690,13 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
     }
     // Before the verdict, which is always the last line.
     //
-    // Gated on there having been a session, not merely on `released`: a bare `unpack` on an idle Mac
-    // reports success too, and spending the one mention there would spend it on someone who has
-    // never taken a trip — and it is only ever offered once.
-    if released && session.is_some() {
+    // Gated on there having been a session as well as a release: letting go of a lease no session
+    // file names is recovery from something that went wrong, not a trip someone just took, and the
+    // one mention is only ever spent once.
+    if restored.released() && session.is_some() {
         crate::star::mention_once(paths, output);
     }
-    output.done(if released {
+    output.done(if restored.released() {
         "Unpacked. This Mac sleeps normally."
     } else {
         "Already unpacked. This Mac sleeps normally."
@@ -684,27 +706,47 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
 
 /// Give sleep back, escalating until something works.
 ///
-/// Ordered so the lease id is used while it is still known: releasing by id, then by owner uid,
-/// then accepting macOS's own answer that sleep is already normal.
-fn restore_normal_sleep(helper: &HelperClient, session: Option<&SessionState>) -> Result<bool> {
-    if let Some(session) = session {
-        if let Ok(status) = helper.release(session.lease_id, "user unpacked") {
-            if !status.active {
-                return Ok(true);
-            }
-        }
-    }
-    if let Ok(Some(status)) = helper.recover() {
-        if !status.active {
-            return Ok(true);
-        }
+/// The helper is asked first, and macOS itself is the last word: a Mac that answers
+/// `SleepDisabled=0` with nothing released was already sleeping normally, and anything else is
+/// somebody else's hold that rucksack must not claim to have undone.
+fn restore_normal_sleep(helper: &HelperClient, session: Option<&SessionState>) -> Result<Restore> {
+    if let Some(restored) = release_through_helper(helper, session) {
+        return Ok(restored);
     }
     match read_sleep_disabled() {
-        Ok(0) => Ok(false),
+        Ok(0) => Ok(Restore::AlreadyNormal),
         Ok(_) => anyhow::bail!(
             "Something is holding this Mac awake and rucksack could not release it.\nQuit any closed-display utility, then run `rucksack unpack` again."
         ),
         Err(error) => Err(error).context("Could not confirm this Mac can sleep again."),
+    }
+}
+
+/// Ask the helper to let go, and report only what it actually let go of.
+///
+/// Ordered so the lease id is used while it is still known: releasing by id, then by owner uid.
+/// `recover` answers identically whether it released a lease or found none to release, so whether
+/// one was standing is read first — otherwise "there was nothing to do" reads as a release, and
+/// `unpack` announces work it never did.
+fn release_through_helper(
+    helper: &HelperClient,
+    session: Option<&SessionState>,
+) -> Option<Restore> {
+    if let Some(session) = session {
+        if let Ok(status) = helper.release(session.lease_id, "user unpacked") {
+            if !status.active {
+                return Some(Restore::ReleasedOurs);
+            }
+        }
+    }
+    let standing = helper
+        .status()
+        .ok()
+        .flatten()
+        .is_some_and(|status| status.active);
+    match helper.recover() {
+        Ok(Some(status)) if standing && !status.active => Some(Restore::ReleasedUntracked),
+        _ => None,
     }
 }
 
@@ -947,7 +989,10 @@ impl Drop for PackCleanup<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rucksack_core::protocol::{HelperOperation, HelperRequest, HelperResponse, HelperStatus};
     use rucksack_core::state::SessionPhase;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
 
     fn route(interface: &str, gateway: &str) -> RouteStatus {
         RouteStatus {
@@ -1116,6 +1161,110 @@ mod tests {
         assert_eq!(format_duration(60), "1 hour");
         assert_eq!(format_duration(24 * 60), "24 hours");
         assert_eq!(format_duration(90), "1h 30m");
+    }
+
+    /// Stand up a helper that answers every request the call under test makes.
+    fn fake_helper(
+        reply: impl Fn(&HelperRequest) -> HelperResponse + Send + 'static,
+    ) -> (tempfile::TempDir, HelperClient) {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut line = String::new();
+                if BufReader::new(&stream).read_line(&mut line).is_err() {
+                    return;
+                }
+                let request: HelperRequest = serde_json::from_str(&line).unwrap();
+                let mut encoded = serde_json::to_vec(&reply(&request)).unwrap();
+                encoded.push(b'\n');
+                let _ = stream.write_all(&encoded);
+                let _ = stream.flush();
+            }
+        });
+        let helper = HelperClient::new(&socket);
+        (directory, helper)
+    }
+
+    fn helper_status(active: bool) -> HelperStatus {
+        HelperStatus {
+            active,
+            lease_id: None,
+            owner_uid: None,
+            created_at: None,
+            expires_at: None,
+            hard_expires_at: None,
+            previous_sleep_disabled: None,
+            sleep_disabled: Some(u8::from(active)),
+            reason: None,
+            last_reasserted_at: None,
+        }
+    }
+
+    /// A helper with nothing to release is not a release.
+    ///
+    /// `recover` reports "no lease is active" both when it has just released one and when there
+    /// was never one to release. Reading that as a release is what made a second `unpack` in a
+    /// row claim it had let go of something.
+    #[test]
+    fn a_helper_holding_nothing_releases_nothing() {
+        let (_directory, helper) = fake_helper(|request| match request.operation {
+            // With no lease to own, the helper refuses a release by id, as `require_owner` does.
+            HelperOperation::Release { .. } => {
+                HelperResponse::failure(request.request_id, "no active lease", None)
+            }
+            _ => HelperResponse::success(request.request_id, Some(helper_status(false))),
+        });
+
+        assert_eq!(release_through_helper(&helper, None), None);
+        assert_eq!(
+            release_through_helper(&helper, Some(&trip(Utc::now(), 30))),
+            None
+        );
+    }
+
+    /// A lease standing with no session file to name it is the case `recover` exists for.
+    #[test]
+    fn a_standing_lease_no_session_names_is_released() {
+        let (_directory, helper) = fake_helper(|request| match request.operation {
+            // The status asked before recovering is the only proof a lease was ever standing.
+            HelperOperation::Status => {
+                HelperResponse::success(request.request_id, Some(helper_status(true)))
+            }
+            _ => HelperResponse::success(request.request_id, Some(helper_status(false))),
+        });
+
+        assert_eq!(
+            release_through_helper(&helper, None),
+            Some(Restore::ReleasedUntracked)
+        );
+    }
+
+    /// Releasing by lease id is rucksack letting go of its own session, and needs no escalation.
+    #[test]
+    fn releasing_by_lease_id_needs_no_recovery() {
+        let (_directory, helper) = fake_helper(|request| match request.operation {
+            HelperOperation::Release { .. } => {
+                HelperResponse::success(request.request_id, Some(helper_status(false)))
+            }
+            _ => HelperResponse::failure(request.request_id, "should not be asked", None),
+        });
+
+        assert_eq!(
+            release_through_helper(&helper, Some(&trip(Utc::now(), 30))),
+            Some(Restore::ReleasedOurs)
+        );
+    }
+
+    /// No helper to answer means nothing was released, and macOS gets the last word.
+    #[test]
+    fn an_unreachable_helper_releases_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let helper = HelperClient::new(directory.path().join("absent.sock"));
+
+        assert_eq!(release_through_helper(&helper, None), None);
     }
 
     #[test]

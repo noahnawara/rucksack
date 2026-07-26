@@ -39,9 +39,9 @@ cd site && npm run test:e2e
 
 Test results:
 
-- 96 debug tests: CLI 32, CLI contract 7, core 46, helper 11;
-- 97 release tests: the same set plus one macOS release-only helper test;
-- 41 end-to-end assertions from `scripts/e2e.sh`, against real leases on this hardware;
+- 100 debug tests: CLI 36, CLI contract 7, core 46, helper 11;
+- 101 release tests: the same set plus one macOS release-only helper test;
+- 43 end-to-end assertions from `scripts/e2e.sh`, against real leases on this hardware;
 - 16 browser tests and 0 vulnerabilities reported by `npm audit`;
 - 0 failures.
 
@@ -91,6 +91,11 @@ The tests and the structural review cover the invariants that make a closed lid 
 - `unpack` absorbs recovery: release by lease id, helper recover by owner uid, then
   accepting macOS's own `SleepDisabled=0`. Session state it cannot parse is reported,
   deleted, and never dead-ends into a second command;
+- `unpack` says only what it did: releasing its own lease, releasing a standing lease no
+  session file names, and finding sleep already normal are three separate outcomes. The
+  helper answers `recover` identically whether it released a lease or found none, so
+  whether one was standing is read before recovering, and a Mac with nothing packed is
+  never told a lease was let go;
 - atomic `0600` writes for configuration and session state, and a configuration written
   by an older release still loads with retired keys ignored;
 - a bounded captive-portal probe that carries no repository data;
@@ -120,6 +125,8 @@ checks:
   actually switched off, `status` says Packed, the lease keeps standing on its own with no
   agent involvement, a second `pack` refuses without disturbing the first lease, and
   `unpack` restores normal sleep;
+- a second `unpack` in a row says "Already unpacked", claims no release, and leaves sleep
+  normal, against a real helper that is installed and holding nothing;
 - `pack` installs the `rucksack` skill and retires `commute-mode`.
 
 ## Supervised hardware observation (historical)

@@ -184,6 +184,7 @@ if [ "$LIFECYCLE_READY" = "no" ]; then
     skip "the lease keeps standing on its own"
     skip "packing twice refuses"
     skip "unpack restores sleep"
+    skip "unpacking twice claims no release"
 else
     START=$(python3 -c 'import time; print(time.time())')
     OUT=$("$RUCKSACK" pack "${PACK_ARGS[@]}" --for 20m 2>&1)
@@ -226,6 +227,14 @@ else
     check $? "unpack is three lines, plus the one-time first-trip line (got $(lines "$OUT"))" "$OUT"
     [ "$(sleep_disabled)" = "0" ]
     check $? "unpack restored normal sleep"
+
+    # The helper is installed and holding nothing, which is the state that used to be reported as
+    # a release: `recover` answers the same way whether it let go of a lease or found none.
+    OUT=$("$RUCKSACK" unpack 2>&1)
+    [ $? -eq 0 ] && contains "$OUT" "Already unpacked" && ! contains "$OUT" "Released"
+    check $? "unpacking twice says Already unpacked and claims no release" "$OUT"
+    [ "$(sleep_disabled)" = "0" ]
+    check $? "the second unpack left sleep normal"
 
     # Once, ever. A mention on every trip would be nagging, which is the thing this product is not.
     "$RUCKSACK" pack "${PACK_ARGS[@]}" --for 20m >/dev/null 2>&1
