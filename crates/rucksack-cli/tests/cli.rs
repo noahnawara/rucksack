@@ -150,3 +150,46 @@ fn unreadable_session_state_never_dead_ends() {
     assert_eq!(reported.status.code(), Some(0));
     assert!(stdout(&reported).contains("Not packed"));
 }
+
+/// Recorded intent is not protection, and `status` must never confuse the two.
+///
+/// This is the session file left behind by the failure it is named for: phase "active", hours still
+/// on the clock, and a single heartbeat from long before, written by a watcher that then died. The
+/// helper dropped the lease ninety seconds later, and `status` went on printing
+/// `Packed · en0 · battery 100% · 23h 53m left` — the one sentence that gets a lid closed on
+/// unprotected work.
+#[test]
+fn a_session_whose_watcher_died_is_never_reported_as_packed() {
+    let home = home();
+    let directory = home.path().join("Library/Application Support/Rucksack");
+    std::fs::create_dir_all(&directory).expect("state directory");
+    std::fs::write(
+        directory.join("session.json"),
+        r#"{
+          "version": 2,
+          "id": "3f1a1f7a-2a5f-4f2e-9f7a-1b2c3d4e5f60",
+          "lease_id": "8c2d4e6f-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+          "phase": "active",
+          "started_at": "2026-07-26T19:17:46Z",
+          "expires_at": "2099-01-01T00:00:00Z",
+          "ended_at": null,
+          "last_heartbeat_at": "2026-07-26T19:18:19Z",
+          "daemon_pid": 58895,
+          "hotspot": null,
+          "route_interface": "en0",
+          "battery_percent": 100,
+          "online": true,
+          "last_event": null,
+          "release_reason": null
+        }"#,
+    )
+    .expect("a session the watcher stopped writing to");
+
+    let reported = rucksack(&["status"], home.path());
+
+    assert_eq!(reported.status.code(), Some(0));
+    let reported = stdout(&reported);
+    assert!(!reported.contains("Packed ·"), "{reported}");
+    assert!(reported.contains("Not packed"), "{reported}");
+    assert!(reported.contains("rucksack pack"), "{reported}");
+}

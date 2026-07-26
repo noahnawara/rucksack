@@ -15,7 +15,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let config = Config::load(&paths)?;
             flow::pack(&args, &output, &paths, &config)
         }
-        Command::Status(args) => flow::status(&args, &output, &paths),
+        Command::Status(args) => {
+            let config = Config::load(&paths)?;
+            flow::status(&args, &output, &paths, &config)
+        }
         Command::Unpack => flow::unpack(&output, &paths),
         Command::Pair => pair(&output),
         Command::Star => crate::star::star(&output),
