@@ -51,7 +51,7 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   await page.goto("/");
 
   await expect(page).toHaveTitle(
-    "Keep Your AI Coding Agent Running on Mac | rucksack",
+    "Keep Your Coding Agent Running with the Lid Closed | rucksack",
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
@@ -215,11 +215,14 @@ test("publishes canonical search, social, and software metadata", async ({
         "width": 1200,
         "height": 630,
       }),
+      // `codeRepository` belongs to SoftwareSourceCode, not SoftwareApplication, and
+      // schema.org's validator rejects it here. `sameAs` carries the repository link
+      // instead, so keep asserting that rather than reintroducing the invalid property.
       expect.objectContaining({
         "@type": "SoftwareApplication",
         "operatingSystem": "macOS 14 or later",
         "softwareVersion": "0.1.0-alpha.1",
-        "codeRepository": "https://github.com/noahnawara/rucksack",
+        "sameAs": "https://github.com/noahnawara/rucksack",
       }),
     ]),
   });
