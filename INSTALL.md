@@ -37,29 +37,54 @@ target/debug/rucksack
 target/debug/rucksack-helper
 ```
 
-There is no setup command. `rucksack pack` installs the power helper the first time it runs,
-which is when macOS asks for administrator authorization.
+## Make `rucksack` a command
 
-To get that prompt out of the way now instead:
+Nothing else in this project says `./target/debug/rucksack`. This guide, the README, and the skill
+your agent reads all say `rucksack pack`. So put it where that works: copy **both** binaries into one
+directory already on your `PATH`. `~/.cargo/bin` is on it for anyone who has Rust, which you do.
 
 ```sh
-./target/debug/rucksack helper install
+cp target/debug/rucksack target/debug/rucksack-helper ~/.cargo/bin/
+rucksack --version
 ```
 
-The first successful `pack` also remembers the network it ended up on, and installs a `rucksack`
-skill for Codex and Claude Code so "pack my Mac" works inside a conversation. To name the network
-yourself:
+Copy both, and keep them together. `rucksack` finds its helper as a file sitting beside itself, so
+symlinking the CLI alone fails with `Build rucksack-helper next to the rucksack binary first` —
+macOS reports the symlink's own location rather than the target's. Re-copy after every rebuild;
+nothing updates these for you.
+
+## Install the power helper yourself, now
+
+Run this in a terminal window, before handing rucksack to an agent:
 
 ```sh
-./target/debug/rucksack pack --hotspot "My iPhone"
+rucksack helper install
+```
+
+`pack` would install it on first use, and that is the part to get out of the way. Installing needs
+`sudo`, `sudo` reads your password from a terminal, and an agent session has no terminal — so an
+agent's first `pack` fails with:
+
+```text
+sudo: a terminal is required to read the password
+```
+
+Doing it here, once, in person, is what keeps every later `pack` silent.
+
+The first successful `pack` also remembers the network it ended up on, and installs a `rucksack`
+skill for Codex, Claude Code, and Cursor so "I'm leaving" works inside a conversation. To name the
+network yourself:
+
+```sh
+rucksack pack --hotspot "My iPhone"
 ```
 
 ## Check the installation
 
 ```sh
-./target/debug/rucksack --version
-./target/debug/rucksack helper status
-./target/debug/rucksack status
+rucksack --version
+rucksack helper status
+rucksack status
 ```
 
 Those three are read-only. Do not run `pack` just to test the install: it joins your hotspot, does
@@ -68,9 +93,9 @@ not put the previous network back, and takes a real closed-lid lease.
 ## Use it
 
 ```sh
-./target/debug/rucksack pack
-./target/debug/rucksack status
-./target/debug/rucksack unpack
+rucksack pack
+rucksack status
+rucksack unpack
 ```
 
 `unpack` is also the recovery path. It restores normal sleep from any state, including an
@@ -81,8 +106,9 @@ interrupted session or state rucksack can no longer read.
 Run `unpack` first, then remove the helper:
 
 ```sh
-./target/debug/rucksack unpack
-./target/debug/rucksack helper uninstall
+rucksack unpack
+rucksack helper uninstall
+rm ~/.cargo/bin/rucksack ~/.cargo/bin/rucksack-helper
 ```
 
 ## Signed releases

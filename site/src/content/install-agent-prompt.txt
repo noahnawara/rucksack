@@ -1,8 +1,9 @@
-Install rucksack on this Mac from https://github.com/noahnawara/rucksack, following INSTALL.md at a
-tag you pin. Don't run `rucksack pack` to test it. When you're done, tell me to run
-`rucksack helper install` myself in a terminal window — it asks for my password once, and getting it
-out of the way now means no later `rucksack pack` ever stops for it. Don't try to run it for me: you
-have nowhere to type a password.
+Install rucksack on this Mac from https://github.com/noahnawara/rucksack, following INSTALL.md and
+pinning the commit you build. Don't run `rucksack pack` to test it. Do finish the step that puts
+`rucksack` on my PATH, or nothing below will work. Then tell me to run `rucksack helper install`
+myself in a terminal window — it asks for my password once, and getting it out of the way now means
+no later `rucksack pack` ever stops for it. Don't try to run it for me: you have nowhere to type a
+password.
 
 From then on: whenever I say I'm leaving, heading out, or have to go — run `rucksack pack`, so this
 Mac stays awake on my hotspot and you can keep working while it's closed. Just run it, don't ask me

@@ -160,14 +160,18 @@ Release packaging targets macOS 14 and newer.
 
 ```sh
 cargo build --workspace --locked
-./target/debug/rucksack status
-./target/debug/rucksack pack
-./target/debug/rucksack unpack
+cp target/debug/rucksack target/debug/rucksack-helper ~/.cargo/bin/
+rucksack helper install
+rucksack status
 ```
 
-The first `pack` installs the helper, which is where macOS asks for your password. Read the
-[installation guide](INSTALL.md) first. `scripts/e2e.sh` exercises the whole flow against
-real leases and always restores normal sleep.
+Copy both binaries, and keep them in the same directory: `rucksack` finds its helper as a file
+beside itself, so symlinking the CLI alone does not work.
+
+Install the helper yourself, in a terminal, as above. `pack` would do it on first use, but it needs
+`sudo`, and `sudo` reads your password from a terminal that an agent session does not have. Read the
+[installation guide](INSTALL.md) first. `scripts/e2e.sh` exercises the whole flow against real
+leases and always restores normal sleep.
 
 ## Safety
 
