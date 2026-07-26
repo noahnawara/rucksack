@@ -1,7 +1,7 @@
 use crate::cli::{PackArgs, StatusArgs};
 use crate::helper_client::HelperClient;
 use crate::install;
-use crate::output::Output;
+use crate::output::{self, Output};
 use crate::thermal::{ends_a_lease, read_thermal_state};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
@@ -24,8 +24,8 @@ use uuid::Uuid;
 /// How long an automatic hotspot join is given before rucksack hands off to the Wi-Fi menu.
 const AUTOMATIC_JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 const NETWORK_POLL_INTERVAL: Duration = Duration::from_secs(1);
-/// How often to reassure the user that rucksack is still waiting for them.
-const WAIT_TICK: Duration = Duration::from_secs(30);
+/// How long the watcher handshake may take before pack gives up on it.
+const WATCHER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(8);
 const WIFI_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.Network-Settings.extension";
 
 pub fn pack(args: &PackArgs, output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
@@ -122,7 +122,7 @@ fn pack_inner(
 
     let daemon_pid = spawn_watcher(session.id, paths)?;
     cleanup.watcher = Some((daemon_pid, session.id));
-    let session = wait_for_watcher(session.id, daemon_pid, paths)?;
+    let session = wait_for_watcher(session.id, daemon_pid, paths, output)?;
     if !session.is_holding_a_lease() {
         anyhow::bail!(
             "The safety watcher stopped during startup: {}",
@@ -379,7 +379,7 @@ fn ensure_commute_network(
                 None => false,
             };
             if joined {
-                if let Some(network) = wait_for_join(config) {
+                if let Some(network) = wait_for_join(config, output) {
                     output.step("Joined.");
                     return Ok(network);
                 }
@@ -427,27 +427,29 @@ fn wait_for_network(
     output.step(instruction);
     open_wifi_settings(output);
 
-    let network = poll(
-        output,
-        "Still waiting for the network — lid open.",
-        || arrived(target, config),
-    );
+    let network = poll(output, output::WAITING_NETWORK, || arrived(target, config));
     announce(&network, output);
     network
 }
 
 /// Give a confirmed automatic join a moment to come up, before falling back to the Wi-Fi menu.
-fn wait_for_join(config: &Config) -> Option<CommuteNetwork> {
-    let deadline = Instant::now() + AUTOMATIC_JOIN_TIMEOUT;
-    loop {
-        if let Some(network) = online(config, true) {
-            return Some(network);
+///
+/// Twenty seconds, after a line that ends in an ellipsis. Without a clock this is the most
+/// misleading pause in the product: the ellipsis promises motion and the code delivers a still
+/// screen, which is exactly what a hang looks like.
+fn wait_for_join(config: &Config, output: &Output) -> Option<CommuteNetwork> {
+    output.waiting(output::WAITING_JOIN, || {
+        let deadline = Instant::now() + AUTOMATIC_JOIN_TIMEOUT;
+        loop {
+            if let Some(network) = online(config, true) {
+                return Some(network);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(NETWORK_POLL_INTERVAL);
         }
-        if Instant::now() >= deadline {
-            return None;
-        }
-        thread::sleep(NETWORK_POLL_INTERVAL);
-    }
+    })
 }
 
 fn wait_for_iphone_usb(config: &Config, output: &Output) -> Result<CommuteNetwork> {
@@ -463,11 +465,7 @@ fn wait_for_iphone_usb(config: &Config, output: &Output) -> Result<CommuteNetwor
             "Turn on Personal Hotspot on the connected iPhone — keep the lid open until this says Packed. Waiting…",
         );
     }
-    let network = poll(
-        output,
-        "Still waiting for the iPhone — lid open.",
-        on_the_iphone,
-    );
+    let network = poll(output, output::WAITING_IPHONE, on_the_iphone);
     output.step("Online through the iPhone.");
     Ok(network)
 }
@@ -478,21 +476,17 @@ fn wait_for_iphone_usb(config: &Config, output: &Output) -> Result<CommuteNetwor
 /// not have to do is start over. Ctrl-C is the way out.
 fn poll(
     output: &Output,
-    still_waiting: &str,
+    waiting_for: &'static str,
     mut ready: impl FnMut() -> Option<CommuteNetwork>,
 ) -> CommuteNetwork {
-    let started = Instant::now();
-    let mut next_tick = WAIT_TICK;
-    loop {
+    // The cadence lives in `Output`, because what a terminal and a captured stream should see here
+    // differ and only one of them is a person. All this loop owes them is the answer to "yet?".
+    output.waiting(waiting_for, || loop {
         if let Some(network) = ready() {
             return network;
         }
-        if started.elapsed() >= next_tick {
-            output.step(still_waiting);
-            next_tick += WAIT_TICK;
-        }
         thread::sleep(NETWORK_POLL_INTERVAL);
-    }
+    })
 }
 
 /// Learn the hotspot from the first successful pack, so the next one needs no arguments.
@@ -1058,22 +1052,31 @@ fn spawn_watcher(session_id: Uuid, paths: &AppPaths) -> Result<u32> {
 }
 
 /// Wait for the watcher we just spawned to prove it is running.
-fn wait_for_watcher(session_id: Uuid, daemon_pid: u32, paths: &AppPaths) -> Result<SessionState> {
-    let deadline = Instant::now() + Duration::from_secs(8);
-    loop {
-        if let Ok(Some(session)) = SessionState::load(paths) {
-            if session.id == session_id
-                && session.daemon_pid == Some(daemon_pid)
-                && session.last_heartbeat_at.is_some()
-            {
-                return Ok(session);
+fn wait_for_watcher(
+    session_id: Uuid,
+    daemon_pid: u32,
+    paths: &AppPaths,
+    output: &Output,
+) -> Result<SessionState> {
+    // Usually a fifth of a second, so the grace period means a healthy Mac sees nothing at all.
+    // It speaks only on a Mac slow enough that the silence would otherwise read as a hang.
+    output.waiting(output::WAITING_WATCHER, || {
+        let deadline = Instant::now() + WATCHER_HANDSHAKE_TIMEOUT;
+        loop {
+            if let Ok(Some(session)) = SessionState::load(paths) {
+                if session.id == session_id
+                    && session.daemon_pid == Some(daemon_pid)
+                    && session.last_heartbeat_at.is_some()
+                {
+                    return Ok(session);
+                }
             }
+            if Instant::now() >= deadline {
+                anyhow::bail!("The safety watcher did not start.");
+            }
+            thread::sleep(Duration::from_millis(50));
         }
-        if Instant::now() >= deadline {
-            anyhow::bail!("The safety watcher did not start.");
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
+    })
 }
 
 /// Stop the watcher for this session, and only that.

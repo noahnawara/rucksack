@@ -5,8 +5,8 @@
 0c64d642e10833f7215129003212ce5e37a41a87209484b4ffee8f784db95683  ./.gitignore
 3346f699eca1390ec284881020ce6417b538966cf9f57804254c58696078c4c9  ./CHANGELOG.md
 e25047bcbf11b4f2ca69236ada00b56b18755997bb75e184942589a6881488ef  ./CONTRIBUTING.md
-08e1fd8fcfbbffdfc0decb550c7e25b5f4b26935ccc951bc2283a4b054d48feb  ./Cargo.lock
-1ea9827ee51ae7f462fa3dce837d52db7cd9f2be367241832e49cc5ef653f2ec  ./Cargo.toml
+410ab33b1b79f1160fb4b7e5819490521c85376230553f392556e7ef59422c7b  ./Cargo.lock
+fa11282d81773ac424729e816ca44f749f1305502321bfab3a3c566ea5fa8321  ./Cargo.toml
 b3d9f3c526ce1ebe57a7d0f2d8a64f08d2c2ded208d4f5ff11c58dfd6cb2d7fd  ./LICENSE
 7cd03cbfeb75d4f25c31fdebf9210cff00ed7ef3ac4247d7333c7012aebc7d36  ./README.md
 f3610f1e1b15970174c657fb9331ba2e1d45fc4f5bf58a8513b91ac7d3b98b35  ./SECURITY.md
@@ -19,11 +19,11 @@ cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  ./assets/launc
 cfc6be92fac78c3ed871eb5c022d347286cd1427ac62072f8b12fa4fbc323f30  ./crates/rucksack-cli/src/app.rs
 792d314780f9156816609c307b0f5b33a890a063efb97847d0061070f2ad4530  ./crates/rucksack-cli/src/cli.rs
 4651d6670fb209b48214ffe68a1f6faa7ad49ea88b7a2661bb55dcf266a9d4e6  ./crates/rucksack-cli/src/daemon.rs
-c372562fff02cb508eacbd96fc8e0a221e39792e385256314243d66c6011e16e  ./crates/rucksack-cli/src/flow.rs
+aa4f59263d48c88d24f81e8127edcb30631275b7b938c86742d2e1afd1b344a8  ./crates/rucksack-cli/src/flow.rs
 f29425a46f9c4bb52a0f4ff274d0b9209df350f74be11f334d682fa2668230db  ./crates/rucksack-cli/src/helper_client.rs
 37dace3d13908e27e51224b2e784e8e5efe4a8620df16473c3d31f164d8ac38e  ./crates/rucksack-cli/src/install.rs
 2d2cc5e8c45603da30ac165556b24058658ead1e74db28387b0c7a7a5cced637  ./crates/rucksack-cli/src/main.rs
-877128d9a78575d42ffebe437966eb6cdb855833b046a5c5daae9deddd32e6c2  ./crates/rucksack-cli/src/output.rs
+b6ca8ee64d2bdc5604fca6ddd7e6fb9c6b9081202a8fd65c77c3d64e43921797  ./crates/rucksack-cli/src/output.rs
 0c0a4bfdfd16af3a944b950c6d7be65a32b4c78d6daa759443a098e0188acb4d  ./crates/rucksack-cli/src/star.rs
 c932f08444951bfcadf43ba81661d45733e716695efe46e25f6e366fc093ae9c  ./crates/rucksack-cli/src/thermal.rs
 7d5776ba1dd35724d4d6694ff288d863b9effb68467b4120f390935680f2e30e  ./crates/rucksack-cli/tests/cli.rs
