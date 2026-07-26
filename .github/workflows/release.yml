@@ -1,9 +1,22 @@
 name: Release
 
+# Run by hand, because signing is still a release gate rather than something this repository can
+# do. There are no Developer ID certificates in `secrets` yet, so on every tag this failed at
+# `security import` with an empty .p12 — three tags, three red runs, no published release.
+#
+# Publishing without them is not the alternative. A helper built without `RUCKSACK_TEAM_ID`
+# authenticates clients by user id alone and says so itself, in
+# `crates/rucksack-helper/src/server.rs`: "Do not distribute this binary." An unsigned package
+# would be a weaker artifact wearing a release's clothes.
+#
+# The documented install path does not depend on this. README, INSTALL.md, and the website's agent
+# prompt all install with `cargo install --git --tag`, which builds from the tag and touches no
+# release asset. `scripts/install.sh` is the one that wants a package, and INSTALL.md already says
+# not to run it until a signed release exists.
+#
+# Put `push: tags:` back the day the four `APPLE_*` secrets are set. Everything below is ready.
 on:
-  push:
-    tags:
-      - "v[0-9]*.[0-9]*.[0-9]*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,6 +40,17 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      # A tag trigger could only ever be a tag. A manual one can be anything the dropdown offers, and
+      # both the version and the release name are read out of the ref further down — so a run
+      # started from a branch would build for twenty minutes and then fail at `gh release create`
+      # with a name no tag has. Say so in the first five seconds instead.
+      - name: Require a release tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::Run this on a release tag. $GITHUB_REF_NAME is a $GITHUB_REF_TYPE, and the package version and release name both come from the ref."
+            exit 1
+          fi
 
       - name: Validate release candidate
         env:
