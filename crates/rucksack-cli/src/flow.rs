@@ -236,12 +236,20 @@ struct CommuteTarget {
     baseline: Option<RouteStatus>,
 }
 
-/// iOS Personal Hotspot always serves 172.20.10.0/28 with itself as the gateway, so this gateway
-/// is positive proof of a phone hotspot even when macOS redacts the network name.
-const PERSONAL_HOTSPOT_GATEWAY: &str = "172.20.10.1";
+/// The gateways only an iOS Personal Hotspot serves, so either one is positive proof of a phone
+/// hotspot even when macOS redacts the network name.
+///
+/// On a dual-stack carrier the hotspot serves 172.20.10.0/28 with itself as the gateway. On an
+/// IPv6-only carrier iOS runs 464XLAT instead and hands the Mac 192.0.0.2/32 with the gateway
+/// 192.0.0.1, out of the RFC 7335 IPv4 Service Continuity prefix. That prefix is reserved for this
+/// use, but only these host addresses are proof, so the match stays exact rather than by subnet.
+const PERSONAL_HOTSPOT_GATEWAYS: [&str; 2] = ["172.20.10.1", "192.0.0.1"];
 
 fn is_personal_hotspot(route: &RouteStatus) -> bool {
-    route.gateway.as_deref() == Some(PERSONAL_HOTSPOT_GATEWAY)
+    route
+        .gateway
+        .as_deref()
+        .is_some_and(|gateway| PERSONAL_HOTSPOT_GATEWAYS.contains(&gateway))
 }
 
 /// Has the Mac left the network it started on?
@@ -892,14 +900,20 @@ mod tests {
         assert!(!has_switched(&target, &office, None));
         assert!(!has_switched(&target, &office, Some("Office")));
         assert!(has_switched(&target, &route("en0", "172.20.10.1"), None));
+        assert!(has_switched(&target, &route("en0", "192.0.0.1"), None));
         assert!(has_switched(&target, &route("en7", "192.168.1.1"), None));
     }
 
     /// The one signal that survives macOS hiding the network name.
+    ///
+    /// Both gateways are real: 172.20.10.1 on a dual-stack carrier, and 192.0.0.1 when the carrier
+    /// is IPv6-only and iOS hands out a 464XLAT service-continuity address instead.
     #[test]
     fn an_iphone_hotspot_gateway_is_proof_on_its_own() {
         assert!(is_personal_hotspot(&route("en0", "172.20.10.1")));
+        assert!(is_personal_hotspot(&route("en0", "192.0.0.1")));
         assert!(!is_personal_hotspot(&route("en0", "192.168.1.1")));
+        assert!(!is_personal_hotspot(&route("en0", "192.0.0.2")));
     }
 
     #[test]

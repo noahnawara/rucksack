@@ -148,7 +148,7 @@ check $? "a config from an older release still loads" "$OUT"
 
 new_home
 # This Mac is on ordinary Wi-Fi, so pack must refuse to accept it and wait instead.
-if [ "$(gateway)" != "" ] && [ "$(gateway)" != "172.20.10.1" ]; then
+if [ "$(gateway)" != "" ] && [ "$(gateway)" != "172.20.10.1" ] && [ "$(gateway)" != "192.0.0.1" ]; then
     "$RUCKSACK" pack --for 20m >"$WORK/wait.log" 2>&1 &
     WAIT_PID=$!
     for _ in $(seq 1 30); do

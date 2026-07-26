@@ -8,8 +8,9 @@ Implemented in source:
 - `pack`, `status`, `unpack`, `pair`, `star`, and `helper install`/`status`/`uninstall`;
 - helper install on the first `pack` that needs it, so macOS authenticates once;
 - arrival on a commute network proven by the saved network name, the default route leaving
-  its baseline interface or gateway, the 172.20.10.1 iOS Personal Hotspot gateway, a join
-  macOS confirmed, or `--here` — and in every case an internet probe on that route;
+  its baseline interface or gateway, an iOS Personal Hotspot gateway (172.20.10.1, or
+  192.0.0.1 on an IPv6-only carrier), a join macOS confirmed, or `--here` — and in every
+  case an internet probe on that route;
 - waiting for as long as it takes when macOS cannot join, ticking every 30 seconds, with
   no abort and no re-run;
 - a host-scoped lease that survives later network loss;

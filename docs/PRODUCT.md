@@ -54,10 +54,10 @@ current network → hotspot → lid closed
 “The internet works” is not evidence, because the office network the user is walking
 away from also works, and accepting it packs a Mac that goes offline at the front door.
 Arrival is proven by the Wi-Fi name matching the saved hotspot, by the default route
-visibly leaving the interface or gateway it started on, by the gateway `172.20.10.1`
-that only an iOS Personal Hotspot serves, by macOS reporting that it joined the network
-rucksack asked for, or by `--here` — and in every case the route must then actually
-reach the internet.
+visibly leaving the interface or gateway it started on, by a gateway that only an iOS
+Personal Hotspot serves — `172.20.10.1`, or `192.0.0.1` when the carrier is IPv6-only —
+by macOS reporting that it joined the network rucksack asked for, or by `--here` — and in
+every case the route must then actually reach the internet.
 
 There is no unplug step. Packing while plugged in is allowed, and the helper re-asserts
 the override when it observes the power source change.
