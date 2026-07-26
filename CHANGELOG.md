@@ -24,6 +24,19 @@ all notable changes to rucksack will be documented here.
 - Canonical `pack`/`unpack` commands; former lifecycle names are rejected.
 - rucksack changes no agent instructions, tools, or permissions.
 
+### Changed
+
+- `status` reports whichever limit ends the session first, rather than the lease clock alone. On
+  a commute the battery is nearly always the smaller of the two, and a day of lease on an
+  afternoon of charge was reported as a day. The battery figure is projected from drain actually
+  observed, marked with `~`, and withheld until two drops have been measured.
+- `unpack` lets go of the phone. A Mac that arrives somewhere new while still tethered stays on
+  the hotspot, because macOS will not abandon a connection that still works; cycling the radio
+  makes it choose again from what is in range. Personal Hotspot is a fallback in that choice, so
+  a known network nearby wins, and a Mac that is nowhere it knows lands back on the phone.
+- The internet probe no longer negotiates TLS to fetch a plain-HTTP page, and every wait now has
+  a clock on it.
+
 ### Fixed
 
 - `status` no longer reports a dead session as packed.
