@@ -221,7 +221,7 @@ test("publishes canonical search, social, and software metadata", async ({
       expect.objectContaining({
         "@type": "SoftwareApplication",
         "operatingSystem": "macOS 14 or later",
-        "softwareVersion": "0.1.0-alpha.3",
+        "softwareVersion": "0.1.0-alpha.4",
         "sameAs": "https://github.com/noahnawara/rucksack",
       }),
     ]),

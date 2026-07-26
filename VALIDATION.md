@@ -13,7 +13,7 @@ be described as production-ready until those checks pass.
 Counts include repository dotfiles and exclude `.git`, `target`, `site/node_modules`, and
 `site/test-results`:
 
-- 28 Rust source files;
+- 27 Rust source files;
 - 8 TOML files;
 - 4 JSON files;
 - 1 launchd plist;
