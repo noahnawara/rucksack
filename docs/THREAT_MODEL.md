@@ -90,8 +90,9 @@ as the lease owner can still invoke the legitimate signed CLI.
 - the probe carries no user, session, or repository data: it is a plain GET with a
   `rucksack/0.1` user agent;
 - arrival on the commute network is proven by the Wi-Fi name matching the saved hotspot, by
-  the default route leaving its baseline interface or gateway, by the `172.20.10.1` gateway
-  that only an iOS Personal Hotspot serves, by a join macOS confirmed, or by `--here`, which
+  the default route leaving its baseline interface or gateway, by a gateway that only an iOS
+  Personal Hotspot serves (`172.20.10.1`, or `192.0.0.1` when the carrier is IPv6-only and
+  iOS hands out a 464XLAT address), by a join macOS confirmed, or by `--here`, which
   is the user saying this network is the commute network — and in every case the route must
   then actually reach the internet;
 - "the internet works" is never proof on its own, because the office network the user is

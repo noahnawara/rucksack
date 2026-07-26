@@ -60,9 +60,9 @@ The tests and the structural review cover the invariants that make a closed lid 
   rather than a hope, including a silent battery gauge on AC power;
 - `pack` proves it reached a commute network instead of accepting that the internet works:
   the Wi-Fi name matching the saved hotspot, the default route leaving its baseline
-  interface or gateway, the `172.20.10.1` iOS Personal Hotspot gateway, a join macOS
-  confirmed, or the user passing `--here` — and in every case the route must then reach
-  the internet;
+  interface or gateway, an iOS Personal Hotspot gateway (`172.20.10.1`, or `192.0.0.1` on
+  an IPv6-only carrier), a join macOS confirmed, or the user passing `--here` — and in
+  every case the route must then reach the internet;
 - a working office network is refused, because accepting it would pack a Mac that goes
   offline at the front door;
 - when macOS cannot join, `pack` prints one instruction, opens Wi-Fi settings, and waits
