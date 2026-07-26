@@ -131,6 +131,7 @@ mod tests {
 
     fn status() -> HelperStatus {
         HelperStatus {
+            version: None,
             active: false,
             lease_id: None,
             owner_uid: None,

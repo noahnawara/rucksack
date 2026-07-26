@@ -153,6 +153,7 @@ impl LeaseManager {
         let observed = read_sleep_disabled().ok();
         Ok(match &self.lease {
             Some(lease) => HelperStatus {
+                version: Some(env!("CARGO_PKG_VERSION").to_owned()),
                 active: true,
                 lease_id: Some(lease.lease_id),
                 owner_uid: Some(lease.owner_uid),
@@ -165,6 +166,7 @@ impl LeaseManager {
                 last_reasserted_at: lease.last_reasserted_at,
             },
             None => HelperStatus {
+                version: Some(env!("CARGO_PKG_VERSION").to_owned()),
                 active: false,
                 lease_id: None,
                 owner_uid: None,
