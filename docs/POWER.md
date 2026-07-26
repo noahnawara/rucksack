@@ -155,6 +155,27 @@ There is no minimum battery level to start; `pack` refuses only at or below the 
 floor, because such a Mac would sleep the moment the lid closed. At the floor the watcher
 restores normal sleep. It does not attempt to finish “one last build.”
 
+## Time remaining
+
+The lease clock and the battery are separate limits, and on a commute the battery is nearly
+always the smaller: a 24 hour lease on a Mac with four hours of charge never had 24 hours to
+give. `status` therefore reports whichever runs out first, and marks a projected figure with
+`~` so it does not read like arithmetic on a known deadline.
+
+The watcher projects from drain it has actually seen. Percent readings are whole numbers, so
+at a realistic rate the gauge only moves every few minutes; differencing every heartbeat
+would measure quantisation rather than drain. Only drops are recorded, and two are needed
+before anything is claimed, so both ends of the measured span are real transitions.
+
+Three silences invalidate the projection rather than stretch it. A gap longer than three
+heartbeats means the Mac slept, and sleep advances the wall clock while the battery barely
+moves. Charging clears it, because there is no drain left to project. A heartbeat that could
+not read the gauge is a tunnel rather than a discontinuity and carries the window forward.
+
+Nothing is claimed before it has been measured. Until two drops have been seen the lease
+clock is reported alone, and a session whose heartbeat has gone quiet stops claiming a
+battery figure nobody is still taking.
+
 ## Thermal pressure
 
 The unprivileged watcher reads two sources, because neither covers every Mac on its own.
