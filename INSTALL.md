@@ -12,7 +12,7 @@ before installing it, and use only the
 Two commands, both in a terminal window.
 
 ```sh
-cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.4 rucksack-cli rucksack-helper
+cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.4 rucksack-cli rucksack-helper
 ```
 
 ```sh
@@ -25,7 +25,13 @@ looks for its helper as a file beside itself. Installing both puts them in the s
 so that requirement is satisfied by construction rather than by you remembering to copy two
 files. **`--tag`** pins what you get; without it `--git` takes whatever is on the default branch
 at the moment you run it, and two people installing an hour apart get different code.
-**`--locked`** uses the dependency versions CI actually gates.
+**`--locked`** uses the dependency versions CI actually gates. **`--force`** is what makes this
+work the second time. Without it `cargo install` refuses to replace a version you already have,
+and refuses in the worse of the two available ways: upgrading from an earlier tag stops with
+"binary rucksack already exists in destination", while re-running it on a version you already
+have prints `Ignored package … is already installed` and then `Successfully installed`, and exits
+0. An agent reading that reports a successful install of a binary it did not install. On a Mac
+that has never had rucksack, `--force` changes nothing.
 
 It compiles for a couple of minutes. `~/.cargo/bin` is already on your `PATH` if you have Rust,
 which you need either way.
