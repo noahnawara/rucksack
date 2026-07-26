@@ -51,7 +51,7 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   await page.goto("/");
 
   await expect(page).toHaveTitle(
-    "Keep Your AI Coding Agent Running on Mac | rucksack",
+    "Keep Your Coding Agent Running with the Lid Closed | rucksack",
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
