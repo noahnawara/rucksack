@@ -60,7 +60,7 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "close your laptop. keep your agent running.",
+      name: "close your laptop. keep your agents running.",
     }),
   ).toBeVisible();
   await expect(
@@ -780,7 +780,7 @@ test("keeps the page and prompt readable without JavaScript", async ({
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "close your laptop. keep your agent running.",
+      name: "close your laptop. keep your agents running.",
     }),
   ).toBeVisible();
   await expect(page.locator("#install-prompt")).not.toBeEmpty();
