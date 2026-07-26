@@ -1,6 +1,6 @@
 Install rucksack on this Mac by running exactly this, both crate names included:
 
-cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.1 rucksack-cli rucksack-helper
+cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.2 rucksack-cli rucksack-helper
 
 Without `rucksack-helper` the install reports success and `rucksack` can never pack, so don't drop
 it. It compiles for a couple of minutes and needs nothing added to my PATH. Don't run `rucksack
