@@ -13,7 +13,7 @@ use rucksack_core::network::{
 use rucksack_core::power::{read_power_status, read_sleep_disabled, read_thermal_status};
 use rucksack_core::state::SessionState;
 use rucksack_core::system::{processes, run, ProcessInfo};
-use rucksack_core::{codex, skill, AppPaths, Config};
+use rucksack_core::{codex, skill, AdaptersConfig, AppPaths, Config};
 use std::fs::OpenOptions;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -67,7 +67,7 @@ fn pack_inner(
     // during a network wait never wrote it at all. It also cannot fail a pack from here, for the same
     // reason it could not before: making "pack my Mac" work as a sentence is worth nothing next to
     // keeping the Mac awake.
-    if let Err(error) = skill::install(paths) {
+    if let Err(error) = skill::install(paths, &base_config.adapters) {
         output.detail(format!("Skill not installed: {error:#}"));
     }
 
@@ -110,7 +110,7 @@ fn pack_inner(
         )
         .context("The power helper would not hold this Mac awake.")?;
 
-    start_remote_control(args.require_remote, paths, output)?;
+    start_remote_control(args.require_remote, &config.adapters, paths, output)?;
 
     let mut session = SessionState::new(lease_id, started_at, expires_at);
     session.hotspot = network.ssid;
@@ -533,22 +533,76 @@ fn open_wifi_settings(output: &Output) {
     }
 }
 
+/// What `pack` does about Remote Control, decided before anything is spawned.
+#[derive(Debug, PartialEq, Eq)]
+enum RemoteControl {
+    /// Start it, with the Codex that was resolved.
+    Start(std::path::PathBuf),
+    /// Switched off on purpose. Nothing is wrong, so nothing is said above `--verbose`.
+    Off(String),
+    /// Wanted and not available. Warned about, and carried on from.
+    Unavailable(String),
+    /// `--require-remote` asked for the opposite of carrying on.
+    Refuse(String),
+}
+
+/// Decide what to do about Remote Control, from facts alone.
+///
+/// Pure, because this is the rule that keeps a lease: rucksack ships to people who run only Claude
+/// Code, only Cursor, or only Codex, and an agent that one of them does not have must cost them
+/// nothing. `--require-remote` is the single way to ask for a Codex problem to end a pack, and it
+/// has to be asked for explicitly.
+fn plan_remote_control(
+    require_remote: bool,
+    adapters: &AdaptersConfig,
+    codex: Option<std::path::PathBuf>,
+) -> RemoteControl {
+    if !adapters.codex {
+        let message = "Remote Control is Codex's, and `adapters.codex` is off in your configuration.\nSet it to true, then run `rucksack pack` again.";
+        return if require_remote {
+            RemoteControl::Refuse(message.to_owned())
+        } else {
+            RemoteControl::Off("Codex is switched off; Remote Control not started.".to_owned())
+        };
+    }
+    match codex {
+        Some(executable) => RemoteControl::Start(executable),
+        None if require_remote => RemoteControl::Refuse(
+            "Codex was not found, so Remote Control could not be started.\nInstall Codex, then run `rucksack pack` again.".to_owned(),
+        ),
+        None => RemoteControl::Unavailable(
+            "Codex was not found, so your phone may not reach this work. Your tasks keep running."
+                .to_owned(),
+        ),
+    }
+}
+
 /// Start Codex Remote Control without making the user wait for it.
 ///
 /// Remote Control is how a phone reaches the work; it is not what keeps the Mac awake. So it is
 /// spawned and forgotten, and only `--require-remote` makes a failure fatal.
-fn start_remote_control(require_remote: bool, paths: &AppPaths, output: &Output) -> Result<()> {
-    let Some(executable) = codex::executable() else {
-        if require_remote {
-            anyhow::bail!(
-                "Codex was not found, so Remote Control could not be started.\nInstall Codex, then run `rucksack pack` again."
-            );
-        }
-        return Ok(());
-    };
+fn start_remote_control(
+    require_remote: bool,
+    adapters: &AdaptersConfig,
+    paths: &AppPaths,
+    output: &Output,
+) -> Result<()> {
+    let executable =
+        match plan_remote_control(require_remote, adapters, codex::executable(&paths.home)) {
+            RemoteControl::Start(executable) => executable,
+            RemoteControl::Off(detail) => {
+                output.detail(detail);
+                return Ok(());
+            }
+            RemoteControl::Unavailable(warning) => {
+                output.warn(warning);
+                return Ok(());
+            }
+            RemoteControl::Refuse(error) => anyhow::bail!(error),
+        };
 
     if require_remote {
-        let result = codex::start_remote_control()?;
+        let result = codex::start_remote_control(&paths.home)?;
         if !result.success() {
             anyhow::bail!(
                 "Codex Remote Control could not be started: {}\nThis Mac still sleeps normally. Run `rucksack pair`, then run `rucksack pack` again.",
@@ -559,11 +613,14 @@ fn start_remote_control(require_remote: bool, paths: &AppPaths, output: &Output)
         return Ok(());
     }
 
+    // Codex gets its own log rather than the daemon's. Sharing one made a Codex that failed on
+    // startup look exactly like a watcher that had crashed — the two are separate processes, and a
+    // reader working out why a Mac went to sleep should not have to know that.
     ensure_private_dir(&paths.log_dir)?;
     let log = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&paths.daemon_log)?;
+        .open(paths.remote_control_log())?;
     let spawned = Command::new(executable)
         .args(codex::remote_control_arguments("start"))
         .stdin(Stdio::null())
@@ -1099,6 +1156,71 @@ mod tests {
             interface: Some(interface.to_owned()),
             gateway: Some(gateway.to_owned()),
         }
+    }
+
+    fn codex_at(path: &str) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from(path))
+    }
+
+    /// The regression that lost a lease: an agent this Mac does not have must not end a pack.
+    ///
+    /// Most Macs running rucksack have one of the three agents, so a missing Codex is the ordinary
+    /// case rather than the exception. Any answer other than "carry on" here is a Mac that went to
+    /// sleep in a bag because of a CLI that had nothing to do with keeping it awake.
+    #[test]
+    fn a_missing_codex_never_ends_a_pack() {
+        let all_on = AdaptersConfig::default();
+
+        assert!(matches!(
+            plan_remote_control(false, &all_on, None),
+            RemoteControl::Unavailable(_)
+        ));
+    }
+
+    /// An adapter switched off is obeyed, and saying so is not a warning.
+    #[test]
+    fn an_adapter_switched_off_is_skipped_quietly() {
+        let codex_off = AdaptersConfig {
+            codex: false,
+            ..AdaptersConfig::default()
+        };
+
+        // Not even asked for, so a Codex that is sitting right there is left alone.
+        assert!(matches!(
+            plan_remote_control(false, &codex_off, codex_at("/usr/local/bin/codex")),
+            RemoteControl::Off(_)
+        ));
+    }
+
+    /// `--require-remote` is the one way to ask for the opposite, so it still refuses.
+    #[test]
+    fn require_remote_refuses_what_it_cannot_start() {
+        let all_on = AdaptersConfig::default();
+        let codex_off = AdaptersConfig {
+            codex: false,
+            ..AdaptersConfig::default()
+        };
+
+        assert!(matches!(
+            plan_remote_control(true, &all_on, None),
+            RemoteControl::Refuse(_)
+        ));
+        assert!(matches!(
+            plan_remote_control(true, &codex_off, codex_at("/usr/local/bin/codex")),
+            RemoteControl::Refuse(_)
+        ));
+    }
+
+    #[test]
+    fn a_codex_that_is_there_and_wanted_is_started() {
+        assert_eq!(
+            plan_remote_control(
+                false,
+                &AdaptersConfig::default(),
+                codex_at("/usr/local/bin/codex")
+            ),
+            RemoteControl::Start(std::path::PathBuf::from("/usr/local/bin/codex"))
+        );
     }
 
     /// The network the user is walking away from also reaches the internet.

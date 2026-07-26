@@ -9,6 +9,6 @@ pub mod skill;
 pub mod state;
 pub mod system;
 
-pub use config::Config;
+pub use config::{AdaptersConfig, Config};
 pub use paths::AppPaths;
 pub use state::SessionState;

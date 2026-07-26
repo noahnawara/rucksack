@@ -42,6 +42,12 @@ impl AppPaths {
         self.session_file.with_extension("terminal.lock")
     }
 
+    /// Where a spawned Codex Remote Control writes, kept apart from the watcher's own log so a
+    /// failure in one is never read as a failure in the other.
+    pub fn remote_control_log(&self) -> PathBuf {
+        self.log_dir.join("remote-control.log")
+    }
+
     /// Records that rucksack has asked about starring the project, so it only ever asks once.
     pub fn star_prompt_marker(&self) -> PathBuf {
         self.data_dir.join("asked-about-star")

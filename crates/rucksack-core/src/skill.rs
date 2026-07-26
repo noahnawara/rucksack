@@ -1,3 +1,4 @@
+use crate::config::AdaptersConfig;
 use crate::files::{atomic_write, reject_symlink, remove_if_exists};
 use crate::paths::AppPaths;
 use anyhow::{Context, Result};
@@ -38,9 +39,20 @@ fn is_managed(text: &str) -> bool {
 ///
 /// Best-effort by design: the skill only makes "pack my Mac" work as a sentence inside a
 /// conversation, so failing to write it must never stop the Mac from staying awake. Skill
-/// directories that do not exist are skipped — that agent is not installed.
-pub fn install(paths: &AppPaths) -> Result<()> {
-    for skill in [&paths.codex_skill, &paths.claude_skill, &paths.cursor_skill] {
+/// directories that do not exist are skipped — that agent is not installed — and so is any agent
+/// switched off under `[adapters]`.
+///
+/// Clearing out an earlier release's files is not gated: those are rucksack's own leftovers, and a
+/// flag turned off today is no reason to leave one behind.
+pub fn install(paths: &AppPaths, adapters: &AdaptersConfig) -> Result<()> {
+    for skill in [
+        adapters.codex.then_some(&paths.codex_skill),
+        adapters.claude.then_some(&paths.claude_skill),
+        adapters.cursor.then_some(&paths.cursor_skill),
+    ]
+    .into_iter()
+    .flatten()
+    {
         let Some(agent_root) = skill.parent().and_then(Path::parent) else {
             continue;
         };
@@ -180,11 +192,29 @@ mod tests {
         let paths = paths(home.path());
         fs::create_dir_all(home.path().join(".agents/skills")).unwrap();
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(paths.codex_skill.exists());
         assert!(!paths.claude_skill.exists(), "Claude Code is not installed");
         assert!(!paths.cursor_skill.exists(), "Cursor is not installed");
+    }
+
+    /// An agent switched off is not touched, even though it is installed and would have been.
+    #[test]
+    fn skips_an_agent_switched_off_in_the_config() {
+        let home = tempdir().unwrap();
+        let paths = paths(home.path());
+        fs::create_dir_all(home.path().join(".agents/skills")).unwrap();
+        fs::create_dir_all(home.path().join(".claude/skills")).unwrap();
+        let adapters = AdaptersConfig {
+            codex: false,
+            ..AdaptersConfig::default()
+        };
+
+        install(&paths, &adapters).unwrap();
+
+        assert!(!paths.codex_skill.exists(), "Codex is switched off");
+        assert!(paths.claude_skill.exists(), "Claude Code is still on");
     }
 
     #[test]
@@ -193,7 +223,7 @@ mod tests {
         let paths = paths(home.path());
         fs::create_dir_all(home.path().join(".cursor/skills-cursor")).unwrap();
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(paths.cursor_skill.exists());
         assert_eq!(fs::read_to_string(&paths.cursor_skill).unwrap(), SKILL);
@@ -209,7 +239,7 @@ mod tests {
             "<!-- rucksack-managed -->\nold\n",
         );
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(paths.codex_skill.exists());
         assert!(!paths.legacy_codex_skill().exists());
@@ -228,7 +258,7 @@ mod tests {
             "older\n",
         );
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(!directory.exists(), "the commute-mode directory is gone");
     }
@@ -244,7 +274,7 @@ mod tests {
             "older\n",
         );
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(!directory.exists());
     }
@@ -255,7 +285,7 @@ mod tests {
         let paths = paths(home.path());
         seed(&paths.legacy_codex_skill(), "my own notes\n");
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(paths.legacy_codex_skill().exists());
     }
@@ -270,7 +300,7 @@ mod tests {
         seed(&legacy, "<!-- rucksack-managed -->\nold\n");
         seed(&directory.join("notes.md"), "mine\n");
 
-        install(&paths).unwrap();
+        install(&paths, &AdaptersConfig::default()).unwrap();
 
         assert!(directory.join("notes.md").exists());
         assert!(directory.exists());
@@ -283,7 +313,7 @@ mod tests {
         fs::create_dir_all(paths.codex_skill.parent().unwrap()).unwrap();
         fs::write(&paths.codex_skill, "hand written\n").unwrap();
 
-        assert!(install(&paths).is_err());
+        assert!(install(&paths, &AdaptersConfig::default()).is_err());
         assert_eq!(
             fs::read_to_string(&paths.codex_skill).unwrap(),
             "hand written\n"

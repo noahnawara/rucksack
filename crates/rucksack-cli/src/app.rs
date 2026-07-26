@@ -20,7 +20,7 @@ pub fn run(cli: Cli) -> Result<()> {
             flow::status(&args, &output, &paths, &config)
         }
         Command::Unpack => flow::unpack(&output, &paths),
-        Command::Pair => pair(&output),
+        Command::Pair => pair(&output, &paths, &Config::load(&paths)?),
         Command::Star => crate::star::star(&output),
         Command::Helper { command } => helper(command, &output),
         Command::Daemon(args) => {
@@ -31,8 +31,17 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 /// Print a Codex pairing code for the phone.
-fn pair(output: &Output) -> Result<()> {
-    let result = codex::pair().context("Could not ask Codex for a pairing code.")?;
+///
+/// Unlike `pack`, this one is allowed to fail: it does nothing except ask Codex a question, so
+/// somebody who typed it with Codex switched off should be told why nothing happened.
+fn pair(output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
+    if !config.adapters.codex {
+        anyhow::bail!(
+            "Pairing is Codex's, and `adapters.codex` is off in {}.\nSet it to true, then run `rucksack pair` again.",
+            paths.config_file.display()
+        );
+    }
+    let result = codex::pair(&paths.home).context("Could not ask Codex for a pairing code.")?;
     if !result.success() {
         anyhow::bail!(
             "Codex could not produce a pairing code: {}",
