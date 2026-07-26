@@ -234,6 +234,7 @@ fn ensure_helper(helper: HelperClient, output: &Output) -> Result<HelperClient> 
             // skew survives every pack until someone is told about it, and `helper status` is a
             // diagnostic nobody reaches for while walking out of a door.
             if let Some(warning) = crate::app::stale_helper_warning(
+                install::installed_helper_matches_source(),
                 status.as_ref().and_then(|status| status.version.as_deref()),
                 env!("CARGO_PKG_VERSION"),
             ) {

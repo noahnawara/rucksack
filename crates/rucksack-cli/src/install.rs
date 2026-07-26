@@ -2,7 +2,7 @@ use crate::helper_client::HelperClient;
 use crate::output::Output;
 use anyhow::{anyhow, Context, Result};
 use rucksack_core::system::run;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -144,6 +144,29 @@ pub fn uninstall_helper() -> Result<()> {
     sudo(&["/bin/rm", "-f", HELPER_SOCKET, HELPER_LOG])?;
     let _ = sudo(&["/bin/rmdir", HELPER_STATE_DIRECTORY]);
     Ok(())
+}
+
+/// Whether the installed helper is byte-for-byte the one this rucksack would install.
+///
+/// `None` when the question cannot be answered — no helper installed yet, or no sibling binary to
+/// compare against — because a check that cannot see both sides must not accuse either.
+///
+/// Bytes rather than versions. Two builds of the same tag carry the same version string and can
+/// still be different binaries, which is exactly what happens when `helper install` runs before a
+/// `cargo install --force` replaces the binary underneath it. A version comparison calls that a
+/// match; the bytes do not.
+pub fn installed_helper_matches_source() -> Option<bool> {
+    let installed = Path::new(HELPER_DESTINATION);
+    if !installed.exists() {
+        return None;
+    }
+    let source = sibling_helper(&std::env::current_exe().ok()?).ok()?;
+    let installed_size = fs::metadata(installed).ok()?.len();
+    let source_size = fs::metadata(&source).ok()?.len();
+    if installed_size != source_size {
+        return Some(false);
+    }
+    Some(fs::read(installed).ok()? == fs::read(&source).ok()?)
 }
 
 pub fn helper_paths() -> (&'static str, &'static str) {
