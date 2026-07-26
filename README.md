@@ -13,6 +13,35 @@ step, where moving the work to a cloud agent means standing up a fresh environme
 > Source-only alpha. CI passes, and short hotspot desk tests have passed. There is no signed
 > package yet, and closed-lid behaviour in a bag is not yet verified.
 
+## Install
+
+```sh
+cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.1 rucksack-cli rucksack-helper
+rucksack helper install
+```
+
+Both crate names are required. `rucksack` finds its helper as a file beside itself, so installing
+only `rucksack-cli` reports success and can never pack. Installing both puts them in one directory.
+
+Run `helper install` yourself, in a terminal. `pack` would do it on first use, but it needs `sudo`,
+and `sudo` reads your password from a terminal that an agent session does not have. Needs macOS,
+Xcode Command Line Tools, and Rust 1.86 or newer; release packaging targets macOS 14 and newer.
+Read the [installation guide](INSTALL.md) for the clone-and-build route and removal.
+
+Or paste this to Codex, Claude Code, or Cursor and let it do the first part:
+
+```text
+Install rucksack on this Mac by running exactly this, both crate names included:
+
+cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.1 rucksack-cli rucksack-helper
+
+Without `rucksack-helper` the install reports success and `rucksack` can never pack, so don't drop
+it. It compiles for a couple of minutes and needs nothing added to my PATH. Don't run `rucksack
+pack` to test it. Then tell me to run `rucksack helper install` myself in a terminal window — it
+asks for my password once, and getting it out of the way now means no later `rucksack pack` ever
+stops for it. Don't try to run it for me: you have nowhere to type a password.
+```
+
 ## What it does
 
 There is no setup command. The first `pack` installs the power helper and remembers the
@@ -151,25 +180,6 @@ Codex and Cursor equivalents. rucksack exists to keep them reachable, since they
 nothing to talk to once the Mac is asleep or off the network.
 
 See [prior art](docs/PRIOR_ART.md) for related projects.
-
-## Install
-
-There is no signed package yet, so you build from source. `cargo` does that for you. Needs macOS,
-Xcode Command Line Tools, and Rust 1.86 or newer; release packaging targets macOS 14 and newer.
-
-```sh
-cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.1 rucksack-cli rucksack-helper
-rucksack helper install
-rucksack status
-```
-
-Both crate names are required. `rucksack` finds its helper as a file beside itself, so installing
-only `rucksack-cli` reports success and can never pack. Installing both puts them in one directory.
-
-Run `helper install` yourself, in a terminal. `pack` would do it on first use, but it needs `sudo`,
-and `sudo` reads your password from a terminal that an agent session does not have. Read the
-[installation guide](INSTALL.md) first. `scripts/e2e.sh` exercises the whole flow against real
-leases and always restores normal sleep.
 
 ## Safety
 
