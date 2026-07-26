@@ -137,7 +137,7 @@ probe to `captive.apple.com`.
 ## Product promise
 
 > rucksack says `Packed.` only after nothing else already owns this Mac's sleep setting,
-> the battery is not at the sleep floor, the Mac is not thermally throttled, the power
+> the battery is not at the sleep floor, the Mac is not too hot to close, the power
 > helper is installed and holding a bounded lease, the route is on a network proven to
 > be the commute network and reaching the internet, and the safety watcher has sent its
 > first heartbeat.

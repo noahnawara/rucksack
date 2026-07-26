@@ -16,6 +16,9 @@ all notable changes to rucksack will be documented here.
   join, or an explicit `--here` — and only once the route reaches the internet.
 - Battery, thermal, hard-deadline, and heartbeat safeguards, with recovery folded into
   `unpack` so restoring normal sleep never dead-ends.
+- Thermal pressure read from public `ProcessInfo.thermalState` in the unprivileged watcher.
+  `pmset -g therm` reports only Intel-era counters, which Apple silicon never populates, so
+  it is kept as a second source rather than the only one.
 - A `rucksack` skill for Codex and Claude Code, so "pack my Mac" works in a conversation.
 - Universal packaging, signing, and notarization, with a checksum-verifying installer script.
 - Canonical `pack`/`unpack` commands; former lifecycle names are rejected.

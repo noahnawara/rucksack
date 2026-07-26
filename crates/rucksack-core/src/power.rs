@@ -128,6 +128,14 @@ pub fn read_thermal_status() -> Result<ThermalStatus> {
     Ok(parse_thermal(&result.stdout))
 }
 
+/// Read what `pmset -g therm` measured, and nothing more.
+///
+/// `CPU_Speed_Limit` and `CPU_Scheduler_Limit` are Intel-era counters. Apple silicon never
+/// populates them, so on that hardware this parses three "has been recorded" notes into
+/// `ThermalLevel::Unknown` at every temperature. Absent counters are therefore an unread sensor,
+/// not a healthy one: reporting `Nominal` here would claim a state that was never measured, and
+/// would be the only thermal level the watcher ever saw on Apple silicon. The level that reflects
+/// real heat comes from `ProcessInfo.thermalState` in the unprivileged watcher.
 pub fn parse_thermal(text: &str) -> ThermalStatus {
     fn value(text: &str, key: &str) -> Option<u16> {
         text.lines().find_map(|line| {
@@ -159,7 +167,7 @@ pub fn parse_thermal(text: &str) -> ThermalStatus {
         ThermalLevel::Serious
     } else if fair {
         ThermalLevel::Fair
-    } else if speed.is_some() || scheduler.is_some() || no_thermal_warning {
+    } else if speed.is_some() || scheduler.is_some() {
         ThermalLevel::Nominal
     } else {
         ThermalLevel::Unknown
@@ -234,12 +242,26 @@ mod tests {
         assert_eq!(thermal.level, ThermalLevel::Serious);
     }
 
+    /// The exact output of `pmset -g therm` on Apple silicon, at any temperature.
+    ///
+    /// Nothing was measured, so nothing may be claimed. Reading this as `Nominal` is what kept the
+    /// thermal release condition from ever firing on the hardware rucksack targets.
     #[test]
-    fn no_recorded_thermal_warning_is_nominal() {
+    fn nothing_recorded_is_unknown_rather_than_healthy() {
         let thermal = parse_thermal(
             "Note: No thermal warning level has been recorded\n\
              Note: No performance warning level has been recorded\n\
              Note: No CPU power status has been recorded\n",
+        );
+        assert!(!thermal.throttled);
+        assert_eq!(thermal.level, ThermalLevel::Unknown);
+    }
+
+    /// An Intel Mac still reports counters, and quiet counters still mean nominal.
+    #[test]
+    fn reported_counters_without_throttling_are_nominal() {
+        let thermal = parse_thermal(
+            "CPU_Speed_Limit = 100\nCPU_Scheduler_Limit = 100\nCPU_Available_CPUs = 8\n",
         );
         assert!(!thermal.throttled);
         assert_eq!(thermal.level, ThermalLevel::Nominal);

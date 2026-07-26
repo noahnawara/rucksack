@@ -51,6 +51,8 @@ User-facing binary:
 - `cli` and `app` — six visible verbs plus a hidden `daemon`, and their dispatch;
 - `flow` — `pack`, `status`, and `unpack`;
 - `daemon` — the safety watcher;
+- `thermal` — `ProcessInfo.thermalState` over a small Objective-C FFI, the only thermal source
+  Apple silicon actually answers, kept here so the root helper samples no temperature;
 - `install` — installing and removing the root helper through one `sudo` prompt;
 - `helper_client` — one request and one response per socket connection;
 - `output` — `step`, `done`, `warn`, and a `detail` only `--verbose` prints;

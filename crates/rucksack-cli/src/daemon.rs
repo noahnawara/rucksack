@@ -1,4 +1,5 @@
 use crate::helper_client::HelperClient;
+use crate::thermal::{ends_a_lease, read_thermal_state};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rucksack_core::files::{append_line, with_advisory_lock};
@@ -6,7 +7,7 @@ use rucksack_core::network::{
     reaches_internet, read_default_route, read_interface_traffic, read_wifi_status,
     InterfaceTraffic, DEFAULT_INTERNET_PROBE_URL,
 };
-use rucksack_core::power::{read_power_status, read_thermal_status, PowerSource, ThermalLevel};
+use rucksack_core::power::{read_power_status, read_thermal_status, PowerSource};
 use rucksack_core::state::{SessionPhase, SessionState};
 use rucksack_core::{AppPaths, Config};
 use std::thread;
@@ -98,6 +99,11 @@ struct Health {
 /// A silent gauge on AC power is ordinary and resets the count. On battery it means rucksack is
 /// flying blind, and only a run of failures — never one — is allowed to end a lease. The count
 /// lives here rather than inside `release_reason` so the rule cannot be tripped by a single read.
+///
+/// Heat is asked of both sources macOS offers, because neither covers the fleet on its own:
+/// `pmset -g therm` still reports real throttling on Intel, and `ProcessInfo.thermalState` is the
+/// only one of the two that ever moves on Apple silicon. Either saying too hot is enough; both
+/// staying silent is not heat.
 fn read_health(consecutive_blind_reads: &mut u8) -> Health {
     let power = read_power_status();
     let readable = power
@@ -110,13 +116,9 @@ fn read_health(consecutive_blind_reads: &mut u8) -> Health {
     };
     Health {
         battery_percent: power.ok().and_then(|power| power.percent),
-        too_hot: read_thermal_status().is_ok_and(|thermal| {
-            thermal.throttled
-                || matches!(
-                    thermal.level,
-                    ThermalLevel::Serious | ThermalLevel::Critical
-                )
-        }),
+        too_hot: read_thermal_status()
+            .is_ok_and(|thermal| thermal.throttled || ends_a_lease(thermal.level))
+            || read_thermal_state().is_some_and(ends_a_lease),
     }
 }
 
