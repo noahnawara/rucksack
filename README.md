@@ -154,22 +154,20 @@ See [prior art](docs/PRIOR_ART.md) for related projects.
 
 ## Install
 
-There is no signed package yet, so you build from source. A development build needs macOS,
-Xcode Command Line Tools, Rust 1.86 or newer, and administrator access for the helper.
-Release packaging targets macOS 14 and newer.
+There is no signed package yet, so you build from source. `cargo` does that for you. Needs macOS,
+Xcode Command Line Tools, and Rust 1.86 or newer; release packaging targets macOS 14 and newer.
 
 ```sh
-cargo build --workspace --locked
-cp target/debug/rucksack target/debug/rucksack-helper ~/.cargo/bin/
+cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.1 rucksack-cli rucksack-helper
 rucksack helper install
 rucksack status
 ```
 
-Copy both binaries, and keep them in the same directory: `rucksack` finds its helper as a file
-beside itself, so symlinking the CLI alone does not work.
+Both crate names are required. `rucksack` finds its helper as a file beside itself, so installing
+only `rucksack-cli` reports success and can never pack. Installing both puts them in one directory.
 
-Install the helper yourself, in a terminal, as above. `pack` would do it on first use, but it needs
-`sudo`, and `sudo` reads your password from a terminal that an agent session does not have. Read the
+Run `helper install` yourself, in a terminal. `pack` would do it on first use, but it needs `sudo`,
+and `sudo` reads your password from a terminal that an agent session does not have. Read the
 [installation guide](INSTALL.md) first. `scripts/e2e.sh` exercises the whole flow against real
 leases and always restores normal sleep.
 

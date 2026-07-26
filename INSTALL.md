@@ -1,11 +1,42 @@
 # Install rucksack
 
 `rucksack` is currently a source-only alpha. There is no signed GitHub release, Homebrew
-cask, npm package, or `cargo install` package yet.
+cask, or npm package yet, so you build it from source. `cargo` can do that for you.
 
 The helper changes a global macOS sleep setting. Read the [security policy](SECURITY.md)
 before installing it, and use only the
 [official repository](https://github.com/noahnawara/rucksack).
+
+## Install
+
+Two commands, both in a terminal window.
+
+```sh
+cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.1 rucksack-cli rucksack-helper
+```
+
+```sh
+rucksack helper install
+```
+
+Every part of the first command is load-bearing. **Both crate names** must be there: without
+`rucksack-helper` the install reports success and `rucksack` can never pack, because the CLI
+looks for its helper as a file beside itself. Installing both puts them in the same directory,
+so that requirement is satisfied by construction rather than by you remembering to copy two
+files. **`--tag`** pins what you get; without it `--git` takes whatever is on the default branch
+at the moment you run it, and two people installing an hour apart get different code.
+**`--locked`** uses the dependency versions CI actually gates.
+
+It compiles for a couple of minutes. `~/.cargo/bin` is already on your `PATH` if you have Rust,
+which you need either way.
+
+The second command is separate because installing the helper needs `sudo`, `sudo` reads your
+password from a terminal, and an agent session has no terminal. Doing it here, once, in person,
+is what keeps every later `pack` silent. Skip it and an agent's first `pack` fails with:
+
+```text
+sudo: a terminal is required to read the password
+```
 
 ## Requirements
 
@@ -18,7 +49,10 @@ before installing it, and use only the
 Hardware testing so far covers desk runs on one Apple silicon Mac. See
 [VALIDATION.md](VALIDATION.md) for the open release checks.
 
-## Build from source
+## Build from a clone instead
+
+Use this route if you want a source tree: to run `scripts/e2e.sh`, to work on rucksack, or to
+test a commit that is not tagged. Otherwise the two commands above are the shorter path.
 
 Clone the repository into a directory you plan to keep. Check out the tag or commit you
 intend to test before recording its hash and building.
@@ -37,7 +71,7 @@ target/debug/rucksack
 target/debug/rucksack-helper
 ```
 
-## Make `rucksack` a command
+### Make a cloned build a command
 
 Nothing else in this project says `./target/debug/rucksack`. This guide, the README, and the skill
 your agent reads all say `rucksack pack`. So put it where that works: copy **both** binaries into one
@@ -53,23 +87,7 @@ symlinking the CLI alone fails with `Build rucksack-helper next to the rucksack 
 macOS reports the symlink's own location rather than the target's. Re-copy after every rebuild;
 nothing updates these for you.
 
-## Install the power helper yourself, now
-
-Run this in a terminal window, before handing rucksack to an agent:
-
-```sh
-rucksack helper install
-```
-
-`pack` would install it on first use, and that is the part to get out of the way. Installing needs
-`sudo`, `sudo` reads your password from a terminal, and an agent session has no terminal — so an
-agent's first `pack` fails with:
-
-```text
-sudo: a terminal is required to read the password
-```
-
-Doing it here, once, in person, is what keeps every later `pack` silent.
+## First run
 
 The first successful `pack` also remembers the network it ended up on, and installs a `rucksack`
 skill for Codex, Claude Code, and Cursor so "I'm leaving" works inside a conversation. To name the
