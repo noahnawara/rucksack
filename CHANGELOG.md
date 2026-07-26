@@ -23,3 +23,14 @@ all notable changes to rucksack will be documented here.
 - Universal packaging, signing, and notarization, with a checksum-verifying installer script.
 - Canonical `pack`/`unpack` commands; former lifecycle names are rejected.
 - rucksack changes no agent instructions, tools, or permissions.
+
+### Fixed
+
+- `status` no longer reports a dead session as packed.
+- The `[adapters]` flags in `config.toml` are read again. `codex = false` had been discarded at
+  load, so nothing downstream could obey it.
+- Codex is considered installed only when the standalone CLI is on `PATH` or under
+  `~/.codex/packages/standalone/current`. The copy inside ChatGPT.app refuses `remote-control`,
+  so treating it as usable reported Codex present on almost every Mac and then failed every call.
+- An agent this Mac does not have can no longer end a pack. It warns and is skipped; only
+  `pack --require-remote` still treats a missing Codex as fatal.

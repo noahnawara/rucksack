@@ -12,7 +12,7 @@ before installing it, and use only the
 Two commands, both in a terminal window.
 
 ```sh
-cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.2 rucksack-cli rucksack-helper
+cargo install --locked --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.3 rucksack-cli rucksack-helper
 ```
 
 ```sh
