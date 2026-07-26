@@ -1,7 +1,7 @@
 22291f9a08bff4503ee169cd55ed0cfb79bb7106b46a81f8068ad2fc56c8cf1b  ./.cargo/config.toml
 88e4c9d5ed5921beb6fccb08e8bab9492a48d95d4b7d96d7dd634a112e5772b9  ./.github/dependabot.yml
 4ae85b1658f1dd6a764a73322e48097ff4cdd78ee782f72dec1ee1c9413108bf  ./.github/workflows/ci.yml
-207b5b03925a1230aaa9cb4799e7b55587533824c45944cc3201bc6de296f321  ./.github/workflows/release.yml
+640dfaacd3dd52ba046d25b8e42eb256f654ef9d9f49422cc9dfb7efb7cbee03  ./.github/workflows/release.yml
 0c64d642e10833f7215129003212ce5e37a41a87209484b4ffee8f784db95683  ./.gitignore
 9231ff28b6dce2a3fa9f3877a2942017f6e6187cd867fd994a5a15bfb0e0ace0  ./CHANGELOG.md
 e25047bcbf11b4f2ca69236ada00b56b18755997bb75e184942589a6881488ef  ./CONTRIBUTING.md
