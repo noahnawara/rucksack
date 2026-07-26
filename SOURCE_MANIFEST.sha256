@@ -11,7 +11,7 @@ b3d9f3c526ce1ebe57a7d0f2d8a64f08d2c2ded208d4f5ff11c58dfd6cb2d7fd  ./LICENSE
 c549af4944f876b2113b7f8bd79d2f714c05ef695de2267c979b77ed04be850f  ./README.md
 f3610f1e1b15970174c657fb9331ba2e1d45fc4f5bf58a8513b91ac7d3b98b35  ./SECURITY.md
 88629e340fdc55dea4ad2da683298b5f03e1c4a6c90268478ebf2ac2aae648ae  ./SUPPORT.md
-886fdc6bd7dc06b582526d9fb26b94db53d5d9bc6730211050ae29cfd07ab8be  ./VALIDATION.md
+50fca2f8c588944605039f6cb6674bff215b5caa8b1b1e815d131b701df2f3af  ./VALIDATION.md
 9f98e2a392747ffbcbfe6470f5af6fc70cca5e30e32d691cf44c6d572aa64552  ./assets/adapters/shared/rucksack/SKILL.md
 cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  ./assets/launchd/io.rucksack.helper.plist
 5f5ed7c83c67e4c8c1487b56d059c9d3dee41c5f0ca60dd5057cf983408da6a3  ./assets/social/github-social-preview.png
@@ -19,7 +19,7 @@ cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  ./assets/launc
 94f144e776d54d16f3d53dfae3dc61eea01a2de2fb576402f770383e020c768c  ./crates/rucksack-cli/src/app.rs
 792d314780f9156816609c307b0f5b33a890a063efb97847d0061070f2ad4530  ./crates/rucksack-cli/src/cli.rs
 19b56387f7fe2e4a235587748658a38b337d4edd33623705c593f9cf4b691075  ./crates/rucksack-cli/src/daemon.rs
-fd02dd466b00742072526991c598c752c8ce4504358010d1238dcb72d754d7a0  ./crates/rucksack-cli/src/flow.rs
+8c314742ce6804812cc3095525e52444655299681c8226a82d5a9e958c380367  ./crates/rucksack-cli/src/flow.rs
 f29425a46f9c4bb52a0f4ff274d0b9209df350f74be11f334d682fa2668230db  ./crates/rucksack-cli/src/helper_client.rs
 37dace3d13908e27e51224b2e784e8e5efe4a8620df16473c3d31f164d8ac38e  ./crates/rucksack-cli/src/install.rs
 dfbffc23f78f6861992f770b6b86b9ab5ee85876be2485fc2c34de595e7ce21f  ./crates/rucksack-cli/src/main.rs
@@ -59,7 +59,7 @@ f3e66b269f05307bc114c3c2d7b0210b9babe7ab33c41c2a4c6a5efd4bf5ad4a  ./docs/adr/000
 638e6ce3d1f77817971a37248aa4f9564304e910a5e2216c809f505c73c57366  ./rust-toolchain.toml
 7c1c7eba80a4b7aa292c77b7ee8acb92d9caf13bf58cd59a9e72a6568ca1c8e0  ./rustfmt.toml
 0a554c203a3d9a9e757d11a5cd8c5e1d6011da4593ee365f274c09a49fd83c59  ./scripts/build-macos-package.sh
-4acc372eabdf43258d8e803ad544ec49c9d08a60543d44fb6a718e3ffe6391eb  ./scripts/e2e.sh
+ce51b705ab1f6172f12bbf32471615cab3d1a4e407acff815b22bb44c1e63e8e  ./scripts/e2e.sh
 cf139b79c32a21ec1566b424b05e7a78a14160263ea4bf53085700236a3681ff  ./scripts/install.sh
 46aa0d2307ba07f9667c259fe78df65177e884fb98de22bf5468255394184b01  ./scripts/package/macos/postinstall
 71984962110bb2a52b0e04e059f48e0cab1efb337f0c80c1f14e59c6e2ada6f0  ./scripts/package/macos/preinstall
