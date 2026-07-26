@@ -3,7 +3,7 @@
 //! Everything here is read-only: taking a real lease disables system sleep, so that belongs in
 //! `scripts/e2e.sh`, which restores it. These tests must be safe to run anywhere, including CI.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn rucksack(arguments: &[&str], home: &Path) -> Output {
@@ -22,6 +22,19 @@ fn stdout(output: &Output) -> String {
 
 fn home() -> tempfile::TempDir {
     tempfile::tempdir().expect("a temporary home")
+}
+
+/// Where the binary looks for its state under the `HOME` these tests hand it.
+///
+/// A test that plants a session file has to plant it where rucksack reads from, and that is not the
+/// same place on the Linux runner as it is on a Mac. Writing to the wrong one leaves the test
+/// passing against a rucksack that never opened the file.
+fn state_directory(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Rucksack")
+    } else {
+        home.join(".local/share/Rucksack")
+    }
 }
 
 #[test]
@@ -149,4 +162,47 @@ fn unreadable_session_state_never_dead_ends() {
     let reported = rucksack(&["status"], home.path());
     assert_eq!(reported.status.code(), Some(0));
     assert!(stdout(&reported).contains("Not packed"));
+}
+
+/// Recorded intent is not protection, and `status` must never confuse the two.
+///
+/// This is the session file left behind by the failure it is named for: phase "active", hours still
+/// on the clock, and a single heartbeat from long before, written by a watcher that then died. The
+/// helper dropped the lease ninety seconds later, and `status` went on printing
+/// `Packed · en0 · battery 100% · 23h 53m left` — the one sentence that gets a lid closed on
+/// unprotected work.
+#[test]
+fn a_session_whose_watcher_died_is_never_reported_as_packed() {
+    let home = home();
+    let directory = state_directory(home.path());
+    std::fs::create_dir_all(&directory).expect("state directory");
+    std::fs::write(
+        directory.join("session.json"),
+        r#"{
+          "version": 2,
+          "id": "3f1a1f7a-2a5f-4f2e-9f7a-1b2c3d4e5f60",
+          "lease_id": "8c2d4e6f-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+          "phase": "active",
+          "started_at": "2026-07-26T19:17:46Z",
+          "expires_at": "2099-01-01T00:00:00Z",
+          "ended_at": null,
+          "last_heartbeat_at": "2026-07-26T19:18:19Z",
+          "daemon_pid": 58895,
+          "hotspot": null,
+          "route_interface": "en0",
+          "battery_percent": 100,
+          "online": true,
+          "last_event": null,
+          "release_reason": null
+        }"#,
+    )
+    .expect("a session the watcher stopped writing to");
+
+    let reported = rucksack(&["status"], home.path());
+
+    assert_eq!(reported.status.code(), Some(0));
+    let reported = stdout(&reported);
+    assert!(!reported.contains("Packed ·"), "{reported}");
+    assert!(reported.contains("Not packed"), "{reported}");
+    assert!(reported.contains("rucksack pack"), "{reported}");
 }

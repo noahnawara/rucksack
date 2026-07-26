@@ -577,7 +577,7 @@ fn start_remote_control(require_remote: bool, paths: &AppPaths, output: &Output)
     Ok(())
 }
 
-pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()> {
+pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
     let session = match SessionState::load(paths) {
         Ok(session) => session,
         Err(error) => {
@@ -596,6 +596,20 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
         .as_ref()
         .filter(|session| session.is_holding_a_lease())
     {
+        if let Some(dead) = dead_session(
+            session,
+            watcher_is_running(session),
+            config.session.heartbeat_seconds,
+            Utc::now(),
+        ) {
+            output.done("Not packed. This Mac will sleep when you close the lid.");
+            output.step(dead.describe(session));
+            output.step("Run `rucksack unpack`, then `rucksack pack` again to protect it.");
+            if args.full {
+                output.step(serde_json::to_string_pretty(session)?);
+            }
+            return Ok(());
+        }
         output.done(format!(
             "Packed · {} · battery {} · {} left",
             session
@@ -639,6 +653,84 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
         output.detail(format!("Power helper: {error:#}"));
     }
     Ok(())
+}
+
+/// How many heartbeats may be missed before the record stops describing anything real.
+///
+/// The watcher writes one every `heartbeat_seconds` and renews the power lease in the same breath,
+/// for `helper_ttl_seconds` — three beats against one, at the defaults. So by the third missed beat
+/// the helper has already handed sleep back on its own, and a file still reading "active" is
+/// describing a Mac that can sleep the moment the lid closes.
+const MAX_MISSED_HEARTBEATS: u64 = 3;
+
+/// Why a session that still claims a lease is not actually holding one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeadSession {
+    /// The watcher stopped writing long enough ago that the lease it renews has lapsed.
+    HeartbeatStopped,
+    /// No watcher for this session is running.
+    WatcherGone,
+}
+
+impl DeadSession {
+    fn describe(self, session: &SessionState) -> String {
+        match self {
+            Self::HeartbeatStopped => match session.last_heartbeat_at {
+                Some(at) => format!("The safety watcher last reported at {}.", format_time(at)),
+                None => "The safety watcher never reported in.".to_owned(),
+            },
+            Self::WatcherGone => "The safety watcher is no longer running.".to_owned(),
+        }
+    }
+}
+
+/// Whether the session on disk still describes a Mac that is being kept awake.
+///
+/// `status` reads a file the watcher writes, and a watcher that dies leaves its last words behind —
+/// which say "active". Read on its own, the record therefore reports a protected Mac at exactly the
+/// moment it stopped being one, and someone closes the lid on it. Two facts close that gap without
+/// the round trip to the root helper that the packed answer deliberately avoids: the process that
+/// renews the lease has to exist, and it has to have written recently enough that what it renews
+/// cannot have lapsed. Neither is evidence about the trip; both are evidence the record is alive.
+///
+/// Deliberately pure, so "a healthy session is still packed" is a test rather than a hope.
+fn dead_session(
+    session: &SessionState,
+    watcher_is_running: bool,
+    heartbeat_seconds: u64,
+    now: DateTime<Utc>,
+) -> Option<DeadSession> {
+    let silence = session
+        .last_heartbeat_at
+        .map(|at| (now - at).num_seconds())
+        .unwrap_or(i64::MAX);
+    let tolerated =
+        i64::try_from(heartbeat_seconds.saturating_mul(MAX_MISSED_HEARTBEATS)).unwrap_or(i64::MAX);
+    if silence > tolerated {
+        return Some(DeadSession::HeartbeatStopped);
+    }
+    if !watcher_is_running {
+        return Some(DeadSession::WatcherGone);
+    }
+    None
+}
+
+/// Is the watcher this session named still running?
+///
+/// Matched the way `unpack` matches it before signalling, because a pid on its own is not enough:
+/// macOS reuses pids, and some unrelated process inheriting one would look exactly like a live
+/// session. A `ps` that will not run answers "yes" — a probe that failed is not evidence of death,
+/// and the heartbeat has already had its say about whether anything is alive.
+fn watcher_is_running(session: &SessionState) -> bool {
+    let Some(pid) = session.daemon_pid else {
+        return false;
+    };
+    let Ok(processes) = processes() else {
+        return true;
+    };
+    processes
+        .iter()
+        .any(|process| process.pid == pid && is_watcher_for(process, session.id))
 }
 
 pub fn unpack(output: &Output, paths: &AppPaths) -> Result<()> {
@@ -1292,5 +1384,57 @@ mod tests {
             arguments: format!("/bin/rm daemon --session-id {session_id}"),
         };
         assert!(!is_watcher_for(&impostor, session_id));
+    }
+
+    fn watched(now: DateTime<Utc>) -> SessionState {
+        let mut session = SessionState::new(Uuid::new_v4(), now, now + ChronoDuration::hours(23));
+        session.phase = SessionPhase::Active;
+        session.daemon_pid = Some(42);
+        session.last_heartbeat_at = Some(now);
+        session
+    }
+
+    /// A watcher that is beating and running is packed, and a late beat is not a dead one.
+    #[test]
+    fn a_live_session_is_still_packed() {
+        let now = Utc::now();
+        let session = watched(now);
+
+        assert_eq!(dead_session(&session, true, 30, now), None);
+        assert_eq!(
+            dead_session(&session, true, 30, now + ChronoDuration::seconds(75)),
+            None
+        );
+    }
+
+    /// The reported failure: a record still saying "active" after the watcher behind it died.
+    ///
+    /// It said `Packed · en0 · battery 100% · 23h 53m left` for nine minutes with no lease held and
+    /// no process to renew one. Every minute of that was an invitation to close the lid.
+    #[test]
+    fn a_watcher_that_stopped_beating_is_not_packed() {
+        let now = Utc::now();
+        let session = watched(now);
+
+        assert_eq!(
+            dead_session(&session, true, 30, now + ChronoDuration::minutes(9)),
+            Some(DeadSession::HeartbeatStopped)
+        );
+    }
+
+    /// A fresh beat is not enough: the process that wrote it must still be there to write the next.
+    #[test]
+    fn a_watcher_that_is_gone_is_not_packed() {
+        let now = Utc::now();
+        let mut session = watched(now);
+
+        assert_eq!(
+            dead_session(&session, false, 30, now),
+            Some(DeadSession::WatcherGone)
+        );
+
+        // A session that never recorded a pid never had a watcher to lose.
+        session.daemon_pid = None;
+        assert!(!watcher_is_running(&session));
     }
 }
