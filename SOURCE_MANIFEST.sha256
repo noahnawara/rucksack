@@ -8,13 +8,13 @@ e25047bcbf11b4f2ca69236ada00b56b18755997bb75e184942589a6881488ef  ./CONTRIBUTING
 38497e69008ba4efe1ee7aef7005ac91df25faf5f109fcf6b7eb7d614da7d228  ./Cargo.lock
 aca4524db267ef7ae8bc60ed95daa907d5ab00f6459022a16a7207d8e7d86a59  ./Cargo.toml
 b3d9f3c526ce1ebe57a7d0f2d8a64f08d2c2ded208d4f5ff11c58dfd6cb2d7fd  ./LICENSE
-8779d17dafe91194ea57c8ebd1df1092cb42903ef3780c3dc66adfec165a891f  ./README.md
+322eaf8c69db62042d850c665d75d5c9f3025ccc82c2b366bf5384e86b248fd8  ./README.md
 f3610f1e1b15970174c657fb9331ba2e1d45fc4f5bf58a8513b91ac7d3b98b35  ./SECURITY.md
 88629e340fdc55dea4ad2da683298b5f03e1c4a6c90268478ebf2ac2aae648ae  ./SUPPORT.md
 50fca2f8c588944605039f6cb6674bff215b5caa8b1b1e815d131b701df2f3af  ./VALIDATION.md
 9f98e2a392747ffbcbfe6470f5af6fc70cca5e30e32d691cf44c6d572aa64552  ./assets/adapters/shared/rucksack/SKILL.md
 cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  ./assets/launchd/io.rucksack.helper.plist
-5f5ed7c83c67e4c8c1487b56d059c9d3dee41c5f0ca60dd5057cf983408da6a3  ./assets/social/github-social-preview.png
+6c8ae56aa3119b77451f9a2110d2d68628805493ecbdf93c835e2bc16c1b985c  ./assets/social/github-social-preview.png
 75f36707fd77379ab4e2174d67435c56bdd6f74b89e77ec2b8fa3f78e4831070  ./crates/rucksack-cli/Cargo.toml
 94f144e776d54d16f3d53dfae3dc61eea01a2de2fb576402f770383e020c768c  ./crates/rucksack-cli/src/app.rs
 792d314780f9156816609c307b0f5b33a890a063efb97847d0061070f2ad4530  ./crates/rucksack-cli/src/cli.rs

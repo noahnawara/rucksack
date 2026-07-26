@@ -1,6 +1,6 @@
 # rucksack
 
-Close your laptop and keep your agent running.
+Close your laptop and keep your agents running.
 
 `rucksack` is a macOS command-line tool for leaving your desk while a local coding agent is
 still working. It moves your Mac onto your phone hotspot, verifies the handoff, and holds a
