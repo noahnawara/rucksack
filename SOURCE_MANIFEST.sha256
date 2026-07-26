@@ -19,7 +19,7 @@ cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  ./assets/launc
 c1b47c77cb5f78d392829972ac0e166bdffb9723760dd7ece53cca0ac40b7536  ./crates/rucksack-cli/src/app.rs
 792d314780f9156816609c307b0f5b33a890a063efb97847d0061070f2ad4530  ./crates/rucksack-cli/src/cli.rs
 aca68933de26921b1f2ef040f9c1c2ce19c8c5931e837cb2169d9fcc43bee7a3  ./crates/rucksack-cli/src/daemon.rs
-a7992a0ec4542750b1827bca5e8fabe157e144e59e85459123a86f34dea49deb  ./crates/rucksack-cli/src/flow.rs
+dbfef62ab2b62f3b93e4e5b5bd17766cf77c6bef5f2dbb309052961b7b408dec  ./crates/rucksack-cli/src/flow.rs
 a9cc15adee7ed37efa3b2f04c4dc609786977ee84f51842f6e10b000dab43af0  ./crates/rucksack-cli/src/helper_client.rs
 358c790aa8f2d3998200a7eaecf2586cec23f4e6673da52d60782362805aa0e7  ./crates/rucksack-cli/src/install.rs
 2d2cc5e8c45603da30ac165556b24058658ead1e74db28387b0c7a7a5cced637  ./crates/rucksack-cli/src/main.rs
@@ -29,7 +29,7 @@ c932f08444951bfcadf43ba81661d45733e716695efe46e25f6e366fc093ae9c  ./crates/rucks
 7d5776ba1dd35724d4d6694ff288d863b9effb68467b4120f390935680f2e30e  ./crates/rucksack-cli/tests/cli.rs
 23a1aaee3db8a8008881a0456a7b6cbc0d3ae8b681040b949cc8b4ea1858f798  ./crates/rucksack-core/Cargo.toml
 4c15b5a1f306e1a5d77cc61692e7a8cffbaf5533eeb5843ee17a155bbeac02f7  ./crates/rucksack-core/src/codex.rs
-e3b1ca9335d0748ada49285b700f4542838abcd9abb67ca1bb8df578951a9ff5  ./crates/rucksack-core/src/config.rs
+0c25b6c7b8b5bd4f56db69fceae97dc7b43d6d132b0085086a61a8517a08de01  ./crates/rucksack-core/src/config.rs
 0e91c57d1fe479151bf117451f98018ecc0f1f7d981725e35d7bbd36e1b0f90d  ./crates/rucksack-core/src/drain.rs
 ab47cb2a2372fd0510436354df1eed114e285f0c95e723b9ceba8ac15ea8e4e4  ./crates/rucksack-core/src/files.rs
 415387e4bf344340ad63fe2a2435b59e11fd0e535304e080433a54d13b829481  ./crates/rucksack-core/src/lib.rs
@@ -38,7 +38,7 @@ fa30f77e06326f41f68b3663d393200f826abede52b40bed8939c682e30d32f8  ./crates/rucks
 7aa41a69b33865b044fc6fa6a126bb4c98116b2d695a165a8209bbeefed2d3d8  ./crates/rucksack-core/src/power.rs
 6a9929a1bf5a3c0c757785d7e205237dee06520becec26823109d8cdac534634  ./crates/rucksack-core/src/protocol.rs
 70e254b4017847452d01e7c2586a6f55ba58dfd33d54aba65d82d2793d1ede99  ./crates/rucksack-core/src/skill.rs
-a0203fb9f6cd39b0b7be06eb1c28570d8fc7855f9f296a6da25dccdc69201e51  ./crates/rucksack-core/src/state.rs
+223957bea3fccd9a8396a2c3052dbc0fe41c472892a942cef2dded1af9010c6d  ./crates/rucksack-core/src/state.rs
 01b57c376cc415ff01555c3921f7e0eef5de323dff3134af979ba501e8433aa2  ./crates/rucksack-core/src/system.rs
 09325873bae28617d6ac7f6129eeee5a64c1ca6b6c3ed23fb6ff87f9ed258d46  ./crates/rucksack-helper/Cargo.toml
 9d025f5fae75b953c8a608cb182cb3404b9296d0816f9bf6cf31c8c76d880adc  ./crates/rucksack-helper/src/lease.rs

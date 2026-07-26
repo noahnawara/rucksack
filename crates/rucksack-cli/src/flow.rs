@@ -11,7 +11,7 @@ use rucksack_core::network::{
     read_wifi_status, set_wifi_power, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
 };
 use rucksack_core::power::{read_power_status, read_sleep_disabled, read_thermal_status};
-use rucksack_core::state::{silence_tolerance, Limit, SessionState};
+use rucksack_core::state::{silence_tolerance, Limit, SessionState, SILENT_HEARTBEATS};
 use rucksack_core::system::{processes, run, ProcessInfo};
 use rucksack_core::{codex, skill, AdaptersConfig, AppPaths, Config};
 use std::fs::OpenOptions;
@@ -725,12 +725,6 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths, config: &Con
 
 /// How many heartbeats may be missed before the record stops describing anything real.
 ///
-/// The watcher writes one every `heartbeat_seconds` and renews the power lease in the same breath,
-/// for `helper_ttl_seconds` — three beats against one, at the defaults. So by the third missed beat
-/// the helper has already handed sleep back on its own, and a file still reading "active" is
-/// describing a Mac that can sleep the moment the lid closes.
-const MAX_MISSED_HEARTBEATS: u64 = 3;
-
 /// Why a session that still claims a lease is not actually holding one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeadSession {
@@ -773,7 +767,7 @@ fn dead_session(
         .map(|at| (now - at).num_seconds())
         .unwrap_or(i64::MAX);
     let tolerated =
-        i64::try_from(heartbeat_seconds.saturating_mul(MAX_MISSED_HEARTBEATS)).unwrap_or(i64::MAX);
+        i64::try_from(heartbeat_seconds.saturating_mul(SILENT_HEARTBEATS)).unwrap_or(i64::MAX);
     if silence > tolerated {
         return Some(DeadSession::HeartbeatStopped);
     }

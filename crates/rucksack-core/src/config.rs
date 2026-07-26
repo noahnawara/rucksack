@@ -112,6 +112,23 @@ impl Default for SafetyConfig {
     }
 }
 
+/// Drop every leaf that already matches the baseline, and every table left empty by doing so.
+///
+/// Recursive because the config is one level of tables deep and each is compared on its own: a user
+/// who set one hotspot name should not also have the session timings written out beside it.
+fn without_matching(mine: toml::Table, baseline: &toml::Table) -> toml::Table {
+    mine.into_iter()
+        .filter_map(|(key, value)| match (value, baseline.get(&key)) {
+            (toml::Value::Table(mine), Some(toml::Value::Table(baseline))) => {
+                let kept = without_matching(mine, baseline);
+                (!kept.is_empty()).then_some((key, toml::Value::Table(kept)))
+            }
+            (value, Some(baseline)) if &value == baseline => None,
+            (value, _) => Some((key, value)),
+        })
+        .collect()
+}
+
 impl Config {
     pub fn load(paths: &AppPaths) -> Result<Self> {
         Self::load_from(&paths.config_file)
@@ -125,8 +142,33 @@ impl Config {
         }
     }
 
+    /// Write what the user's Mac needs remembered, and nothing that merely agrees with the defaults.
+    ///
+    /// Writing every value out turned each default into a decision the moment anyone packed once.
+    /// `remember_hotspot` saves one field — the network — and used to serialise the whole config
+    /// doing it, so a battery floor nobody chose was recorded as though they had, and no later
+    /// release could improve it for them. A default that cannot move is not a default.
+    ///
+    /// Every struct here is `#[serde(default)]`, so a file holding only the differences reads back
+    /// identically. What is absent is answered by this binary rather than by the one that happened
+    /// to be installed the first time.
+    ///
+    /// `version` is kept regardless. It is what `validate` checks and what any future migration will
+    /// read, and a config file that does not say which shape it is has to be guessed at.
     pub fn save(&self, paths: &AppPaths) -> Result<()> {
-        atomic_write_toml(&paths.config_file, self)
+        atomic_write_toml(&paths.config_file, &self.differences_from_defaults()?)
+    }
+
+    /// This config as a table holding only what differs from `Config::default()`.
+    fn differences_from_defaults(&self) -> Result<toml::Table> {
+        let mine = toml::Table::try_from(self)?;
+        let defaults = toml::Table::try_from(Config::default())?;
+        let mut kept = without_matching(mine, &defaults);
+        kept.insert(
+            "version".to_owned(),
+            toml::Value::Integer(self.version.into()),
+        );
+        Ok(kept)
     }
 
     pub fn validate(&self) -> std::result::Result<(), String> {
@@ -295,5 +337,69 @@ mod tests {
             .validate()
             .unwrap_err()
             .contains("require_iphone_usb"));
+    }
+
+    /// The point of the whole change: a default nobody chose is not written down as if they had.
+    #[test]
+    fn defaults_are_not_recorded_as_decisions() {
+        let mut config = Config::default();
+        config.hotspot.ssid = Some("Noah".to_owned());
+
+        let written = toml::to_string_pretty(&config.differences_from_defaults().unwrap()).unwrap();
+
+        assert!(written.contains("Noah"), "the one real decision is kept");
+        assert!(!written.contains("sleep_battery_percent"), "{written}");
+        assert!(!written.contains("heartbeat_seconds"), "{written}");
+        assert!(
+            !written.contains("[session]"),
+            "an emptied table goes too: {written}"
+        );
+        assert!(written.contains("version"), "the shape is always stated");
+    }
+
+    /// A value the user actually set is a decision, and survives being written.
+    #[test]
+    fn a_chosen_value_is_kept_even_though_a_default_exists_for_it() {
+        let mut config = Config::default();
+        config.safety.sleep_battery_percent = 5;
+
+        let written = toml::to_string_pretty(&config.differences_from_defaults().unwrap()).unwrap();
+
+        assert!(written.contains("sleep_battery_percent = 5"), "{written}");
+        assert!(
+            !written.contains("warn_battery_percent"),
+            "only what differs: {written}"
+        );
+    }
+
+    /// Writing less must not mean loading something else, or this trades one bug for a worse one.
+    #[test]
+    fn what_is_written_reads_back_the_same() {
+        let mut config = Config::default();
+        config.hotspot.ssid = Some("Noah".to_owned());
+        config.session.duration_minutes = 90;
+
+        let written = toml::to_string_pretty(&config.differences_from_defaults().unwrap()).unwrap();
+        let read: Config = toml::from_str(&written).unwrap();
+
+        assert_eq!(read.hotspot.ssid.as_deref(), Some("Noah"));
+        assert_eq!(read.session.duration_minutes, 90);
+        assert_eq!(
+            read.safety.sleep_battery_percent,
+            Config::default().safety.sleep_battery_percent
+        );
+        assert_eq!(read.adapters.codex, Config::default().adapters.codex);
+        read.validate()
+            .expect("a pruned config is still a valid one");
+    }
+
+    /// An untouched config still says which shape it is, and nothing else.
+    #[test]
+    fn an_unchanged_config_writes_only_its_version() {
+        let written =
+            toml::to_string_pretty(&Config::default().differences_from_defaults().unwrap())
+                .unwrap();
+
+        assert_eq!(written.trim(), "version = 1", "{written}");
     }
 }

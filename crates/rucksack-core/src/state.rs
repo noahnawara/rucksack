@@ -10,10 +10,15 @@ const SESSION_STATE_VERSION: u32 = 2;
 
 /// How many heartbeats of silence mean nobody is writing this session any more.
 ///
-/// Shared so the watcher's sleep-gap detection and `status`'s staleness check cannot drift apart.
-/// Both ask the same question — is anyone still measuring — and a session file answers it the same
-/// way whether the silence came from sleep, a crash, or a watcher that was killed.
-const SILENT_HEARTBEATS: u64 = 3;
+/// The watcher writes one every `heartbeat_seconds` and renews the power lease in the same breath,
+/// for `helper_ttl_seconds` — three beats against one, at the defaults. So by the third missed beat
+/// the helper has already handed sleep back on its own, and a file still reading "active" is
+/// describing a Mac that can sleep the moment the lid closes.
+///
+/// One constant, because every caller is asking the same question: is anyone still writing this. The
+/// watcher asks it of a gap in its own samples, `status` asks it of a file on disk, and a session
+/// answers the same way whether the silence came from sleep, a crash, or a killed watcher.
+pub const SILENT_HEARTBEATS: u64 = 3;
 
 /// The longest silence that can still be a running watcher, whatever the heartbeat is set to.
 const MAX_SILENCE_SECONDS: u64 = 3600;
