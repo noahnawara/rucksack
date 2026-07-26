@@ -64,10 +64,14 @@ rucksack helper   install or remove the power helper
 
 ## Why caffeinate is not enough
 
-A `caffeinate` assertion prevents *idle* sleep. Closing the lid on battery is a *forced*
-sleep condition evaluated by closed-display policy, so the assertion does not cover it.
-`caffeinate` is useful defense-in-depth while the lid is open; it is not the closed-lid
-primitive.
+`caffeinate` keeps a Mac awake for as long as it runs. `caffeinate -d` also holds the
+display on, and `caffeinate -i make` keeps the machine up until that command finishes. With
+the lid open, on power or on battery, it does what you want and rucksack has nothing to add.
+
+Close the lid and it stops helping. A `caffeinate` assertion prevents *idle* sleep, and
+closing the lid on battery is a *forced* sleep condition evaluated by closed-display policy,
+so the assertion does not cover it. That is the whole gap: `caffeinate` is useful
+defense-in-depth while the lid is open, and it is not the closed-lid primitive.
 
 The setting that does cover it is `SleepDisabled`, and it is global, persistent, and
 root-only. Nothing releases it when a process exits, so leaving it on is how a Mac ends up
