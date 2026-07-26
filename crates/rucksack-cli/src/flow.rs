@@ -93,6 +93,8 @@ fn pack_inner(
     require_no_thermal_pressure()?;
 
     let helper = ensure_helper(HelperClient::default(), output)?;
+    // Read before the switch, because afterwards there is nothing left to read it from.
+    let before_ssid = read_wifi_status().ok().and_then(|status| status.ssid);
     let network = ensure_commute_network(args, &config, output)?;
     remember_hotspot(&mut config, &network, args, paths, output);
 
@@ -113,6 +115,7 @@ fn pack_inner(
     start_remote_control(args.require_remote, &config.adapters, paths, output)?;
 
     let mut session = SessionState::new(lease_id, started_at, expires_at);
+    session.previous_ssid = network_left_behind(before_ssid, network.ssid.as_deref());
     session.hotspot = network.ssid;
     session.route_interface = network.route.interface;
     session.battery_percent = battery;
@@ -266,6 +269,16 @@ struct CommuteTarget {
 /// 192.0.0.1, out of the RFC 7335 IPv4 Service Continuity prefix. That prefix is reserved for this
 /// use, but only these host addresses are proof, so the match stays exact rather than by subnet.
 const PERSONAL_HOTSPOT_GATEWAYS: [&str; 2] = ["172.20.10.1", "192.0.0.1"];
+
+/// The network worth putting back afterwards, or `None` when nothing was left.
+///
+/// Only a Mac that actually moved has somewhere to return to. Packing while already on the hotspot,
+/// or with `--here`, ends on the same network it started on and must not record a "return" to the
+/// network it never left — `unpack` would then try to rejoin the hotspot the user just came home
+/// from. A name macOS declined to say is not a target either: rejoining needs the name.
+fn network_left_behind(before: Option<String>, commute: Option<&str>) -> Option<String> {
+    before.filter(|before| Some(before.as_str()) != commute)
+}
 
 fn is_personal_hotspot(route: &RouteStatus) -> bool {
     route
@@ -834,6 +847,7 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
             stop_watcher(pid, session.id);
         }
         report_outcome(session, restored.released(), output);
+        return_to_previous_wifi(session, output);
     } else if restored == Restore::ReleasedUntracked {
         output.step("Released a power lease rucksack was not tracking.");
     }
@@ -856,6 +870,44 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
         "Already unpacked. This Mac sleeps normally."
     });
     Ok(())
+}
+
+/// Put back the Wi-Fi network `pack` moved this Mac off, when it is still on the phone.
+///
+/// Deliberately narrow. `networksetup -setairportnetwork` cannot supply a keychain password, and a
+/// failed attempt drops the connection the Mac already had, so this only reaches for it from a
+/// personal hotspot — the one network the user is unpacking in order to leave. macOS usually
+/// rejoins a known network by itself once it is in range, and when it already has, the route is no
+/// longer a hotspot and rucksack correctly does nothing.
+///
+/// Never fails the unpack. "Let my Mac sleep" is the only thing the caller asked for, it has already
+/// happened by this point, and a Wi-Fi network is not worth dead-ending the one command that is also
+/// the recovery path. A join that does not work says which network to pick instead.
+fn return_to_previous_wifi(session: &SessionState, output: &Output) {
+    let Some(previous) = session.previous_ssid.as_deref() else {
+        return;
+    };
+    if !read_default_route().is_ok_and(|route| is_personal_hotspot(&route)) {
+        output.detail(format!(
+            "Not on a hotspot; leaving the network alone ({previous})."
+        ));
+        return;
+    }
+    let Some(device) = read_wifi_status().ok().and_then(|status| status.device) else {
+        output.warn(format!(
+            "Could not find the Wi-Fi device to rejoin “{previous}”."
+        ));
+        return;
+    };
+    match connect_saved_wifi(&device, previous) {
+        Ok(()) => output.step(format!("Back on “{previous}”.")),
+        Err(error) => {
+            output.detail(format!("Automatic join failed: {error:#}"));
+            output.warn(format!(
+                "Still on your phone. Choose “{previous}” in Wi-Fi."
+            ));
+        }
+    }
 }
 
 /// Give sleep back, escalating until something works.
@@ -1532,6 +1584,34 @@ mod tests {
         session.daemon_pid = Some(42);
         session.last_heartbeat_at = Some(now);
         session
+    }
+
+    /// A Mac that moved has somewhere to go back to.
+    #[test]
+    fn the_network_left_behind_is_the_one_to_return_to() {
+        assert_eq!(
+            network_left_behind(Some("Home".to_owned()), Some("Noah")),
+            Some("Home".to_owned())
+        );
+    }
+
+    /// Packing while already on the hotspot leaves nothing behind.
+    ///
+    /// Recording one here is the bug worth having a test for: `unpack` would then try to rejoin the
+    /// phone the user just came home from, having never been on anything else.
+    #[test]
+    fn a_mac_that_never_moved_has_nothing_to_return_to() {
+        assert_eq!(
+            network_left_behind(Some("Noah".to_owned()), Some("Noah")),
+            None
+        );
+    }
+
+    /// macOS hides network names from processes without Location Services, and rejoining needs the
+    /// name. No name is no target.
+    #[test]
+    fn an_unnamed_network_is_not_a_return_target() {
+        assert_eq!(network_left_behind(None, Some("Noah")), None);
     }
 
     /// A watcher that is beating and running is packed, and a late beat is not a dead one.

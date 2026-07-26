@@ -77,6 +77,16 @@ pub struct SessionState {
     /// Bytes carried over the commute interface, or `None` when that cannot be said honestly.
     #[serde(default)]
     pub bytes_moved: Option<u64>,
+    /// The Wi-Fi network this Mac was on when it packed, when packing moved it off one.
+    ///
+    /// Every other global rucksack changes is recorded before the change and put back afterwards;
+    /// the network was the exception, and the user was left to remember it. `None` whenever there is
+    /// nothing to put back: `--here`, a Mac already on the hotspot, or a name macOS would not say.
+    ///
+    /// `#[serde(default)]` for the same reason as `started_battery_percent`: a version bump would
+    /// strand a session that was already running when the user upgraded.
+    #[serde(default)]
+    pub previous_ssid: Option<String>,
     /// Minutes until the battery reaches its floor, projected from the drops observed so far.
     ///
     /// `None` until enough has been seen to measure a rate, and again whenever the Mac is charging.
@@ -108,6 +118,7 @@ impl SessionState {
             last_event: None,
             release_reason: None,
             started_battery_percent: None,
+            previous_ssid: None,
             bytes_moved: None,
             battery_minutes_remaining: None,
         }
