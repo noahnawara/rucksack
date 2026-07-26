@@ -8,7 +8,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
 use rucksack_core::network::{
     connect_saved_wifi, reaches_internet, read_default_route, read_iphone_usb_device,
-    read_wifi_status, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
+    read_wifi_status, set_wifi_power, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
 };
 use rucksack_core::power::{read_power_status, read_sleep_disabled, read_thermal_status};
 use rucksack_core::state::{silence_tolerance, Limit, SessionState};
@@ -26,6 +26,8 @@ const AUTOMATIC_JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 const NETWORK_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// How long the watcher handshake may take before pack gives up on it.
 const WATCHER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(8);
+/// How long macOS is given to settle on a network after the radio comes back.
+const WIFI_REJOIN_TIMEOUT: Duration = Duration::from_secs(15);
 const WIFI_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.Network-Settings.extension";
 
 pub fn pack(args: &PackArgs, output: &Output, paths: &AppPaths, config: &Config) -> Result<()> {
@@ -834,6 +836,7 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
             stop_watcher(pid, session.id);
         }
         report_outcome(session, restored.released(), output);
+        release_the_hotspot(output);
     } else if restored == Restore::ReleasedUntracked {
         output.step("Released a power lease rucksack was not tracking.");
     }
@@ -856,6 +859,64 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
         "Already unpacked. This Mac sleeps normally."
     });
     Ok(())
+}
+
+/// Let go of the phone, so macOS can join wherever this Mac actually is.
+///
+/// A commute is A to B: packed at home, arrived at the office. The network to be on at the end is
+/// almost never the one left at the start, so rucksack records none and chooses none. macOS already
+/// picks by what is in range; the only thing in its way is that it will not abandon a hotspot that
+/// still works, which is exactly the state a Mac arrives in.
+///
+/// Cycling the radio is what makes it choose again — `airport -z` was removed in macOS 14.4 and
+/// `networksetup` cannot disassociate. Personal Hotspot is a fallback in that choice rather than a
+/// preference, so a known network in range wins it, and a Mac that is nowhere it knows lands back on
+/// the phone. That is the right answer when there is nothing else.
+///
+/// Only from a hotspot, because that is the only connection worth interrupting. Never fails the
+/// unpack: sleep is the only thing that command promises and it has already happened, and unpack is
+/// also the recovery path. What it could not finish, it says.
+fn release_the_hotspot(output: &Output) {
+    if !read_default_route().is_ok_and(|route| is_personal_hotspot(&route)) {
+        return;
+    }
+    let Some(device) = read_wifi_status().ok().and_then(|status| status.device) else {
+        return;
+    };
+    output.step("Letting go of your phone…");
+    if let Err(error) = set_wifi_power(&device, false).and_then(|()| set_wifi_power(&device, true))
+    {
+        output.detail(format!("Could not cycle Wi-Fi: {error:#}"));
+        output.warn("Still on your phone. Pick a network in Wi-Fi.");
+        return;
+    }
+    match wait_for_any_network(WIFI_REJOIN_TIMEOUT) {
+        Some(ssid) => output.step(format!("On “{ssid}” now.")),
+        None => {
+            output.warn("Wi-Fi is still looking for a network. Pick one if it does not settle.")
+        }
+    }
+}
+
+/// Wait for macOS to land on something, and report only a network it actually named.
+///
+/// A Mac with no Location Services permission reports no name, so an unnamed but routed network is
+/// reported as the interface rather than guessed at. Nothing found in time is not a failure worth
+/// an error — the radio is on and still scanning — but it is worth saying.
+fn wait_for_any_network(timeout: Duration) -> Option<String> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let route = read_default_route().ok();
+        let routed = route
+            .as_ref()
+            .is_some_and(|route| route.interface.is_some());
+        if routed {
+            let named = read_wifi_status().ok().and_then(|status| status.ssid);
+            return named.or_else(|| route.and_then(|route| route.interface));
+        }
+        thread::sleep(NETWORK_POLL_INTERVAL);
+    }
+    None
 }
 
 /// Give sleep back, escalating until something works.

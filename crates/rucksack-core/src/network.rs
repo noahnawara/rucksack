@@ -58,6 +58,35 @@ pub fn connect_saved_wifi(device: &str, ssid: &str) -> Result<()> {
     require_wifi_join_success(&result)
 }
 
+/// Switch the Wi-Fi radio off or on.
+///
+/// Turning it back on makes macOS choose a network again from what is in range, which is the only
+/// way left to ask for that: `airport -z` was removed in macOS 14.4, and `networksetup` has no
+/// disassociate of its own.
+pub fn set_wifi_power(device: &str, on: bool) -> Result<()> {
+    let args = wifi_power_args(device, on)?;
+    let borrowed = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let result = run_network_command("/usr/sbin/networksetup", &borrowed)?;
+    require_success("networksetup -setairportpower", &result)
+}
+
+fn wifi_power_args(device: &str, on: bool) -> Result<Vec<String>> {
+    let device = device.trim();
+    if device.is_empty() {
+        return Err(anyhow!("Wi-Fi device name cannot be empty"));
+    }
+    if device.chars().any(char::is_control) {
+        return Err(anyhow!(
+            "Wi-Fi device name cannot contain control characters"
+        ));
+    }
+    Ok(vec![
+        "-setairportpower".to_owned(),
+        device.to_owned(),
+        if on { "on" } else { "off" }.to_owned(),
+    ])
+}
+
 fn saved_wifi_connection_args(device: &str, ssid: &str) -> Result<Vec<String>> {
     let device = device.trim();
     let ssid = ssid.trim();
@@ -321,6 +350,24 @@ mod tests {
     fn the_join_command_carries_no_password() {
         let args = saved_wifi_connection_args("en0", "Noah's iPhone").unwrap();
         assert_eq!(args, vec!["-setairportnetwork", "en0", "Noah's iPhone"]);
+    }
+
+    #[test]
+    fn the_power_command_names_the_device_and_the_state() {
+        assert_eq!(
+            wifi_power_args("en0", false).unwrap(),
+            vec!["-setairportpower", "en0", "off"]
+        );
+        assert_eq!(
+            wifi_power_args("en0", true).unwrap(),
+            vec!["-setairportpower", "en0", "on"]
+        );
+    }
+
+    #[test]
+    fn the_power_command_rejects_a_bad_device() {
+        assert!(wifi_power_args("", true).is_err());
+        assert!(wifi_power_args("en0\nother", true).is_err());
     }
 
     #[test]
