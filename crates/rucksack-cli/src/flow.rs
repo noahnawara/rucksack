@@ -228,8 +228,19 @@ fn require_no_thermal_pressure() -> Result<()> {
 /// that fixes it is a human running one command in a real terminal window. Saying so is the
 /// difference between a product that looks broken and one that takes thirty seconds to set up.
 fn ensure_helper(helper: HelperClient, output: &Output) -> Result<HelperClient> {
-    if install::installed_helper_exists() && helper.status().is_ok() {
-        return Ok(helper);
+    if install::installed_helper_exists() {
+        if let Ok(status) = helper.status() {
+            // Said here as well as in `helper status`, because this is the command people run. A
+            // skew survives every pack until someone is told about it, and `helper status` is a
+            // diagnostic nobody reaches for while walking out of a door.
+            if let Some(warning) = crate::app::stale_helper_warning(
+                status.as_ref().and_then(|status| status.version.as_deref()),
+                env!("CARGO_PKG_VERSION"),
+            ) {
+                output.warn(warning);
+            }
+            return Ok(helper);
+        }
     }
     install::install_helper(output).context(
         "Could not install the power helper, and rucksack cannot hold the lid closed without it.\nRun `rucksack helper install` in a terminal window — it needs a password — then run `rucksack pack` again.",
@@ -1505,6 +1516,7 @@ mod tests {
 
     fn helper_status(active: bool) -> HelperStatus {
         HelperStatus {
+            version: None,
             active,
             lease_id: None,
             owner_uid: None,

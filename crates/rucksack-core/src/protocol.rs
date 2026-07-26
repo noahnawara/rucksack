@@ -48,6 +48,22 @@ pub struct HelperResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HelperStatus {
+    /// The version of the helper binary that is actually installed and answering.
+    ///
+    /// `cargo install` replaces the two binaries in `~/.cargo/bin`; the helper that holds this Mac
+    /// awake is a copy at `/Library/PrivilegedHelperTools`, and only `rucksack helper install`
+    /// refreshes it. Updating without that second step leaves a new CLI talking to an old helper,
+    /// and until this field existed neither end could tell — `helper status` reported "installed and
+    /// idle" against a build from a different release.
+    ///
+    /// It works today only because the wire format has not changed between versions. The first time
+    /// it does, a skew fails at parse with nothing to explain it, on the process that keeps a laptop
+    /// awake in a bag.
+    ///
+    /// `#[serde(default)]` so a CLI that knows about this field can still read a helper that predates
+    /// it — which is exactly the skew being detected, and it must not become a parse error.
+    #[serde(default)]
+    pub version: Option<String>,
     pub active: bool,
     pub lease_id: Option<Uuid>,
     pub owner_uid: Option<u32>,
