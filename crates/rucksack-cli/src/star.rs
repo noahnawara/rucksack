@@ -35,28 +35,25 @@ fn open_in_browser(output: &Output) -> Result<()> {
     Ok(())
 }
 
-/// Ask once, ever, whether to star the repository.
+/// Say once, ever, that starring is a thing — and leave the asking to whoever has a conversation.
 ///
-/// Deliberately at the end of the first `unpack`: the user is back at a desk and has just watched
-/// rucksack work, so it costs them nothing. Asking during `pack` would be asking someone a favour
-/// while they are halfway out of the door, which is exactly what rucksack is supposed to stop
-/// doing. Never asks when there is no terminal to answer from, so agents and scripts are unaffected.
-pub fn offer_once(paths: &AppPaths, output: &Output) {
+/// rucksack cannot ask. Nobody is watching its output: an agent ran it, captured the text, and will
+/// summarise it. An earlier version asked on the terminal and gated the question on a TTY, which
+/// meant it never once fired for a real user, because agents have no TTY and agents are how this
+/// gets run. Worse, ungating it would have printed `[Y/n]` into a pipe, read end-of-file, taken that
+/// for "no", and recorded a permanent refusal without a human ever seeing the question.
+///
+/// So the division of labour is: rucksack states the fact, exactly once, at the end of the first
+/// completed trip — the user is back at a desk and has just watched it work. The skill turns it into
+/// a real question in the agent's own dialog, where there are buttons rather than a line of terminal
+/// output to skim past. `rucksack star` does the work when they say yes.
+///
+/// Recorded before it is printed, so a conversation that dies mid-ask costs one missed mention
+/// rather than asking forever.
+pub fn mention_once(paths: &AppPaths, output: &Output) {
     let marker = paths.star_prompt_marker();
-    if marker.exists() || !output.is_interactive() {
+    if marker.exists() || atomic_write(&marker, b"mentioned\n", 0o600).is_err() {
         return;
     }
-    // Record the ask before making it, so a refusal is never asked twice.
-    if atomic_write(&marker, b"asked\n", 0o600).is_err() {
-        return;
-    }
-    match output.ask("That worked. Star rucksack on GitHub?") {
-        Ok(true) => {
-            if let Err(error) = star(output) {
-                output.detail(format!("{error:#}"));
-            }
-        }
-        Ok(false) => output.step("No problem. `rucksack star` if you change your mind."),
-        Err(_) => {}
-    }
+    output.step("First trip done. If rucksack earned it: `rucksack star`.");
 }

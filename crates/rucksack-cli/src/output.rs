@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 
 /// Everything rucksack says to the person running it.
 ///
@@ -38,27 +38,6 @@ impl Output {
         if self.verbose {
             println!("  {}", message.as_ref());
         }
-    }
-
-    /// Is there a person at a terminal who could answer a question?
-    pub fn is_interactive(&self) -> bool {
-        io::stdin().is_terminal() && io::stdout().is_terminal()
-    }
-
-    /// Ask a yes-or-no question, defaulting to yes.
-    ///
-    /// rucksack asks exactly one question, ever, and only when a person is there to answer it.
-    pub fn ask(&self, question: &str) -> anyhow::Result<bool> {
-        print!("{question} [Y/n] ");
-        io::stdout().flush()?;
-        let mut answer = String::new();
-        if io::stdin().lock().read_line(&mut answer)? == 0 {
-            return Ok(false);
-        }
-        Ok(matches!(
-            answer.trim().to_ascii_lowercase().as_str(),
-            "" | "y" | "yes"
-        ))
     }
 
     fn paint(&self, code: &str, value: &str) -> String {

@@ -58,6 +58,18 @@ fn pack_inner(
     if !cfg!(target_os = "macos") {
         anyhow::bail!("rucksack currently requires macOS.");
     }
+
+    // First, because the first pack is the one that needs it most.
+    //
+    // The skill is what tells an agent how to behave while pack is waiting, so writing it at the end
+    // gave it to everyone except the person who had not run pack before — and a pack interrupted
+    // during a network wait never wrote it at all. It also cannot fail a pack from here, for the same
+    // reason it could not before: making "pack my Mac" work as a sentence is worth nothing next to
+    // keeping the Mac awake.
+    if let Err(error) = skill::install(paths) {
+        output.detail(format!("Skill not installed: {error:#}"));
+    }
+
     require_nothing_packed(paths)?;
 
     let mut config = base_config.clone();
@@ -103,6 +115,7 @@ fn pack_inner(
     session.hotspot = network.ssid;
     session.route_interface = network.route.interface;
     session.battery_percent = battery;
+    session.started_battery_percent = battery;
     session.save(paths)?;
     cleanup.session = true;
 
@@ -118,11 +131,6 @@ fn pack_inner(
                 .or(session.last_event.as_deref())
                 .unwrap_or("no reason recorded")
         );
-    }
-
-    // The skill only makes "pack my Mac" work as a sentence, so it must never be able to fail pack.
-    if let Err(error) = skill::install(paths) {
-        output.detail(format!("Skill not installed: {error:#}"));
     }
 
     output.step(format!(
@@ -202,12 +210,19 @@ fn require_no_thermal_throttling() -> Result<()> {
 ///
 /// The helper is the one part that genuinely needs an administrator, so rucksack asks macOS for it
 /// during `pack` rather than sending the user through a separate setup command first.
+/// Make sure the root power helper is there, installing it on the first pack.
+///
+/// The failure this names is the common one, not an exotic one. Installing runs `sudo`, and `sudo`
+/// asks for a password on a controlling terminal — which the agent session that runs `rucksack pack`
+/// for most users does not have. So the first pack of a fresh install fails here, and the only thing
+/// that fixes it is a human running one command in a real terminal window. Saying so is the
+/// difference between a product that looks broken and one that takes thirty seconds to set up.
 fn ensure_helper(helper: HelperClient, output: &Output) -> Result<HelperClient> {
     if install::installed_helper_exists() && helper.status().is_ok() {
         return Ok(helper);
     }
     install::install_helper(output).context(
-        "Could not install the power helper, and rucksack cannot hold the lid closed without it.",
+        "Could not install the power helper, and rucksack cannot hold the lid closed without it.\nRun `rucksack helper install` in a terminal window — it needs a password — then run `rucksack pack` again.",
     )?;
     helper
         .status()
@@ -221,13 +236,12 @@ struct CommuteNetwork {
     ssid: Option<String>,
 }
 
-/// What counts as being on the commute network.
+/// What rucksack must see before it believes the Mac has moved networks.
 ///
 /// Arrival cannot be judged on the network name alone, because macOS hides it from any process
 /// without Location Services. It cannot be judged on "the internet works" either: the office
 /// network the user is walking away from also works, and accepting it packs a Mac that goes
 /// offline at the door.
-/// What rucksack must see before it believes the Mac has moved networks.
 #[derive(Debug)]
 struct CommuteTarget {
     /// The saved network's name, when there is one and macOS will reveal it.
@@ -339,10 +353,7 @@ fn ensure_commute_network(
     }
 
     let target = CommuteTarget { expected, baseline };
-    let instruction = match target.expected.as_deref() {
-        Some(expected) => format!("Choose “{expected}” in Wi-Fi. Waiting…"),
-        None => "Switch this Mac to your hotspot in Wi-Fi. Waiting…".to_owned(),
-    };
+    let instruction = wait_instruction(target.expected.as_deref());
 
     // Only ask macOS to switch networks when there is nothing to lose.
     //
@@ -371,6 +382,21 @@ fn ensure_commute_network(
     Ok(wait_for_network(&instruction, &target, config, output))
 }
 
+/// The one thing to do, and the one thing not to do while it is being done.
+///
+/// The lid clause is the whole message. Until `pack` prints its verdict nothing is holding this Mac
+/// awake, so a lid closed during the wait sleeps it and takes every running task down — the exact
+/// loss rucksack exists to prevent, arrived at by being helpful. It is one clause in one string
+/// because a user who is already halfway out of the door will read one clause.
+fn wait_instruction(expected: Option<&str>) -> String {
+    match expected {
+        Some(expected) => {
+            format!("Choose “{expected}” in Wi-Fi — keep the lid open until this says Packed. Waiting…")
+        }
+        None => "Switch this Mac to your hotspot in Wi-Fi — keep the lid open until this says Packed. Waiting…".to_owned(),
+    }
+}
+
 /// The one sentence that reports a successful arrival.
 fn announce(network: &CommuteNetwork, output: &Output) {
     output.step(match network.ssid.as_deref() {
@@ -393,9 +419,11 @@ fn wait_for_network(
     output.step(instruction);
     open_wifi_settings(output);
 
-    let network = poll(output, "Still waiting for the network…", || {
-        arrived(target, config)
-    });
+    let network = poll(
+        output,
+        "Still waiting for the network — lid open.",
+        || arrived(target, config),
+    );
     announce(&network, output);
     network
 }
@@ -423,9 +451,15 @@ fn wait_for_iphone_usb(config: &Config, output: &Output) -> Result<CommuteNetwor
             .filter(|network| network.route.interface.as_deref() == Some(device.as_str()))
     };
     if on_the_iphone().is_none() {
-        output.step("Turn on Personal Hotspot on the connected iPhone. Waiting…");
+        output.step(
+            "Turn on Personal Hotspot on the connected iPhone — keep the lid open until this says Packed. Waiting…",
+        );
     }
-    let network = poll(output, "Still waiting for the iPhone…", on_the_iphone);
+    let network = poll(
+        output,
+        "Still waiting for the iPhone — lid open.",
+        on_the_iphone,
+    );
     output.step("Online through the iPhone.");
     Ok(network)
 }
@@ -600,13 +634,7 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths) -> Result<()
 }
 
 pub fn unpack(output: &Output, paths: &AppPaths) -> Result<()> {
-    let released = with_terminal_operation(paths, || unpack_locked(output, paths))?;
-    // Asked outside the lock: it waits on a person, and the lock exists to serialise `pack`
-    // against `unpack`, not to wait for someone to answer a question.
-    if released {
-        crate::star::offer_once(paths, output);
-    }
-    Ok(())
+    with_terminal_operation(paths, || unpack_locked(output, paths))
 }
 
 /// Let this Mac sleep again, from any state.
@@ -614,7 +642,7 @@ pub fn unpack(output: &Output, paths: &AppPaths) -> Result<()> {
 /// This is also the recovery path: an unreadable session file, a lease whose id no longer matches,
 /// or a watcher that died all end here, because "let my Mac sleep" is the only thing the user
 /// wants and it must never dead-end into a second command.
-fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<bool> {
+fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<()> {
     let helper = HelperClient::default();
     let session = match SessionState::load(paths) {
         Ok(session) => session,
@@ -638,12 +666,20 @@ fn unpack_locked(output: &Output, paths: &AppPaths) -> Result<bool> {
     if read_sleep_disabled().unwrap_or(0) != 0 {
         output.warn("Sleep is still switched off — something else is holding it.");
     }
+    // Before the verdict, which is always the last line.
+    //
+    // Gated on there having been a session, not merely on `released`: a bare `unpack` on an idle Mac
+    // reports success too, and spending the one mention there would spend it on someone who has
+    // never taken a trip — and it is only ever offered once.
+    if released && session.is_some() {
+        crate::star::mention_once(paths, output);
+    }
     output.done(if released {
         "Unpacked. This Mac sleeps normally."
     } else {
         "Already unpacked. This Mac sleeps normally."
     });
-    Ok(released)
+    Ok(())
 }
 
 /// Give sleep back, escalating until something works.
@@ -672,21 +708,73 @@ fn restore_normal_sleep(helper: &HelperClient, session: Option<&SessionState>) -
     }
 }
 
-/// Say what the session did, because the release reason is the most useful thing rucksack knows.
+/// Say what the trip was, then the one thing left to do about it.
 fn report_outcome(session: &SessionState, released: bool, output: &Output) {
-    match (session.is_holding_a_lease(), &session.release_reason) {
-        (false, Some(reason)) => {
+    // A session still holding a lease that rucksack did not release is an inconsistency, not a trip.
+    if !released && session.is_holding_a_lease() {
+        return;
+    }
+    output.step(trip_line(session, Utc::now()));
+    if let Some(line) = closing_line(session, read_default_route().ok().as_ref()) {
+        output.step(line);
+    }
+}
+
+/// The trip, in facts.
+///
+/// Each fact disappears rather than guesses: no battery gauge, a byte counter that reset, or a
+/// session written before those fields existed all shorten the line instead of inventing a number.
+/// The entire claim rucksack makes about itself is that what it printed is what it saw, and a
+/// friendly estimate here would cost that for the sake of a prettier sentence.
+fn trip_line(session: &SessionState, now: DateTime<Utc>) -> String {
+    // `ended_at` whenever the session ended itself: a Mac that went to sleep at 14:12 and is
+    // unpacked at 19:00 was packed for the first stretch, not for the five hours since.
+    let until = session.ended_at.unwrap_or(now);
+    let minutes = (until - session.started_at).num_minutes().max(0) as u64;
+    let mut line = format!("Packed for {}", format_duration(minutes));
+    if let (Some(from), Some(to)) = (session.started_battery_percent, session.battery_percent) {
+        line.push_str(&format!(" · battery {from}% → {to}%"));
+    }
+    if let Some(bytes) = session.bytes_moved {
+        line.push_str(&format!(" · {}", format_bytes(bytes)));
+    }
+    line
+}
+
+/// The single most useful thing left to say, or nothing.
+///
+/// One line, never two: `unpack` gets three in total and the verdict owns the last. A release reason
+/// wins over the network hint, because "your battery ran out" is both more important and the reason
+/// the user is reading this at all.
+fn closing_line(session: &SessionState, route: Option<&RouteStatus>) -> Option<String> {
+    if !session.is_holding_a_lease() {
+        if let Some(reason) = &session.release_reason {
             let when = session
                 .ended_at
                 .map(format_time)
                 .unwrap_or_else(|| "earlier".to_owned());
-            output.step(format!("This Mac went back to sleep at {when} — {reason}."));
+            return Some(format!("This Mac went back to sleep at {when} — {reason}."));
         }
-        _ if released => {
-            let minutes = (Utc::now() - session.started_at).num_minutes().max(0) as u64;
-            output.step(format!("Packed for {}.", format_duration(minutes)));
-        }
-        _ => {}
+    }
+    // Nobody notices they are still on cellular until the bill does.
+    route
+        .filter(|route| is_personal_hotspot(route))
+        .map(|_| "Still on your phone. Pick a Wi-Fi network when you can.".to_owned())
+}
+
+/// Bytes as a person would say them.
+///
+/// Truncated rather than rounded, so the figure is never larger than what actually moved, and in
+/// decimal units because that is what a phone bill counts in.
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1_000;
+    const MB: u64 = 1_000_000;
+    const GB: u64 = 1_000_000_000;
+    match bytes {
+        bytes if bytes < KB => format!("{bytes} B"),
+        bytes if bytes < MB => format!("{} KB", bytes / KB),
+        bytes if bytes < GB => format!("{} MB", bytes / MB),
+        bytes => format!("{}.{} GB", bytes / GB, (bytes % GB) / (GB / 10)),
     }
 }
 
@@ -859,6 +947,7 @@ impl Drop for PackCleanup<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rucksack_core::state::SessionPhase;
 
     fn route(interface: &str, gateway: &str) -> RouteStatus {
         RouteStatus {
@@ -914,6 +1003,111 @@ mod tests {
         assert!(is_personal_hotspot(&route("en0", "192.0.0.1")));
         assert!(!is_personal_hotspot(&route("en0", "192.168.1.1")));
         assert!(!is_personal_hotspot(&route("en0", "192.0.0.2")));
+    }
+
+    /// A session that started `minutes` before `now`, anchored so the duration cannot drift.
+    fn trip(now: DateTime<Utc>, minutes: i64) -> SessionState {
+        let started_at = now - ChronoDuration::minutes(minutes);
+        let mut session = SessionState::new(
+            Uuid::new_v4(),
+            started_at,
+            started_at + ChronoDuration::hours(24),
+        );
+        session.phase = SessionPhase::Active;
+        session
+    }
+
+    /// Facts only. Anything rucksack could not measure leaves the line shorter.
+    #[test]
+    fn a_trip_report_omits_what_it_could_not_measure() {
+        let now = Utc::now();
+
+        let mut full = trip(now, 192);
+        full.started_battery_percent = Some(79);
+        full.battery_percent = Some(61);
+        full.bytes_moved = Some(240_331_847);
+        assert_eq!(
+            trip_line(&full, now),
+            "Packed for 3h 12m · battery 79% → 61% · 240 MB"
+        );
+
+        let mut no_bytes = full.clone();
+        no_bytes.bytes_moved = None;
+        assert_eq!(
+            trip_line(&no_bytes, now),
+            "Packed for 3h 12m · battery 79% → 61%"
+        );
+
+        let mut no_battery = full.clone();
+        no_battery.started_battery_percent = None;
+        assert_eq!(trip_line(&no_battery, now), "Packed for 3h 12m · 240 MB");
+
+        // A session written before these fields existed measures neither.
+        let bare = trip(now, 192);
+        assert_eq!(trip_line(&bare, now), "Packed for 3h 12m");
+    }
+
+    /// A Mac that slept at 14:12 and is unpacked at 19:00 was packed for the first stretch.
+    #[test]
+    fn a_finished_trip_is_measured_to_when_it_ended() {
+        let now = Utc::now();
+        let mut session = trip(now, 300);
+        session.phase = SessionPhase::Released;
+        session.ended_at = Some(session.started_at + ChronoDuration::hours(1));
+        session.release_reason = Some("the battery reached the 15% floor".to_owned());
+
+        assert_eq!(trip_line(&session, now), "Packed for 1 hour");
+    }
+
+    /// Three lines total, so the closing slot holds one fact and the release reason outranks it.
+    #[test]
+    fn a_closing_line_is_never_two_facts() {
+        let now = Utc::now();
+        let hotspot = route("en0", "192.0.0.1");
+
+        let live = trip(now, 30);
+        assert_eq!(
+            closing_line(&live, Some(&hotspot)).as_deref(),
+            Some("Still on your phone. Pick a Wi-Fi network when you can.")
+        );
+        assert_eq!(
+            closing_line(&live, Some(&route("en0", "192.168.1.1"))),
+            None
+        );
+        assert_eq!(closing_line(&live, None), None);
+
+        let mut ended = trip(now, 30);
+        ended.phase = SessionPhase::Released;
+        ended.release_reason = Some("this Mac got too hot".to_owned());
+        ended.ended_at = Some(now);
+        let closing = closing_line(&ended, Some(&hotspot)).expect("a reason to report");
+        assert!(closing.contains("too hot"));
+        assert!(!closing.contains("phone"), "one fact, not two");
+    }
+
+    /// Truncated, never rounded: the figure must never exceed what actually moved.
+    #[test]
+    fn formats_bytes_a_person_would_say() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(999), "999 B");
+        assert_eq!(format_bytes(1_000), "1 KB");
+        assert_eq!(format_bytes(999_999), "999 KB");
+        assert_eq!(format_bytes(1_000_000), "1 MB");
+        assert_eq!(format_bytes(240_331_847), "240 MB");
+        assert_eq!(format_bytes(999_999_999), "999 MB");
+        assert_eq!(format_bytes(1_000_000_000), "1.0 GB");
+        assert_eq!(format_bytes(1_299_999_999), "1.2 GB");
+    }
+
+    /// The clause that stops someone closing the lid on an unheld lease.
+    #[test]
+    fn the_waiting_instruction_always_carries_the_lid() {
+        let named = wait_instruction(Some("Noah"));
+        assert!(named.contains("“Noah”"));
+        assert!(named.contains("lid open"));
+
+        let unnamed = wait_instruction(None);
+        assert!(unnamed.contains("lid open"));
     }
 
     #[test]

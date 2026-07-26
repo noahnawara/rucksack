@@ -18,6 +18,11 @@ step, where moving the work to a cloud agent means standing up a fresh environme
 There is no setup command. The first `pack` installs the power helper and remembers the
 network it ended up on.
 
+Run that first one yourself, in a terminal — `rucksack helper install` does the same job on its
+own. Installing the helper needs your password, `sudo` asks for it on a terminal, and the agent
+session that will run every later `pack` has no terminal to be asked on. Doing it once, in
+person, is what keeps every `pack` after it silent.
+
 ```text
 $ rucksack pack
 
@@ -31,22 +36,37 @@ If macOS cannot join the hotspot itself — the normal case for Apple Instant Ho
 rucksack opens Wi-Fi settings, says what to pick, and waits:
 
 ```text
-Choose “Noah” in Wi-Fi. Waiting…
+Choose “Noah” in Wi-Fi — keep the lid open until this says Packed. Waiting…
 ```
 
-It then carries on by itself. There is nothing to confirm and nothing to re-run.
+It then carries on by itself. There is nothing to confirm and nothing to re-run. The lid clause
+is the one thing worth reading twice: until `pack` says `Packed`, nothing is holding this Mac
+awake yet, so closing it during the wait sleeps the machine.
 
 The lease belongs to the **Mac**, not to one conversation. Closing the lid affects every
 process, so every running task benefits, and a task finishing does not end the lease.
 
 rucksack does not change how your agents behave. It writes no instructions, prompts, or
 policy into them, and installs no hooks; your permission, approval, and sandbox settings
-stay exactly as you configured them. It installs one thing: a `rucksack` skill for Codex and
-Claude Code, so "pack my Mac" works as a sentence in a conversation. Codex, Claude Code, or
-Cursor carries the remote conversation. The CLI and helper have no backend.
+stay exactly as you configured them. It installs one thing: a `rucksack` skill for Codex,
+Claude Code, and Cursor, so "I'm leaving" works as a sentence in a conversation. Whichever of
+them you use carries the remote conversation. The CLI and helper have no backend.
 
-When you are back at a desk, `rucksack unpack` restores normal sleep. It is also the recovery
-path, and works from any state.
+When you are back at a desk, `rucksack unpack` restores normal sleep, and says what the trip
+was. It is also the recovery path, and works from any state.
+
+```text
+$ rucksack unpack
+
+Packed for 3h 12m · battery 79% → 61% · 240 MB
+Still on your phone. Pick a Wi-Fi network when you can.
+Unpacked. This Mac sleeps normally.
+```
+
+Each of those numbers is measured or absent. A battery gauge that says nothing, a byte counter
+that reset, or an interface that changed mid-trip all shorten that line rather than fill it in
+with something plausible. The byte figure spans the watcher's first heartbeat to its last, so it
+reads slightly low rather than slightly high.
 
 ## The whole command surface
 

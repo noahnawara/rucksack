@@ -82,8 +82,9 @@ as the lease owner can still invoke the legitimate signed CLI.
 - an advisory lock serialising `pack`, `unpack`, and watcher updates;
 - configuration keys from older releases load and are ignored rather than failing a command;
 - session state rucksack cannot parse never blocks `unpack`, which deletes it;
-- a stable `rucksack-managed` marker on the skill file: rucksack refuses to overwrite a file
-  it does not own, and removes only files carrying that marker.
+- a stable `rucksack-managed` marker near the top of the skill file: rucksack refuses to overwrite
+  a file it does not own, and removes only files carrying that marker, or backups whose own name
+  carries it.
 
 ## Network controls
 

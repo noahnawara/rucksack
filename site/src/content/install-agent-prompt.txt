@@ -1,7 +1,13 @@
 Install rucksack on this Mac from https://github.com/noahnawara/rucksack, following INSTALL.md at a
-tag you pin. Don't run `rucksack pack` to test it.
+tag you pin. Don't run `rucksack pack` to test it. When you're done, tell me to run
+`rucksack helper install` myself in a terminal window — it asks for my password once, and getting it
+out of the way now means no later `rucksack pack` ever stops for it. Don't try to run it for me: you
+have nowhere to type a password.
 
 From then on: whenever I say I'm leaving, heading out, or have to go — run `rucksack pack`, so this
 Mac stays awake on my hotspot and you can keep working while it's closed. Just run it, don't ask me
-first, and tell me the last line it prints. If it says it's waiting for a network, it carries on by
-itself, so never re-run it. When I'm back, run `rucksack unpack`.
+first, and tell me the last line it prints. If it says it's waiting for a network, tell me that one
+thing and that the lid has to stay open until it says Packed; it carries on by itself, so never
+re-run it. When I'm back, run `rucksack unpack` and read me the trip line, numbers and all — and if
+it mentions a first trip, ask me properly whether to star the project, then run `rucksack star` if I
+say yes.
