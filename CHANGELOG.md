@@ -26,6 +26,15 @@ all notable changes to rucksack will be documented here.
 
 ### Changed
 
+- Only the settings you actually changed are written to `config.toml`. Writing every value out on
+  the first pack turned each default into a decision, so a default improved in a later release
+  could never reach anyone who had used rucksack once.
+- `helper status` and `pack` say when the installed helper is not the one this rucksack would
+  install, comparing the binaries rather than their version strings. Two builds of the same tag
+  report the same version and can still differ, which is what happens when `helper install` runs
+  before a `cargo install --force` replaces the binary underneath it.
+- The website's install prompt asks the agent to copy the departure instructions into the file it
+  loads every session. Pasted into one conversation they stopped applying when it ended.
 - The battery floor is 10%, down from 15%. The old floor ended a commute with a sixth of the
   battery unused, and macOS does not begin its own low-power warnings until 10% either.
 - `status` has a battery figure from the first heartbeat. Measuring a rate takes three readings,
