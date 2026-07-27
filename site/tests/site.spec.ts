@@ -6,6 +6,7 @@ import { fileURLToPath, URL } from "node:url";
 const promptPath = fileURLToPath(
   new URL("../src/content/install-agent-prompt.txt", import.meta.url),
 );
+const readmePath = fileURLToPath(new URL("../../README.md", import.meta.url));
 const robotsPath = fileURLToPath(
   new URL("../public/robots.txt", import.meta.url),
 );
@@ -26,9 +27,7 @@ type TextLineBounds = {
 const readCanonicalPrompt = async (): Promise<string> =>
   readFile(promptPath, "utf8");
 
-const measureTextLines = (
-  element: HTMLElement,
-): readonly TextLineBounds[] => {
+const measureTextLines = (element: HTMLElement): readonly TextLineBounds[] => {
   const range = document.createRange();
   range.selectNodeContents(element);
 
@@ -128,10 +127,9 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
     page.getByText("why doesn’t caffeinate fix it?", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText(
-      "will Claude Code keep running if I close my laptop?",
-      { exact: true },
-    ),
+    page.getByText("will Claude Code keep running if I close my laptop?", {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     page.getByText("why not just run the agent in the cloud?", {
@@ -144,9 +142,9 @@ test("shows one promise, one distilled commute pass, one action, and the evidenc
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(
-    page.getByRole("navigation", { name: "project" }),
-  ).toContainText("security");
+  await expect(page.getByRole("navigation", { name: "project" })).toContainText(
+    "security",
+  );
   await expect(
     page.getByRole("link", {
       name: "rucksack on GitHub",
@@ -179,10 +177,9 @@ test("publishes canonical search, social, and software metadata", async ({
     "content",
     "1200",
   );
-  await expect(page.locator('meta[property="og:image:height"]')).toHaveAttribute(
-    "content",
-    "630",
-  );
+  await expect(
+    page.locator('meta[property="og:image:height"]'),
+  ).toHaveAttribute("content", "630");
   await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
     "content",
     "summary_large_image",
@@ -204,25 +201,25 @@ test("publishes canonical search, social, and software metadata", async ({
     "@graph": expect.arrayContaining([
       expect.objectContaining({
         "@type": "WebSite",
-        "url": "https://www.rucksack.wtf/",
+        url: "https://www.rucksack.wtf/",
       }),
       expect.objectContaining({
         "@type": "WebPage",
-        "url": "https://www.rucksack.wtf/",
+        url: "https://www.rucksack.wtf/",
       }),
       expect.objectContaining({
         "@type": "ImageObject",
-        "width": 1200,
-        "height": 630,
+        width: 1200,
+        height: 630,
       }),
       // `codeRepository` belongs to SoftwareSourceCode, not SoftwareApplication, and
       // schema.org's validator rejects it here. `sameAs` carries the repository link
       // instead, so keep asserting that rather than reintroducing the invalid property.
       expect.objectContaining({
         "@type": "SoftwareApplication",
-        "operatingSystem": "macOS 14 or later",
-        "softwareVersion": "0.1.0-alpha.7",
-        "sameAs": "https://github.com/noahnawara/rucksack",
+        operatingSystem: "macOS 14 or later",
+        softwareVersion: "0.1.0-alpha.7",
+        sameAs: "https://github.com/noahnawara/rucksack",
       }),
     ]),
   });
@@ -279,14 +276,12 @@ test("renders and copies the canonical prompt byte for byte", async ({
   await expect(page.locator("#install-prompt")).toHaveText(canonicalPrompt);
   await page.getByRole("button", { name: "copy setup prompt" }).click();
 
-  const clipboardText = await page.evaluate(
-    async (): Promise<string> => navigator.clipboard.readText(),
+  const clipboardText = await page.evaluate(async (): Promise<string> =>
+    navigator.clipboard.readText(),
   );
   expect(clipboardText).toBe(canonicalPrompt);
   await expect(page.locator(".copy-text")).toHaveText("setup prompt copied");
-  await expect(page.locator("#copy-status")).toHaveText(
-    "setup prompt copied.",
-  );
+  await expect(page.locator("#copy-status")).toHaveText("setup prompt copied.");
   await expect(page.locator("#manual-copy")).not.toBeVisible();
 });
 
@@ -299,10 +294,7 @@ test("gives a direct manual-copy handoff when clipboard access fails", async ({
       value: {
         writeText: (): Promise<never> =>
           Promise.reject(
-            new DOMException(
-              "Clipboard access was blocked",
-              "NotAllowedError",
-            ),
+            new DOMException("Clipboard access was blocked", "NotAllowedError"),
           ),
       },
     });
@@ -315,12 +307,8 @@ test("gives a direct manual-copy handoff when clipboard access fails", async ({
   await expect(status).toContainText(
     "rucksack stopped copying the setup prompt.",
   );
-  await expect(status).toContainText(
-    "your browser blocked clipboard access.",
-  );
-  await expect(status).toContainText(
-    "select the prompt below and copy it.",
-  );
+  await expect(status).toContainText("your browser blocked clipboard access.");
+  await expect(status).toContainText("select the prompt below and copy it.");
   await expect(page.locator("#manual-copy")).toBeVisible();
   await expect(page.locator("#install-prompt-details")).toHaveAttribute(
     "open",
@@ -400,11 +388,7 @@ test("keeps the mobile action large while the pass stays subordinate", async ({
   expect(buttonBounds).not.toBeNull();
   expect(passBounds).not.toBeNull();
   expect(headlineBounds).not.toBeNull();
-  if (
-    buttonBounds === null ||
-    passBounds === null ||
-    headlineBounds === null
-  ) {
+  if (buttonBounds === null || passBounds === null || headlineBounds === null) {
     throw new Error("The mobile hierarchy has missing rendered bounds");
   }
 
@@ -442,9 +426,9 @@ test("keeps every pass phrase on one line at 320 pixels", async ({
   );
 
   expect(phraseLineCounts.length).toBeGreaterThan(0);
-  expect(phraseLineCounts.every((lineCount: number): boolean => lineCount === 1)).toBe(
-    true,
-  );
+  expect(
+    phraseLineCounts.every((lineCount: number): boolean => lineCount === 1),
+  ).toBe(true);
 });
 
 test("keeps wide-screen content on one centered two-column grid", async ({
@@ -514,9 +498,7 @@ test("keeps wide-screen content on one centered two-column grid", async ({
           window.getComputedStyle(routeName).fontSize,
         ),
         setupCopyLeft: setupCopyBounds.left,
-        setupHeadlineFontSize: Number.parseFloat(
-          setupHeadlineStyle.fontSize,
-        ),
+        setupHeadlineFontSize: Number.parseFloat(setupHeadlineStyle.fontSize),
         setupHeadlineLineHeight: Number.parseFloat(
           setupHeadlineStyle.lineHeight,
         ),
@@ -528,9 +510,10 @@ test("keeps wide-screen content on one centered two-column grid", async ({
 
   expect(hierarchy.passWidth).toBeLessThan(hierarchy.headlineWidth);
   expect(hierarchy.routeFontSize).toBeLessThan(hierarchy.headlineFontSize);
-  expect(
-    hierarchy.headlineLineHeight / hierarchy.headlineFontSize,
-  ).toBeCloseTo(1.2, 2);
+  expect(hierarchy.headlineLineHeight / hierarchy.headlineFontSize).toBeCloseTo(
+    1.2,
+    2,
+  );
   expect(
     hierarchy.setupHeadlineLineHeight / hierarchy.setupHeadlineFontSize,
   ).toBeCloseTo(1.2, 2);
@@ -542,9 +525,9 @@ test("keeps wide-screen content on one centered two-column grid", async ({
   expect(Math.abs(hierarchy.passLeft - hierarchy.setupPathsLeft)).toBeLessThan(
     1,
   );
-  expect(Math.abs(hierarchy.passRight - hierarchy.setupPathsRight)).toBeLessThan(
-    1,
-  );
+  expect(
+    Math.abs(hierarchy.passRight - hierarchy.setupPathsRight),
+  ).toBeLessThan(1);
 });
 
 test("shows the final pass state without motion when reduced motion is requested", async ({
@@ -563,8 +546,9 @@ test("shows the final pass state without motion when reduced motion is requested
     (): number =>
       document
         .getAnimations()
-        .filter((animation: Animation): boolean => animation.playState === "running")
-        .length,
+        .filter(
+          (animation: Animation): boolean => animation.playState === "running",
+        ).length,
   );
   expect(runningAnimations).toBe(0);
 });
@@ -616,7 +600,9 @@ test("brings the complete pass into focus without spatial movement", async ({
   await expect(page.locator("#pass-stage")).toHaveClass(/is-running/);
 
   const focus = await page.locator(".pass").evaluate(
-    (element: HTMLElement): {
+    (
+      element: HTMLElement,
+    ): {
       readonly bounds: readonly {
         readonly height: number;
         readonly width: number;
@@ -713,7 +699,9 @@ test("scans the complete pass down and back up", async ({
   await expect(page.locator("#pass-stage")).toHaveClass(/is-running/);
 
   const scan = await page.locator(".pass-body").evaluate(
-    (element: HTMLElement): {
+    (
+      element: HTMLElement,
+    ): {
       readonly delay: number;
       readonly duration: number;
       readonly transforms: readonly string[];
@@ -753,9 +741,7 @@ test("scans the complete pass down and back up", async ({
         transforms: animation.effect
           .getKeyframes()
           .flatMap((keyframe: ComputedKeyframe): readonly string[] =>
-            typeof keyframe.transform === "string"
-              ? [keyframe.transform]
-              : [],
+            typeof keyframe.transform === "string" ? [keyframe.transform] : [],
           ),
       };
     },
@@ -792,4 +778,18 @@ test("keeps the page and prompt readable without JavaScript", async ({
   ).toHaveCount(0);
 
   await context.close();
+});
+
+/// The README and the website hand out the same text, or one of them is lying to somebody.
+///
+/// They drifted once already: the README kept a truncated copy of a prompt two releases old,
+/// missing the paragraphs that stop an agent running `pack` as a smoke test and that make the
+/// departure instructions outlive the conversation they were pasted into.
+test("the README hands out exactly the prompt the website does", async () => {
+  const prompt = (await readFile(promptPath, "utf8")).replace(/\n+$/, "");
+  const readme = await readFile(readmePath, "utf8");
+  const block = readme.match(/```text\n([\s\S]*?)\n```/);
+
+  expect(block, "README has no ```text prompt block").not.toBeNull();
+  expect(block![1]).toBe(prompt);
 });

@@ -16,9 +16,13 @@ From then on, when I say I'm leaving, heading out, or have to go: run `rucksack 
 don't ask me first, and tell me the last line it prints. If it's waiting for a network, tell me
 that, and that the lid stays open until it says Packed. It finishes by itself, so never run it
 twice. When I'm back, run `rucksack unpack` and read me the trip line with the numbers exactly as
-printed. If it mentions a first trip, ask me whether I want to star the project, and run `rucksack
-star` if I say yes.
+printed.
 
-Then put that last paragraph into the file you load every session, ~/.claude/CLAUDE.md for Claude
-Code or ~/.codex/AGENTS.md for Codex. Pasting it here only lasts this conversation, and "I have to
-go" is not something I want to explain twice.
+The first time I finish a trip, unpack says so. When it does, ask me whether I want to star the
+project on GitHub, and ask it properly: use your question tool, the one that gives me buttons to
+click, not a line of chat I will scroll past. Run `rucksack star` if I say yes, drop it for good if
+I say no, and only ever ask once.
+
+Then put the two paragraphs above into the file you load every session, ~/.claude/CLAUDE.md for
+Claude Code or ~/.codex/AGENTS.md for Codex. Pasting it here only lasts this conversation, and "I
+have to go" is not something I want to explain twice.
