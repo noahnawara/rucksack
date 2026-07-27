@@ -16,7 +16,7 @@ step, where moving the work to a cloud agent means standing up a fresh environme
 ## Install
 
 ```sh
-cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.6 rucksack-cli rucksack-helper
+cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.7 rucksack-cli rucksack-helper
 rucksack helper install
 ```
 
@@ -33,7 +33,7 @@ Or paste this to Codex, Claude Code, or Cursor and let it do the first part:
 ```text
 Install rucksack on this Mac by running exactly this, both crate names included:
 
-cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.6 rucksack-cli rucksack-helper
+cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.7 rucksack-cli rucksack-helper
 
 Without `rucksack-helper` the install reports success and `rucksack` can never pack, so don't drop
 it. It compiles for a couple of minutes and needs nothing added to my PATH. Don't run `rucksack
