@@ -69,7 +69,9 @@ Small root binary:
 - `lease` — one lease, its persisted baseline, the fixed `pmset` calls, and expiry;
 - `power_events` — IOKit power-source notifications on a run loop.
 
-It contains no HTTP client, config merger, shell interpreter, or arbitrary filesystem API.
+It contains no config merger, shell interpreter, or arbitrary filesystem API. It contains no HTTP
+client either, and now neither does anything else: the one request rucksack makes is the
+captive-network probe, and `network` asks `curl` for it the same way `power` asks `pmset`.
 
 ### Privileged boundary
 

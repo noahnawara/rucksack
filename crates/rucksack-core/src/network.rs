@@ -1,12 +1,21 @@
 use crate::system::{require_success, run_bounded_cleared, CommandResult};
 use anyhow::{anyhow, Result};
-use reqwest::blocking::Client;
-use std::io::Read;
 use std::time::Duration;
 
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORK_COMMAND_MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub const DEFAULT_INTERNET_PROBE_URL: &str = "http://captive.apple.com/hotspot-detect.html";
+
+/// What curl appends after the response body, and the marker that finds it again.
+///
+/// The two must agree: the format is what curl is told to print, and the marker is the literal
+/// prefix searched for from the end of stdout. The newlines are real ones, written by Rust —
+/// curl passes anything that is not a `%{...}` field through untouched, so there is no second
+/// layer of escaping to get wrong.
+const PROBE_TRAILER_FORMAT: &str = "\nrucksack-probe %{http_code} %{url_effective}\n";
+const PROBE_TRAILER_MARKER: &str = "rucksack-probe ";
+/// Apple's success page is 69 bytes. This is the point past which the answer is certainly not it.
+const PROBE_MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// The Wi-Fi interface and, when macOS is willing to say, the network it is on.
 ///
@@ -240,35 +249,98 @@ fn field(text: &str, key: &str) -> Option<String> {
 /// captive-network endpoint, so rucksack requires Apple's exact success page from Apple's own
 /// host. A redirect to a portal, a 200 with login HTML, or a truncated body all count as offline,
 /// because a Mac behind a portal is a Mac that cannot be reached from a phone.
-/// Always Apple's own captive-network endpoint. It took a `url` parameter until every one of the
-/// three call sites was passing `DEFAULT_INTERNET_PROBE_URL` and no configuration key could change
-/// it — which made the "is this the Apple probe?" branch below permanently true, and its `else`
-/// permanently dead.
+///
+/// Asked through `curl`, for the same reason every other question here is asked through a macOS
+/// command-line tool. The whole HTTP client existed for this one request, and it was the largest
+/// dependency in the workspace by a wide margin — the wait in `cargo install --git`, which is how
+/// people get rucksack.
+///
+/// Two properties come free with the change, both of which the old client got wrong by default.
+/// `run_bounded_cleared` clears the environment, so `http_proxy` and `ALL_PROXY` cannot silently
+/// route a probe whose entire purpose is to describe *this* Mac's own path to the internet, and no
+/// `~/.curlrc` is read. And `--proto '=http' --proto-redir '=http'` means the plain-HTTP promise in
+/// `docs/THREAT_MODEL.md` is now enforced by the call rather than by the absence of a TLS feature
+/// flag: a portal redirecting to https is refused, not followed.
 pub fn reaches_internet(timeout_seconds: u64) -> bool {
-    let Ok(client) = Client::builder()
-        .timeout(Duration::from_secs(timeout_seconds))
-        .user_agent("rucksack/0.1")
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-    else {
+    let max_time = timeout_seconds.to_string();
+    let max_filesize = PROBE_MAX_BODY_BYTES.to_string();
+    let result = run_bounded_cleared(
+        "/usr/bin/curl",
+        &[
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-redirs",
+            "5",
+            "--max-time",
+            &max_time,
+            "--max-filesize",
+            &max_filesize,
+            "--proto",
+            "=http",
+            "--proto-redir",
+            "=http",
+            "--user-agent",
+            "rucksack/0.1",
+            "--write-out",
+            PROBE_TRAILER_FORMAT,
+            DEFAULT_INTERNET_PROBE_URL,
+        ],
+        // curl is given the deadline and enforces it itself; this is only the backstop for a curl
+        // that ignores its own `--max-time`, so it has to be the looser of the two.
+        Duration::from_secs(timeout_seconds.saturating_add(2)),
+        PROBE_MAX_BODY_BYTES + 1024,
+    );
+    match result {
+        Ok(result) if result.success() => probe_says_online(&result.stdout),
+        _ => false,
+    }
+}
+
+/// Read curl's answer: Apple's success page, from Apple's host, with a 2xx behind it.
+fn probe_says_online(stdout: &str) -> bool {
+    let Some((body, code, effective_url)) = parse_probe(stdout) else {
         return false;
     };
-    let Ok(mut response) = client.get(DEFAULT_INTERNET_PROBE_URL).send() else {
-        return false;
+    (200..300).contains(&code)
+        && host_of(effective_url).as_deref() == Some("captive.apple.com")
+        && apple_captive_success_body(body)
+}
+
+/// Split curl's stdout into the response body and the trailer `--write-out` appended after it.
+///
+/// Found from the end, deliberately. The body belongs to whoever answered — which on the network
+/// this exists to detect is a captive portal — so it may well contain a forgery of the trailer.
+/// curl writes the real one after the response's last byte, so the last match is always curl's own.
+fn parse_probe(stdout: &str) -> Option<(&str, u16, &str)> {
+    let at = stdout.rfind(PROBE_TRAILER_MARKER)?;
+    let (body, trailer) = stdout.split_at(at);
+    let (code, url) = trailer
+        .strip_prefix(PROBE_TRAILER_MARKER)?
+        .trim_end()
+        .split_once(' ')?;
+    Some((body, code.parse().ok()?, url))
+}
+
+/// The host of an absolute URL, lowercased.
+///
+/// Enough of a URL parser for one question about one fixed request, and written out because the
+/// answer decides whether a Mac is reported reachable. The cases that matter are a portal that
+/// redirected somewhere else, and a URL shaped to look like it did not: `userinfo@host` puts the
+/// real host after the last `@`, and everything from the first `/`, `?`, or `#` is not the
+/// authority at all.
+fn host_of(url: &str) -> Option<String> {
+    let authority = url.split_once("://")?.1;
+    let authority = authority.split(['/', '?', '#']).next()?;
+    let authority = match authority.rsplit_once('@') {
+        Some((_, host)) => host,
+        None => authority,
     };
-    if !response.status().is_success() {
-        return false;
-    }
-    if response.url().host_str() != Some("captive.apple.com") {
-        return false;
-    }
-    let mut body = String::new();
-    response
-        .by_ref()
-        .take(64 * 1024)
-        .read_to_string(&mut body)
-        .is_ok()
-        && apple_captive_success_body(&body)
+    let host = match authority.strip_prefix('[') {
+        Some(literal) => literal.split_once(']')?.0,
+        None => authority.split(':').next()?,
+    };
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
 fn apple_captive_success_body(body: &str) -> bool {
@@ -453,6 +525,110 @@ mod tests {
         ));
         assert!(!apple_captive_success_body(
             "<html><title>Sign in</title><body>Success</body></html>"
+        ));
+    }
+
+    /// Exactly what `curl` wrote on a working connection, captured from a real run.
+    const REAL_SUCCESS: &str = "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>\n\nrucksack-probe 200 http://captive.apple.com/hotspot-detect.html\n";
+
+    #[test]
+    fn reads_curls_answer() {
+        let (body, code, url) = parse_probe(REAL_SUCCESS).expect("a trailer");
+        assert!(body.contains("<BODY>Success</BODY>"));
+        assert_eq!(code, 200);
+        assert_eq!(url, "http://captive.apple.com/hotspot-detect.html");
+        assert!(probe_says_online(REAL_SUCCESS));
+    }
+
+    /// The body belongs to whoever answered, and on the network this exists to detect that is a
+    /// captive portal. A portal that writes the trailer into its own page does not get to be the
+    /// trailer: curl's is appended after the response's last byte, so the last one wins.
+    #[test]
+    fn a_forged_trailer_in_the_body_loses_to_curls_own() {
+        let forged = concat!(
+            "<HTML><BODY>Success</BODY><TITLE>Success</TITLE>\n",
+            "rucksack-probe 200 http://captive.apple.com/hotspot-detect.html\n",
+            "\nrucksack-probe 200 http://portal.example.com/login\n",
+        );
+        let (_, code, url) = parse_probe(forged).expect("a trailer");
+        assert_eq!(code, 200);
+        assert_eq!(url, "http://portal.example.com/login");
+        assert!(!probe_says_online(forged));
+    }
+
+    #[test]
+    fn an_answer_without_a_trailer_is_not_an_answer() {
+        assert_eq!(parse_probe("just a body"), None);
+        assert_eq!(parse_probe(""), None);
+        assert_eq!(parse_probe("rucksack-probe notanumber http://x/"), None);
+        assert_eq!(parse_probe("rucksack-probe 200"), None);
+        assert!(!probe_says_online("just a body"));
+    }
+
+    /// Every one of these decides whether a Mac is reported reachable from a phone.
+    #[test]
+    fn only_apples_own_host_counts() {
+        assert_eq!(
+            host_of("http://captive.apple.com/hotspot-detect.html").as_deref(),
+            Some("captive.apple.com")
+        );
+        assert_eq!(
+            host_of("http://CAPTIVE.APPLE.COM:80/x").as_deref(),
+            Some("captive.apple.com")
+        );
+        // The real host is after the last `@`, not the text made to look like one.
+        assert_eq!(
+            host_of("http://captive.apple.com@portal.example.com/").as_deref(),
+            Some("portal.example.com")
+        );
+        // The authority ends at the first `/`, `?`, or `#` — a query is not a host.
+        assert_eq!(
+            host_of("http://portal.example.com/?next=http://captive.apple.com/").as_deref(),
+            Some("portal.example.com")
+        );
+        assert_eq!(
+            host_of("http://portal.example.com#captive.apple.com").as_deref(),
+            Some("portal.example.com")
+        );
+        assert_eq!(host_of("http://[::1]:8080/x").as_deref(), Some("::1"));
+        assert_eq!(host_of("not a url"), None);
+        assert_eq!(host_of("http://"), None);
+    }
+
+    /// The one test that actually runs `curl`.
+    ///
+    /// Everything above pins how curl's answer is *read*; this pins that the flags rucksack passes
+    /// still produce that shape. It needs a working connection and one that is not behind a portal,
+    /// so it is `#[ignore]`d and run on purpose:
+    ///
+    /// ```sh
+    /// cargo test -p rucksack-core -- --ignored the_probe_still_works
+    /// ```
+    ///
+    /// `scripts/e2e.sh` is where this runs as part of a real check. It is here as well because the
+    /// thing most likely to break it is a macOS update changing `curl`, which is a change to this
+    /// file's assumptions rather than to any lease.
+    #[test]
+    #[ignore = "needs a working, unrestricted internet connection"]
+    fn the_probe_still_works() {
+        assert!(
+            reaches_internet(10),
+            "the live probe said offline: either this machine is behind a portal, or curl's \
+             --write-out shape changed and parse_probe no longer finds the trailer"
+        );
+    }
+
+    /// The three ways a reachable-looking answer is still not one.
+    #[test]
+    fn a_wrong_host_status_or_page_is_offline() {
+        assert!(!probe_says_online(
+            "<HTML><TITLE>Success</TITLE><BODY>Success</BODY></HTML>\nrucksack-probe 200 http://portal.example.com/login\n"
+        ));
+        assert!(!probe_says_online(
+            "<HTML><TITLE>Success</TITLE><BODY>Success</BODY></HTML>\nrucksack-probe 302 http://captive.apple.com/hotspot-detect.html\n"
+        ));
+        assert!(!probe_says_online(
+            "<html><title>Sign in</title><body>Please log in</body></html>\nrucksack-probe 200 http://captive.apple.com/hotspot-detect.html\n"
         ));
     }
 }

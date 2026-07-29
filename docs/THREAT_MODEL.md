@@ -89,7 +89,11 @@ as the lease owner can still invoke the legitimate signed CLI.
 ## Network controls
 
 - the probe carries no user, session, or repository data: it is a plain GET with a
-  `rucksack/0.1` user agent;
+  `rucksack/0.1` user agent, made by `curl` with a cleared environment — so `http_proxy`,
+  `ALL_PROXY`, and `~/.curlrc` cannot redirect or rewrite a request whose only job is to
+  describe this Mac's own path to the internet — and restricted to `http` on the request and
+  on any redirect, so "plain HTTP" is enforced by the call rather than by the absence of a
+  TLS feature flag;
 - arrival on the commute network is proven by the Wi-Fi name matching the saved hotspot, by
   the default route leaving its baseline interface or gateway, by a gateway that only an iOS
   Personal Hotspot serves (`172.20.10.1`, or `192.0.0.1` when the carrier is IPv6-only and
