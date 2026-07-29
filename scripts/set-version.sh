@@ -69,9 +69,11 @@ done
 # The lockfile records the workspace members' own versions, so it goes stale the moment they move.
 cargo update --workspace --offline >/dev/null 2>&1 || cargo update --workspace >/dev/null
 
-# The manifest covers the files just edited, and a release that ships stale hashes has no manifest.
-paths=$(awk '{print $2}' SOURCE_MANIFEST.sha256 | LC_ALL=C sort -u)
-printf '%s\n' "$paths" | tr '\n' '\0' | xargs -0 shasum -a 256 > SOURCE_MANIFEST.sha256
+# The manifest describes the files just edited — which it did not always do. Its path list used to
+# be read back out of itself, so it only ever covered what was already in it, and four of the eight
+# files rewritten above were absent: INSTALL.md and three of the website's. `scripts/manifest.sh`
+# takes the list from `git ls-files` instead, so there is nothing left to keep in step.
+scripts/manifest.sh --write >/dev/null
 
 # Prove it, rather than trusting the sed. A missed reference is the whole failure this prevents.
 stale=$(grep -rn --fixed-strings "$OLD" "${FILES[@]}" Cargo.lock || true)
@@ -80,10 +82,7 @@ if [ -n "$stale" ]; then
     echo "$stale" >&2
     exit 1
 fi
-if ! shasum -a 256 -c SOURCE_MANIFEST.sha256 >/dev/null 2>&1; then
-    echo "SOURCE_MANIFEST.sha256 does not match the tree it just described" >&2
-    exit 1
-fi
+scripts/manifest.sh --check >/dev/null
 
 echo "$OLD -> $NEW"
 grep -rn --fixed-strings "$NEW" "${FILES[@]}" | sed 's/^/  /'
