@@ -14,5 +14,9 @@ plist_path=/Library/LaunchDaemons/io.rucksack.helper.plist
     /Library/PrivilegedHelperTools/io.rucksack.helper
 /bin/chmod 0644 "$plist_path"
 
-/bin/launchctl bootstrap system "$plist_path"
+# `bootstrap` fails when the daemon is already registered, which is the ordinary state on a
+# reinstall, and under `set -e` that failed the whole install after every file had been written.
+# `kickstart -k` is the call that has to succeed: it starts the daemon, and restarts it if it was
+# already running, so it is the one that proves the new binary is the one now serving.
+/bin/launchctl bootstrap system "$plist_path" || true
 /bin/launchctl kickstart -k "system/$helper_label"

@@ -83,7 +83,8 @@ In order, from `pack_inner` in `crates/rucksack-cli/src/flow.rs`:
 11. Start Codex Remote Control as a fire-and-forget child. Failure warns; only
     `--require-remote` makes it fatal.
 12. Write the session state, spawn the watcher, and wait for its first heartbeat.
-13. Print how long the Mac stays awake, then “Packed. Close the lid and go.”
+13. Print whichever limit binds — the lease deadline or the battery — say how much notice
+    agents get before the end, then “Packed. Close the lid and go.”
 
 If any step after the lease fails, `pack` rolls back: it stops the watcher, releases the
 lease, and clears the session state.
@@ -107,14 +108,15 @@ expires_at
 hard_expires_at
 previous_sleep_disabled
 reason
-last_reasserted_at
 ```
 
 Invariants:
 
 - only one global lease exists;
 - acquisition requires `previous_sleep_disabled=0` and refuses while a lease is held;
-- the owner or root can renew, re-assert, release, or recover an active lease;
+- the owner or root can renew, release, or recover an active lease; reasserting is not a
+  request anyone can make, it is what the helper does to itself from the watchdog and the
+  power-event thread;
 - renewable expiry cannot cross `hard_expires_at`, which is capped at 24 hours;
 - either deadline elapsing restores `previous_sleep_disabled`;
 - helper restart restores stale state before accepting a new lease;
@@ -134,8 +136,11 @@ changes. On each event while a lease is active:
 2. re-apply it again after a 250 ms debounce;
 3. verify the setting with `pmset -g`.
 
-If any of that fails, the helper restores the recorded baseline: a helper that cannot prove
-the override is active fails safe to ordinary sleep.
+A failure here is reported and left to the watchdog, which reasserts on the same condition
+five seconds later. `pmset` runs under a five-second timeout and this path fires during a power
+transition — the busiest moment it ever runs in — so a single slow call must not end a healthy
+trip. Failing safe still happens when the failure persists: the watchdog keeps retrying, and the
+lease TTL restores ordinary sleep if nothing can hold it.
 
 A separate watchdog thread ticks every five seconds. It releases the lease once either
 deadline has elapsed, and re-asserts `SleepDisabled` whenever the setting is no longer 1.
