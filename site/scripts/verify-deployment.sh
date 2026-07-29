@@ -73,8 +73,16 @@ expect_contains() {
 
 printf 'verifying %s\n\n' "$target"
 
+# The status code is asked for as a status code. Grepping the header block for "200" passed
+# unconditionally: `strict-transport-security: max-age=63072000` contains it.
+home_status=$(fetch / --output /dev/null --write-out '%{http_code}')
+if [ "$home_status" = 200 ]; then
+    report pass 'home page responds 200'
+else
+    report fail "home page responds 200 (got ${home_status:-no response})"
+fi
+
 home_headers=$(fetch / --head)
-expect_contains "$home_headers" '200' 'home page responds 200'
 expect_contains "$home_headers" 'content-security-policy:' 'content security policy header present'
 expect_contains "$home_headers" 'x-content-type-options: nosniff' 'nosniff header present'
 expect_contains "$home_headers" 'referrer-policy:' 'referrer policy header present'

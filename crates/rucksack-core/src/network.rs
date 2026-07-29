@@ -240,7 +240,11 @@ fn field(text: &str, key: &str) -> Option<String> {
 /// captive-network endpoint, so rucksack requires Apple's exact success page from Apple's own
 /// host. A redirect to a portal, a 200 with login HTML, or a truncated body all count as offline,
 /// because a Mac behind a portal is a Mac that cannot be reached from a phone.
-pub fn reaches_internet(url: &str, timeout_seconds: u64) -> bool {
+/// Always Apple's own captive-network endpoint. It took a `url` parameter until every one of the
+/// three call sites was passing `DEFAULT_INTERNET_PROBE_URL` and no configuration key could change
+/// it — which made the "is this the Apple probe?" branch below permanently true, and its `else`
+/// permanently dead.
+pub fn reaches_internet(timeout_seconds: u64) -> bool {
     let Ok(client) = Client::builder()
         .timeout(Duration::from_secs(timeout_seconds))
         .user_agent("rucksack/0.1")
@@ -249,14 +253,11 @@ pub fn reaches_internet(url: &str, timeout_seconds: u64) -> bool {
     else {
         return false;
     };
-    let Ok(mut response) = client.get(url).send() else {
+    let Ok(mut response) = client.get(DEFAULT_INTERNET_PROBE_URL).send() else {
         return false;
     };
     if !response.status().is_success() {
         return false;
-    }
-    if !is_apple_captive_probe(url) {
-        return true;
     }
     if response.url().host_str() != Some("captive.apple.com") {
         return false;
@@ -268,12 +269,6 @@ pub fn reaches_internet(url: &str, timeout_seconds: u64) -> bool {
         .read_to_string(&mut body)
         .is_ok()
         && apple_captive_success_body(&body)
-}
-
-fn is_apple_captive_probe(url: &str) -> bool {
-    reqwest::Url::parse(url).is_ok_and(|parsed| {
-        parsed.host_str() == Some("captive.apple.com") && parsed.path() == "/hotspot-detect.html"
-    })
 }
 
 fn apple_captive_success_body(body: &str) -> bool {
@@ -440,15 +435,14 @@ mod tests {
         assert!(read_interface_traffic("").is_err());
     }
 
+    /// The strict body check below is only sound against Apple's own endpoint, and `reaches_internet`
+    /// now applies it unconditionally. That is only correct while the probe stays this exact URL.
     #[test]
-    fn only_apples_own_probe_gets_the_strict_body_check() {
-        assert!(is_apple_captive_probe(
+    fn the_probe_is_apples_own_endpoint() {
+        assert_eq!(
+            DEFAULT_INTERNET_PROBE_URL,
             "http://captive.apple.com/hotspot-detect.html"
-        ));
-        assert!(!is_apple_captive_probe(
-            "https://example.com/hotspot-detect.html"
-        ));
-        assert!(!is_apple_captive_probe("http://captive.apple.com/other"));
+        );
     }
 
     /// A captive portal that returns 200 with its own page is still offline.

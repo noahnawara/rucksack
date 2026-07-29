@@ -8,7 +8,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
 use rucksack_core::network::{
     connect_saved_wifi, reaches_internet, read_default_route, read_iphone_usb_device,
-    read_wifi_status, set_wifi_power, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
+    read_wifi_status, set_wifi_power, RouteStatus,
 };
 use rucksack_core::power::{
     minutes_until_floor, read_power_status, read_sleep_disabled, read_thermal_status, PowerStatus,
@@ -77,7 +77,7 @@ fn pack_inner(
         output.detail(format!("Skill not installed: {error:#}"));
     }
 
-    require_nothing_packed(paths)?;
+    require_nothing_packed(paths, base_config.session.heartbeat_seconds, output)?;
 
     let mut config = base_config.clone();
     if let Some(ssid) = &args.hotspot {
@@ -87,12 +87,19 @@ fn pack_inner(
         config.hotspot.ssid = None;
         config.hotspot.require_iphone_usb = true;
     }
-    if let Some(minutes) = args.duration_minutes {
-        config.session.duration_minutes = minutes;
-    }
     config
         .validate()
         .map_err(|error| anyhow!("The saved configuration is not usable: {error}"))?;
+
+    // `--for` is for this trip, and this trip only.
+    //
+    // It used to be written into `config`, which `remember_hotspot` saves a few lines below — so the
+    // first `pack --for 45m` on a Mac that had not yet remembered a hotspot made 45 minutes the
+    // permanent default, silently, for every bare `pack` after it. Nothing is lost by keeping it
+    // local: `parse_duration_minutes` already enforces the same 1-to-1440 bound `validate` does.
+    let duration_minutes = args
+        .duration_minutes
+        .unwrap_or(config.session.duration_minutes);
 
     require_normal_sleep()?;
     let battery = require_enough_battery(&config, output)?;
@@ -103,7 +110,7 @@ fn pack_inner(
     remember_hotspot(&mut config, &network, args, paths, output);
 
     let started_at = Utc::now();
-    let expires_at = started_at + ChronoDuration::minutes(config.session.duration_minutes as i64);
+    let expires_at = started_at + ChronoDuration::minutes(duration_minutes as i64);
     let lease_id = Uuid::new_v4();
     cleanup.helper = Some(helper.clone());
     cleanup.lease_id = Some(lease_id);
@@ -143,7 +150,7 @@ fn pack_inner(
     output.step(opening_line(
         &battery,
         opening_limit(
-            config.session.duration_minutes,
+            duration_minutes,
             &battery,
             config.safety.sleep_battery_percent,
         ),
@@ -157,18 +164,34 @@ fn pack_inner(
     Ok(())
 }
 
-fn require_nothing_packed(paths: &AppPaths) -> Result<()> {
+/// Refuse to pack over a session that is genuinely still running — and only that.
+///
+/// `is_holding_a_lease` reads the record, and a watcher that died leaves its last words behind
+/// saying "active". On its own it therefore refuses to pack precisely when packing is what the Mac
+/// needs, and tells the user to `unpack` something nothing is holding. `status` has never had that
+/// problem: it asks `dead_session` the two questions that separate a live record from an abandoned
+/// one. This asks the same two.
+fn require_nothing_packed(paths: &AppPaths, heartbeat_seconds: u64, output: &Output) -> Result<()> {
     // A session file rucksack cannot read must not block packing; `unpack` cleans it up.
     let Ok(Some(existing)) = SessionState::load(paths) else {
         return Ok(());
     };
-    if existing.is_holding_a_lease() {
-        anyhow::bail!(
-            "Already packed until {}.\nRun `rucksack unpack` to stop.",
-            format_deadline(existing.expires_at)
-        );
+    if !existing.is_holding_a_lease() {
+        return Ok(());
     }
-    Ok(())
+    if let Some(dead) = dead_session(
+        &existing,
+        watcher_is_running(&existing),
+        heartbeat_seconds,
+        Utc::now(),
+    ) {
+        output.detail(dead.describe(&existing));
+        return Ok(());
+    }
+    anyhow::bail!(
+        "Already packed until {}.\nRun `rucksack unpack` to stop.",
+        format_deadline(existing.expires_at)
+    );
 }
 
 /// Refuse when something else already owns the global sleep setting.
@@ -271,10 +294,7 @@ fn opening_line(
 /// macOS declining to report thermal pressure still means silence, not heat.
 fn require_no_thermal_pressure() -> Result<()> {
     let thermal = read_thermal_status().context("Could not read thermal pressure.")?;
-    if thermal.throttled
-        || ends_a_lease(thermal.level)
-        || read_thermal_state().is_some_and(ends_a_lease)
-    {
+    if ends_a_lease(thermal.level) || read_thermal_state().is_some_and(ends_a_lease) {
         anyhow::bail!(
             "This Mac is already too hot, so a closed lid would make it worse.\nLet it cool down, then run `rucksack pack` again."
         );
@@ -377,11 +397,7 @@ fn online(config: &Config, want_name: bool) -> Option<CommuteNetwork> {
     let ssid = want_name
         .then(|| read_wifi_status().ok().and_then(|status| status.ssid))
         .flatten();
-    reaches_internet(
-        DEFAULT_INTERNET_PROBE_URL,
-        config.hotspot.probe_timeout_seconds,
-    )
-    .then_some(CommuteNetwork { route, ssid })
+    reaches_internet(config.hotspot.probe_timeout_seconds).then_some(CommuteNetwork { route, ssid })
 }
 
 /// Has the Mac arrived on the commute network?
@@ -397,11 +413,7 @@ fn arrived(target: &CommuteTarget, config: &Config) -> Option<CommuteNetwork> {
     if !has_switched(target, &route, ssid.as_deref()) {
         return None;
     }
-    reaches_internet(
-        DEFAULT_INTERNET_PROBE_URL,
-        config.hotspot.probe_timeout_seconds,
-    )
-    .then_some(CommuteNetwork { route, ssid })
+    reaches_internet(config.hotspot.probe_timeout_seconds).then_some(CommuteNetwork { route, ssid })
 }
 
 fn ensure_commute_network(
@@ -1594,7 +1606,6 @@ mod tests {
             previous_sleep_disabled: None,
             sleep_disabled: Some(u8::from(active)),
             reason: None,
-            last_reasserted_at: None,
         }
     }
 
@@ -1667,7 +1678,6 @@ mod tests {
         let session_id = Uuid::new_v4();
         let watcher = ProcessInfo {
             pid: 42,
-            command: "/usr/local/bin/rucksack".to_owned(),
             arguments: format!("/usr/local/bin/rucksack daemon --session-id {session_id}"),
         };
         assert!(is_watcher_for(&watcher, session_id));
@@ -1675,7 +1685,6 @@ mod tests {
 
         let impostor = ProcessInfo {
             pid: 42,
-            command: "/bin/rm".to_owned(),
             arguments: format!("/bin/rm daemon --session-id {session_id}"),
         };
         assert!(!is_watcher_for(&impostor, session_id));

@@ -24,8 +24,8 @@ permissions:
   attestations: write
 
 env:
+  # MACOSX_DEPLOYMENT_TARGET comes from .cargo/config.toml. See the note in ci.yml.
   CARGO_TERM_COLOR: always
-  MACOSX_DEPLOYMENT_TARGET: "14.0"
 
 jobs:
   signed-macos-package:

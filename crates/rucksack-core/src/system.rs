@@ -288,7 +288,6 @@ pub fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     path.metadata()
@@ -296,20 +295,19 @@ fn is_executable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
-}
-
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
     pub pid: u32,
-    pub command: String,
     pub arguments: String,
 }
 
+/// Every running process, as pid and full argument vector.
+///
+/// `args=` alone, not `comm=,args=`: `comm` is a truncated fixed-width column, so a path long
+/// enough to be cut — or a command name with a space in it — makes splitting it back off ambiguous.
+/// `args` already begins with argv[0], which is the only part any caller reads.
 pub fn processes() -> Result<Vec<ProcessInfo>> {
-    let result = run("/bin/ps", &["-axo", "pid=,comm=,args="])?;
+    let result = run("/bin/ps", &["-axo", "pid=,args="])?;
     if !result.success() {
         anyhow::bail!("ps failed: {}", result.combined_trimmed());
     }
@@ -322,30 +320,12 @@ pub fn processes() -> Result<Vec<ProcessInfo>> {
         let Ok(pid) = pid_text.parse::<u32>() else {
             continue;
         };
-        let rest = rest.trim_start();
-        let (command, arguments) = rest
-            .split_once(char::is_whitespace)
-            .map(|(command, args)| (command.to_owned(), args.trim().to_owned()))
-            .unwrap_or_else(|| (rest.to_owned(), String::new()));
         processes.push(ProcessInfo {
             pid,
-            command,
-            arguments,
+            arguments: rest.trim().to_owned(),
         });
     }
     Ok(processes)
-}
-
-pub fn current_uid() -> u32 {
-    #[cfg(unix)]
-    unsafe {
-        libc::geteuid()
-    }
-
-    #[cfg(not(unix))]
-    {
-        0
-    }
 }
 
 #[cfg(test)]

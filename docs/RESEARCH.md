@@ -2,9 +2,17 @@
 
 Research date: 2026-07-24.
 
-This document records the upstream behavior the implementation depends on. Provider
-features change quickly; release CI should test capabilities rather than compare only
-version strings.
+This document records the upstream behavior that was investigated. Provider features change
+quickly; release CI should test capabilities rather than compare only version strings.
+
+> **What rucksack does with this is one file.** The macOS power-management section below is
+> load-bearing: the implementation rests on it directly, and ADR 0001 and ADR 0002 lean on it. The
+> Codex, Claude Code, and Cursor sections are a survey of integration surfaces that were considered
+> and **not** taken. rucksack ships one marker-guarded `SKILL.md` per agent and nothing else — no
+> hooks, no rules files, no project commands, no `.git/info/exclude` entries. See ADR 0003,
+> `docs/ADAPTERS.md`, and the "There is no agent module and no adapter machinery" note in
+> `docs/ARCHITECTURE.md`. Where a sentence below says rucksack "uses" or "therefore does" something,
+> read it as what the option would have required, not as a description of the shipped tool.
 
 ## macOS power management
 
@@ -106,8 +114,9 @@ Primary sources:
 ### Rich state
 
 Codex App Server exposes thread and turn events such as thread-status changes and
-turn completion. rucksack’s alpha uses hooks; a production adapter should use App Server
-for richer, typed state where stable.
+turn completion. It is the richer, typed source an integration would want if rucksack ever
+needed to know what an agent was doing — which, so far, it does not: the lease belongs to the
+Mac, and nothing about a conversation starts or ends one.
 
 Primary source:
 
@@ -170,10 +179,12 @@ Primary sources:
 ### Rules
 
 Project rules live in `.cursor/rules`. Cursor's file-backed global-home rule path is not
-supported; global User Rules are configured through Cursor itself. rucksack therefore uses
-a temporary project rule plus a project command, excludes both locally through
-`.git/info/exclude`, and removes them when the lease ends. `AGENTS.md` is not edited because
-A rucksack session is transient host state, not repository policy.
+supported; global User Rules are configured through Cursor itself. A rule-based integration
+would therefore have needed a temporary project rule plus a project command, both excluded
+locally through `.git/info/exclude` and removed when the lease ends. That is the option this
+survey rejected: rucksack writes one skill file under `~/.cursor/skills-cursor/rucksack/` and
+edits no repository at all. `AGENTS.md` is not touched for the same reason a project rule is
+not — a rucksack session is transient host state, not repository policy.
 
 Primary source:
 
@@ -184,8 +195,8 @@ Primary source:
 
 Cursor’s hook surface includes session, prompt, shell, file-edit, response, stop, and
 subagent events. The surface has changed rapidly across desktop, CLI, queued messages, and
-background agents. rucksack therefore treats Cursor hooks as telemetry, not as the host
-safety boundary or per-prompt policy transport. `beforeSubmitPrompt` can continue or block
+background agents. That instability is one of the reasons rucksack treats no hook surface as a
+host safety boundary or a policy transport. `beforeSubmitPrompt` can continue or block
 but cannot add equivalent prompt context. `sessionStart` context applies only at creation
 of a new composer conversation. The always-applied project rule is therefore the
 authoritative temporary policy path.

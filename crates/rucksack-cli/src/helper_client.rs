@@ -99,6 +99,15 @@ impl HelperClient {
         if line.len() > MAX_RESPONSE_BYTES {
             anyhow::bail!("The helper reply was too large to trust.");
         }
+        // A closed connection is not malformed JSON, and saying so sent people looking in the wrong
+        // place. The helper hangs up without replying when it refuses the caller — most often a
+        // `cargo install`ed rucksack talking to a notarized helper that authenticates by code
+        // signature — and "invalid JSON" describes none of that.
+        if line.trim().is_empty() {
+            anyhow::bail!(
+                "The power helper closed the connection without replying.\nIt may be refusing this copy of rucksack: run `rucksack helper install` so the installed helper matches this build."
+            );
+        }
         let response: HelperResponse =
             serde_json::from_str(&line).context("The helper returned invalid JSON.")?;
         if response.protocol != HELPER_PROTOCOL_VERSION {
@@ -141,7 +150,6 @@ mod tests {
             previous_sleep_disabled: None,
             sleep_disabled: Some(0),
             reason: None,
-            last_reasserted_at: None,
         }
     }
 

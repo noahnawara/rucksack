@@ -19,7 +19,7 @@ Implemented in source:
   never populates them;
 - a 24-hour default hard deadline with shorter sessions available through `--for`;
 - `unpack` restoring normal sleep from any state, including session state it cannot parse;
-- one marker-guarded skill file for Codex and Claude Code;
+- one marker-guarded skill file for Codex, Claude Code, and Cursor;
 - macOS and Linux CI with parser and state tests;
 - release-gated universal packaging and a signing/notarization workflow, with helper
   authorization that verifies the caller's Apple code signature only when the helper was

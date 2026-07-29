@@ -28,7 +28,6 @@ struct PersistedLease {
     hard_expires_at: DateTime<Utc>,
     previous_sleep_disabled: u8,
     reason: String,
-    last_reasserted_at: Option<DateTime<Utc>>,
 }
 
 enum PersistedState {
@@ -78,11 +77,6 @@ impl LeaseManager {
                 lease_id,
                 ttl_seconds,
             } => self.renew(caller_uid, lease_id, ttl_seconds),
-            HelperOperation::Reassert { lease_id } => {
-                self.require_owner(caller_uid, lease_id)?;
-                self.reassert_now()?;
-                self.status()
-            }
             HelperOperation::Release {
                 lease_id,
                 reason: _,
@@ -119,8 +113,19 @@ impl LeaseManager {
         }
 
         // First write immediately, then again after the power-management transition settles.
-        // If either write or verification fails, restore the pre-rucksack baseline. A helper
-        // that cannot prove the override is active must fail safe to ordinary sleep.
+        //
+        // A failure here is reported and not acted on, because the watchdog is five seconds away
+        // and does the identical thing. This used to restore the baseline and drop the lease, which
+        // made `power_source_changed` the one path where a single failed `pmset` was fatal — and
+        // `pmset` has a five-second timeout, so a slow one during a power transition (exactly when
+        // this runs, and exactly when the system is busiest) could end a healthy trip that nothing
+        // was wrong with. `watchdog_tick` reasserts on the same condition and merely propagates;
+        // the two now agree.
+        //
+        // Failing safe is still what happens when the reassert is genuinely broken: the watchdog
+        // retries every five seconds, and the lease TTL restores ordinary sleep on its own if
+        // nothing can hold it. The difference is that it now takes a persistent failure to end a
+        // trip rather than one unlucky call.
         let reassert = (|| -> Result<()> {
             set_sleep_disabled(1)?;
             thread::sleep(Duration::from_millis(250));
@@ -128,25 +133,16 @@ impl LeaseManager {
             verify_sleep_disabled(1)
         })();
 
-        if let Err(error) = reassert {
-            let restore = self.release_internal();
-            return match restore {
-                Ok(_) => Err(error).context(
-                    "Closed-lid mode could not be re-armed after the power-source change; the previous sleep state was restored",
-                ),
-                Err(restore_error) => Err(anyhow!(
-                    "Closed-lid re-arm failed ({error}); restoring the previous sleep state also failed ({restore_error})"
-                )),
-            };
-        }
+        reassert.context(
+            "Closed-lid mode could not be re-armed after the power-source change; the watchdog will retry",
+        )?;
 
         if self.restore_if_deadline_elapsed()? {
             anyhow::bail!("the lease deadline elapsed during power-source recovery");
         }
-        if let Some(lease) = self.lease.as_mut() {
-            lease.last_reasserted_at = Some(Utc::now());
-        }
-        self.persist()
+        // Nothing to write: this path changes no part of the lease. It used to persist here only to
+        // record a `last_reasserted_at` nothing ever read back.
+        Ok(())
     }
 
     pub fn status(&self) -> Result<HelperStatus> {
@@ -163,7 +159,6 @@ impl LeaseManager {
                 previous_sleep_disabled: Some(lease.previous_sleep_disabled),
                 sleep_disabled: observed,
                 reason: Some(lease.reason.clone()),
-                last_reasserted_at: lease.last_reasserted_at,
             },
             None => HelperStatus {
                 version: Some(env!("CARGO_PKG_VERSION").to_owned()),
@@ -176,7 +171,6 @@ impl LeaseManager {
                 previous_sleep_disabled: None,
                 sleep_disabled: observed,
                 reason: None,
-                last_reasserted_at: None,
             },
         })
     }
@@ -227,7 +221,6 @@ impl LeaseManager {
             hard_expires_at,
             previous_sleep_disabled: previous,
             reason,
-            last_reasserted_at: None,
         });
 
         // Persist the rollback target before changing the global power setting.
@@ -258,9 +251,6 @@ impl LeaseManager {
         }
         if self.restore_if_deadline_elapsed()? {
             anyhow::bail!("the lease deadline elapsed during acquisition");
-        }
-        if let Some(lease) = self.lease.as_mut() {
-            lease.last_reasserted_at = Some(Utc::now());
         }
         self.persist()?;
         self.status()
@@ -300,9 +290,6 @@ impl LeaseManager {
         verify_sleep_disabled(1)?;
         if self.restore_if_deadline_elapsed()? {
             anyhow::bail!("the lease deadline elapsed while reasserting");
-        }
-        if let Some(lease) = self.lease.as_mut() {
-            lease.last_reasserted_at = Some(Utc::now());
         }
         self.persist()
     }
@@ -538,7 +525,6 @@ mod tests {
             hard_expires_at: created_at + ChronoDuration::hours(1),
             previous_sleep_disabled,
             reason: "test lease".to_owned(),
-            last_reasserted_at: None,
         }
     }
 

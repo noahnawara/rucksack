@@ -10,7 +10,9 @@ permissions:
   contents: read
 
 env:
-  MACOSX_DEPLOYMENT_TARGET: "14.0"
+  # MACOSX_DEPLOYMENT_TARGET lives in .cargo/config.toml and only there. Cargo's `[env]` does not
+  # override a variable the environment already set unless it is marked `force`, so a copy here
+  # silently won — and a bump to the config would not have reached CI.
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -69,6 +71,10 @@ jobs:
       matrix:
         os: [macos-14, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    concurrency:
+      group: rust-${{ matrix.os }}-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,9 +88,6 @@ jobs:
 
       - name: Format
         run: cargo fmt --all -- --check
-
-      - name: Check
-        run: cargo check --workspace --all-targets --locked
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -101,8 +104,16 @@ jobs:
           command: check
           arguments: --locked
 
+  # Release mode, and the signed-helper authentication path that only compiles with a team ID.
+  # `cargo test --release` builds every bin on the way to the integration tests, so a separate
+  # release `build` proved nothing the tests had not already proved, and a second clippy run in
+  # release mode found nothing the debug run above did not.
   macos-release-build:
     runs-on: macos-14
+    timeout-minutes: 30
+    concurrency:
+      group: release-build-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     env:
       RUCKSACK_TEAM_ID: CI00000000
     steps:
@@ -110,14 +121,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: 1.86.0
-          components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-
-      - name: Release clippy
-        run: cargo clippy --workspace --all-targets --release --locked -- -D warnings
 
       - name: Release tests
         run: cargo test --workspace --release --locked
-
-      - name: Release build
-        run: cargo build --workspace --release --locked

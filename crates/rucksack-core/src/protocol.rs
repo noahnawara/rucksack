@@ -26,9 +26,6 @@ pub enum HelperOperation {
         lease_id: Uuid,
         ttl_seconds: u64,
     },
-    Reassert {
-        lease_id: Uuid,
-    },
     Release {
         lease_id: Uuid,
         reason: String,
@@ -56,12 +53,14 @@ pub struct HelperStatus {
     /// and until this field existed neither end could tell — `helper status` reported "installed and
     /// idle" against a build from a different release.
     ///
-    /// It works today only because the wire format has not changed between versions. The first time
-    /// it does, a skew fails at parse with nothing to explain it, on the process that keeps a laptop
-    /// awake in a bag.
+    /// Adding and removing optional fields is survivable in both directions, and the test at the
+    /// bottom of this file is what keeps that true: serde reads a missing `Option` as `None` and
+    /// ignores fields it does not recognise. What is *not* survivable is a shape change — a field
+    /// changing type, or an operation being renamed — because both ends parse before they look at
+    /// `protocol`, so the version that was supposed to explain the skew is never reached.
     ///
-    /// `#[serde(default)]` so a CLI that knows about this field can still read a helper that predates
-    /// it — which is exactly the skew being detected, and it must not become a parse error.
+    /// `#[serde(default)]` is therefore belt-and-braces rather than load-bearing. It stays because
+    /// this is the field whose whole job is to survive meeting a stranger.
     #[serde(default)]
     pub version: Option<String>,
     pub active: bool,
@@ -73,7 +72,6 @@ pub struct HelperStatus {
     pub previous_sleep_disabled: Option<u8>,
     pub sleep_disabled: Option<u8>,
     pub reason: Option<String>,
-    pub last_reasserted_at: Option<DateTime<Utc>>,
 }
 
 impl HelperRequest {
@@ -109,5 +107,36 @@ impl HelperResponse {
             error: Some(error.into()),
             status,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A CLI and a helper from different releases have to survive meeting each other.
+    ///
+    /// `cargo install` replaces `~/.cargo/bin`; only `rucksack helper install` replaces the copy in
+    /// `/Library/PrivilegedHelperTools`. Skew is therefore the normal state between an update and
+    /// the next `helper install`, and it is resolved by a process holding a laptop awake in a bag.
+    ///
+    /// Both directions have to be non-fatal, and both are, for reasons worth pinning: serde reads a
+    /// missing `Option` field as `None` without needing `#[serde(default)]`, and ignores fields it
+    /// does not know about. So a helper may stop sending a field, and may start sending one, without
+    /// either end failing to parse. This test is what makes that a property rather than a memory.
+    #[test]
+    fn a_status_survives_meeting_a_different_release() {
+        // A newer helper that has stopped sending fields this build knows about.
+        let fewer = r#"{"protocol":2,"request_id":"00000000-0000-0000-0000-000000000000","ok":true,"status":{"active":false}}"#;
+        let parsed: HelperResponse = serde_json::from_str(fewer).expect("fewer fields still parse");
+        let status = parsed.status.expect("a status");
+        assert!(!status.active);
+        assert_eq!(status.lease_id, None);
+        assert_eq!(status.version, None);
+
+        // An older helper that still sends fields this build has dropped.
+        let more = r#"{"protocol":2,"request_id":"00000000-0000-0000-0000-000000000000","ok":true,"status":{"active":true,"last_reasserted_at":"2026-07-24T18:42:00Z","some_field_from_the_future":7}}"#;
+        let parsed: HelperResponse = serde_json::from_str(more).expect("extra fields still parse");
+        assert!(parsed.status.expect("a status").active);
     }
 }

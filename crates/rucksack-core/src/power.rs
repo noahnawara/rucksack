@@ -1,6 +1,5 @@
 use crate::system::{require_success, run_bounded_cleared, CommandResult};
 use anyhow::{anyhow, Result};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -21,7 +20,9 @@ pub struct PowerStatus {
     pub source: PowerSource,
     pub source_label: String,
     pub percent: Option<u8>,
-    pub charging: bool,
+    /// Whether the battery is actually draining, which is the only state in which
+    /// `minutes_to_empty` means what its name says.
+    pub discharging: bool,
     /// What macOS thinks is left before the battery is empty, when it is willing to say.
     ///
     /// Only ever read while discharging. The same field carries time-to-full while charging, and a
@@ -75,23 +76,24 @@ pub fn parse_battery(text: &str) -> Result<PowerStatus> {
         _ => PowerSource::Unknown,
     };
 
-    let percent_re = Regex::new(r"(?P<percent>\d{1,3})%")?;
-    let percent = percent_re
-        .captures(text)
-        .and_then(|captures| captures.name("percent"))
-        .and_then(|value| value.as_str().parse::<u8>().ok())
-        .filter(|value| *value <= 100);
-    let lower = text.to_ascii_lowercase();
-    let charging = lower.contains("charging")
-        && !lower.contains("not charging")
-        && !lower.contains("discharging");
+    let percent = parse_percent(text);
+    // Ask whether the battery is draining, not whether it is filling.
+    //
+    // The two are not opposites in `pmset`'s vocabulary, and the gap between them had a wrong answer
+    // in it. `charging && !"not charging" && !"discharging"` was three substring tests trying to
+    // spell one word, and it still missed `finishing charge` — the top-off state a plugged-in Mac
+    // sits in around 99% — because that string says "charge", not "charging". A Mac in it was read as
+    // not charging, so the `H:MM remaining` on that line, which means time-to-full, was reported as
+    // time-to-empty. `discharging` is the one state where that field means what rucksack wants, and
+    // `pmset` names it in one word.
+    let discharging = text.to_ascii_lowercase().contains("discharging");
 
     Ok(PowerStatus {
         source,
         source_label,
         percent,
-        charging,
-        minutes_to_empty: parse_minutes_to_empty(text, charging),
+        discharging,
+        minutes_to_empty: parse_minutes_to_empty(text, discharging),
         raw: text.to_owned(),
     })
 }
@@ -101,18 +103,60 @@ pub fn parse_battery(text: &str) -> Result<PowerStatus> {
 /// `pmset` prints `H:MM remaining` on the battery row, and `(no estimate)` while it is still working
 /// one out — which it also does for a minute or so after waking or after the load changes sharply.
 ///
-/// Read only while discharging, because the same field means time-to-full while charging. `0:00` is
+/// Read only while discharging, because the same field means time-to-full otherwise. `0:00` is
 /// how macOS spells "no estimate yet" rather than "empty now", so it is not an answer either.
-fn parse_minutes_to_empty(text: &str, charging: bool) -> Option<u64> {
-    if charging {
+fn parse_minutes_to_empty(text: &str, discharging: bool) -> Option<u64> {
+    if !discharging {
         return None;
     }
-    let remaining = Regex::new(r"(?P<hours>\d{1,2}):(?P<minutes>\d{2})\s+remaining").ok()?;
-    let captures = remaining.captures(text)?;
-    let hours = captures.name("hours")?.as_str().parse::<u64>().ok()?;
-    let minutes = captures.name("minutes")?.as_str().parse::<u64>().ok()?;
-    let total = hours.checked_mul(60)?.checked_add(minutes)?;
-    (total > 0).then_some(total)
+    for (at, _) in text.match_indices("remaining") {
+        let head = &text[..at];
+        // `\s+remaining`: the word has to be a word, not the tail of a longer one.
+        let before_space = head.trim_end_matches(char::is_whitespace);
+        if before_space.len() == head.len() {
+            continue;
+        }
+        let Some((hours, minutes)) = split_clock(before_space) else {
+            continue;
+        };
+        let total = hours.checked_mul(60)?.checked_add(minutes)?;
+        return (total > 0).then_some(total);
+    }
+    None
+}
+
+/// The `H:MM` at the end of `text`, if that is how it ends.
+fn split_clock(text: &str) -> Option<(u64, u64)> {
+    let head = text.trim_end_matches(|c: char| c.is_ascii_digit());
+    let minutes = &text[head.len()..];
+    if minutes.len() != 2 {
+        return None;
+    }
+    let head = head.strip_suffix(':')?;
+    let before = head.trim_end_matches(|c: char| c.is_ascii_digit());
+    let hours = &head[before.len()..];
+    if hours.is_empty() || hours.len() > 2 {
+        return None;
+    }
+    Some((hours.parse().ok()?, minutes.parse().ok()?))
+}
+
+/// The first `NN%` in `pmset`'s output, which is the charge.
+///
+/// Hand-written rather than `\d{1,3}%`, because that one pattern and the clock above were the whole
+/// reason the workspace compiled `regex` and its three dependencies on every `cargo install` — and
+/// both were being recompiled on every heartbeat, for the life of a twenty-four-hour lease.
+fn parse_percent(text: &str) -> Option<u8> {
+    for (at, _) in text.match_indices('%') {
+        let head = &text[..at];
+        let before = head.trim_end_matches(|c: char| c.is_ascii_digit());
+        let digits = &head[before.len()..];
+        if digits.is_empty() || digits.len() > 3 {
+            continue;
+        }
+        return digits.parse::<u8>().ok().filter(|value| *value <= 100);
+    }
+    None
 }
 
 /// Turn "minutes until empty" into "minutes until the floor", which is the figure rucksack reports.
@@ -246,7 +290,7 @@ mod tests {
         .unwrap();
         assert_eq!(status.source, PowerSource::Battery);
         assert_eq!(status.percent, Some(78));
-        assert!(!status.charging);
+        assert!(status.discharging);
     }
 
     /// The line this exists for, exactly as a discharging Mac prints it.
@@ -267,6 +311,52 @@ mod tests {
             "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t57%; charging; 1:23 remaining present: true",
         )
         .unwrap();
+        assert_eq!(status.minutes_to_empty, None);
+    }
+
+    /// The shapes the two hand-written parsers replaced a regex for.
+    ///
+    /// `\d{1,3}%` and `\d{1,2}:\d{2}\s+remaining` were doing more than they looked like: bounding the
+    /// digit runs, requiring whitespace before the word, and skipping a candidate that did not fit
+    /// rather than taking a wrong answer from it. Each of those is a line of code now, so each gets a
+    /// case.
+    #[test]
+    fn the_parsers_are_as_picky_as_the_patterns_were() {
+        // A digit run too long to be a percentage is not one.
+        assert_eq!(parse_percent("1234%"), None);
+        assert_eq!(parse_percent("no digits here %"), None);
+        assert_eq!(parse_percent("999%"), None); // parses, then fails the <= 100 filter
+        assert_eq!(
+            parse_percent(" -InternalBattery-0\t78%; discharging"),
+            Some(78)
+        );
+
+        // `remaining` has to be its own word, after a clock.
+        assert_eq!(split_clock("3:09"), Some((3, 9)));
+        assert_eq!(split_clock("13:09"), Some((13, 9)));
+        assert_eq!(split_clock("3:9"), None); // minutes are always two digits
+        assert_eq!(split_clock("309"), None);
+        assert_eq!(
+            parse_minutes_to_empty("57%; discharging; 3:09remaining", true),
+            None
+        );
+        assert_eq!(
+            parse_minutes_to_empty("57%; discharging; 0:00 remaining", true),
+            None
+        );
+    }
+
+    /// The top-off state, which says "charge" and not "charging".
+    ///
+    /// It is the one `pmset` word the old three-substring guard could not spell, so a Mac five
+    /// minutes from a full battery reported five minutes until it fell asleep.
+    #[test]
+    fn finishing_charge_is_not_time_left() {
+        let status = parse_battery(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t99%; finishing charge; 0:05 remaining present: true",
+        )
+        .unwrap();
+        assert!(!status.discharging);
         assert_eq!(status.minutes_to_empty, None);
     }
 

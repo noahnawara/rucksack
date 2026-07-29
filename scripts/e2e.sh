@@ -52,7 +52,12 @@ skip() { SKIPPED=$((SKIPPED + 1)); printf '  \033[33mskip\033[0m  %s\n' "$1"; }
 fail() {
     FAILED=$((FAILED + 1))
     printf '  \033[31mFAIL\033[0m  %s\n' "$1"
-    [ -n "${2:-}" ] && printf '%s\n' "$2" | /usr/bin/sed 's/^/          /'
+    # An `if`, not a `&&`: as a trailing `&&` this made the function's exit status depend on
+    # whether a detail argument was passed, so `fail "name"` returned 1 and `fail "name" "detail"`
+    # returned 0 — a difference no caller meant to express.
+    if [ -n "${2:-}" ]; then
+        printf '%s\n' "$2" | /usr/bin/sed 's/^/          /'
+    fi
 }
 check() { if [ "$1" = "0" ]; then ok "$2"; else fail "$2" "${3:-}"; fi; }
 contains() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
