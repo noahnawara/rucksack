@@ -52,6 +52,15 @@ jobs:
             exit 1
           fi
 
+      # The one moment SOURCE_MANIFEST.sha256 claims something, so the one moment it is checked.
+      #
+      # Deliberately not a pull-request gate: every change to any tracked file changes the manifest
+      # too, so gating there would make concurrent branches conflict in this file and nowhere else,
+      # and the conflict would always be resolved by regenerating it. Here it is free, and it is
+      # what stops a release from shipping a tree its own record of the bytes disagrees with.
+      - name: Check the source manifest describes this tree
+        run: scripts/manifest.sh --check
+
       - name: Validate release candidate
         env:
           RUCKSACK_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}

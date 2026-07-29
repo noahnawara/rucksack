@@ -25,6 +25,7 @@ Counts include repository dotfiles and exclude `.git`, `target`, `site/node_modu
 The current tree passes:
 
 ```sh
+scripts/manifest.sh --check
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked

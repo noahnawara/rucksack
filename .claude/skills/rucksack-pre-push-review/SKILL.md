@@ -262,8 +262,8 @@ The Rust lens and the dependability rules still apply to helper code this diff t
 | Marketing surface | `site/` |
 
 `rucksack-core` is privilege-free but not side-effect-free. It owns every subprocess
-(`crates/rucksack-core/src/system.rs:61`), the `reqwest` probe
-(`crates/rucksack-core/src/network.rs:302`), and all mutation of the user's agent config
+(`crates/rucksack-core/src/system.rs:61`), the captive-network probe, which is `curl` through that
+same bounded runner (`crates/rucksack-core/src/network.rs:247`), and all mutation of the user's agent config
 (`crates/rucksack-core/src/agent/json_hooks.rs:119`). Judge a new core side effect on whether it
 is bounded, cleared-environment, and reversible, not on whether it is a side effect at all.
 Privilege-free work landing in `rucksack-helper` is worth one finding.
@@ -319,9 +319,11 @@ actually run, on which macOS and hardware. Never suggest a closed-lid test insid
 bag; require a ventilated desk and a short lease.
 
 `VALIDATION.md` records the source inventory and the checks that passed. `SOURCE_MANIFEST.sha256`
-covers only the crate, docs, assets, scripts, and root-config tree; it excludes `site/**`,
-`INSTALL.md`, `documentation/**`, and `.agents/**`. Both take the project route. Regenerate them
-when a covered file is added, removed, or changed.
+covers every tracked file — it used to read its own path list back out of itself, so it described
+only what was already in it and never learned about the website or `INSTALL.md`. Both take the
+project route. Regenerate the manifest with `scripts/manifest.sh --write`, which is also what
+`scripts/set-version.sh` calls; `scripts/manifest.sh --check` fails on a file it does not describe
+as loudly as on one whose bytes moved, and gates the release workflow.
 
 ## Finding standard
 
