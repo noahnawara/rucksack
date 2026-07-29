@@ -1606,7 +1606,6 @@ mod tests {
             previous_sleep_disabled: None,
             sleep_disabled: Some(u8::from(active)),
             reason: None,
-            last_reasserted_at: None,
         }
     }
 

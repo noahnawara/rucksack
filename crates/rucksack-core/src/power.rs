@@ -1,6 +1,5 @@
 use crate::system::{require_success, run_bounded_cleared, CommandResult};
 use anyhow::{anyhow, Result};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -77,12 +76,7 @@ pub fn parse_battery(text: &str) -> Result<PowerStatus> {
         _ => PowerSource::Unknown,
     };
 
-    let percent_re = Regex::new(r"(?P<percent>\d{1,3})%")?;
-    let percent = percent_re
-        .captures(text)
-        .and_then(|captures| captures.name("percent"))
-        .and_then(|value| value.as_str().parse::<u8>().ok())
-        .filter(|value| *value <= 100);
+    let percent = parse_percent(text);
     // Ask whether the battery is draining, not whether it is filling.
     //
     // The two are not opposites in `pmset`'s vocabulary, and the gap between them had a wrong answer
@@ -115,12 +109,54 @@ fn parse_minutes_to_empty(text: &str, discharging: bool) -> Option<u64> {
     if !discharging {
         return None;
     }
-    let remaining = Regex::new(r"(?P<hours>\d{1,2}):(?P<minutes>\d{2})\s+remaining").ok()?;
-    let captures = remaining.captures(text)?;
-    let hours = captures.name("hours")?.as_str().parse::<u64>().ok()?;
-    let minutes = captures.name("minutes")?.as_str().parse::<u64>().ok()?;
-    let total = hours.checked_mul(60)?.checked_add(minutes)?;
-    (total > 0).then_some(total)
+    for (at, _) in text.match_indices("remaining") {
+        let head = &text[..at];
+        // `\s+remaining`: the word has to be a word, not the tail of a longer one.
+        let before_space = head.trim_end_matches(char::is_whitespace);
+        if before_space.len() == head.len() {
+            continue;
+        }
+        let Some((hours, minutes)) = split_clock(before_space) else {
+            continue;
+        };
+        let total = hours.checked_mul(60)?.checked_add(minutes)?;
+        return (total > 0).then_some(total);
+    }
+    None
+}
+
+/// The `H:MM` at the end of `text`, if that is how it ends.
+fn split_clock(text: &str) -> Option<(u64, u64)> {
+    let head = text.trim_end_matches(|c: char| c.is_ascii_digit());
+    let minutes = &text[head.len()..];
+    if minutes.len() != 2 {
+        return None;
+    }
+    let head = head.strip_suffix(':')?;
+    let before = head.trim_end_matches(|c: char| c.is_ascii_digit());
+    let hours = &head[before.len()..];
+    if hours.is_empty() || hours.len() > 2 {
+        return None;
+    }
+    Some((hours.parse().ok()?, minutes.parse().ok()?))
+}
+
+/// The first `NN%` in `pmset`'s output, which is the charge.
+///
+/// Hand-written rather than `\d{1,3}%`, because that one pattern and the clock above were the whole
+/// reason the workspace compiled `regex` and its three dependencies on every `cargo install` — and
+/// both were being recompiled on every heartbeat, for the life of a twenty-four-hour lease.
+fn parse_percent(text: &str) -> Option<u8> {
+    for (at, _) in text.match_indices('%') {
+        let head = &text[..at];
+        let before = head.trim_end_matches(|c: char| c.is_ascii_digit());
+        let digits = &head[before.len()..];
+        if digits.is_empty() || digits.len() > 3 {
+            continue;
+        }
+        return digits.parse::<u8>().ok().filter(|value| *value <= 100);
+    }
+    None
 }
 
 /// Turn "minutes until empty" into "minutes until the floor", which is the figure rucksack reports.
@@ -276,6 +312,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(status.minutes_to_empty, None);
+    }
+
+    /// The shapes the two hand-written parsers replaced a regex for.
+    ///
+    /// `\d{1,3}%` and `\d{1,2}:\d{2}\s+remaining` were doing more than they looked like: bounding the
+    /// digit runs, requiring whitespace before the word, and skipping a candidate that did not fit
+    /// rather than taking a wrong answer from it. Each of those is a line of code now, so each gets a
+    /// case.
+    #[test]
+    fn the_parsers_are_as_picky_as_the_patterns_were() {
+        // A digit run too long to be a percentage is not one.
+        assert_eq!(parse_percent("1234%"), None);
+        assert_eq!(parse_percent("no digits here %"), None);
+        assert_eq!(parse_percent("999%"), None); // parses, then fails the <= 100 filter
+        assert_eq!(
+            parse_percent(" -InternalBattery-0\t78%; discharging"),
+            Some(78)
+        );
+
+        // `remaining` has to be its own word, after a clock.
+        assert_eq!(split_clock("3:09"), Some((3, 9)));
+        assert_eq!(split_clock("13:09"), Some((13, 9)));
+        assert_eq!(split_clock("3:9"), None); // minutes are always two digits
+        assert_eq!(split_clock("309"), None);
+        assert_eq!(
+            parse_minutes_to_empty("57%; discharging; 3:09remaining", true),
+            None
+        );
+        assert_eq!(
+            parse_minutes_to_empty("57%; discharging; 0:00 remaining", true),
+            None
+        );
     }
 
     /// The top-off state, which says "charge" and not "charging".

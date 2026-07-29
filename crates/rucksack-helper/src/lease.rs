@@ -28,7 +28,6 @@ struct PersistedLease {
     hard_expires_at: DateTime<Utc>,
     previous_sleep_disabled: u8,
     reason: String,
-    last_reasserted_at: Option<DateTime<Utc>>,
 }
 
 enum PersistedState {
@@ -141,10 +140,9 @@ impl LeaseManager {
         if self.restore_if_deadline_elapsed()? {
             anyhow::bail!("the lease deadline elapsed during power-source recovery");
         }
-        if let Some(lease) = self.lease.as_mut() {
-            lease.last_reasserted_at = Some(Utc::now());
-        }
-        self.persist()
+        // Nothing to write: this path changes no part of the lease. It used to persist here only to
+        // record a `last_reasserted_at` nothing ever read back.
+        Ok(())
     }
 
     pub fn status(&self) -> Result<HelperStatus> {
@@ -161,7 +159,6 @@ impl LeaseManager {
                 previous_sleep_disabled: Some(lease.previous_sleep_disabled),
                 sleep_disabled: observed,
                 reason: Some(lease.reason.clone()),
-                last_reasserted_at: lease.last_reasserted_at,
             },
             None => HelperStatus {
                 version: Some(env!("CARGO_PKG_VERSION").to_owned()),
@@ -174,7 +171,6 @@ impl LeaseManager {
                 previous_sleep_disabled: None,
                 sleep_disabled: observed,
                 reason: None,
-                last_reasserted_at: None,
             },
         })
     }
@@ -225,7 +221,6 @@ impl LeaseManager {
             hard_expires_at,
             previous_sleep_disabled: previous,
             reason,
-            last_reasserted_at: None,
         });
 
         // Persist the rollback target before changing the global power setting.
@@ -256,9 +251,6 @@ impl LeaseManager {
         }
         if self.restore_if_deadline_elapsed()? {
             anyhow::bail!("the lease deadline elapsed during acquisition");
-        }
-        if let Some(lease) = self.lease.as_mut() {
-            lease.last_reasserted_at = Some(Utc::now());
         }
         self.persist()?;
         self.status()
@@ -298,9 +290,6 @@ impl LeaseManager {
         verify_sleep_disabled(1)?;
         if self.restore_if_deadline_elapsed()? {
             anyhow::bail!("the lease deadline elapsed while reasserting");
-        }
-        if let Some(lease) = self.lease.as_mut() {
-            lease.last_reasserted_at = Some(Utc::now());
         }
         self.persist()
     }
@@ -536,7 +525,6 @@ mod tests {
             hard_expires_at: created_at + ChronoDuration::hours(1),
             previous_sleep_disabled,
             reason: "test lease".to_owned(),
-            last_reasserted_at: None,
         }
     }
 

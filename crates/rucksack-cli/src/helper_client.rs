@@ -141,7 +141,6 @@ mod tests {
             previous_sleep_disabled: None,
             sleep_disabled: Some(0),
             reason: None,
-            last_reasserted_at: None,
         }
     }
 
