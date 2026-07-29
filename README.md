@@ -77,9 +77,15 @@ $ rucksack pack
 
 Connecting to Noah…
 Joined.
-Awake for 24 hours, or until the battery hits 10%. Ends 09:14 tomorrow.
+Battery 92%. About 7h 8m before it reaches 10%, when this Mac sleeps and running work stops.
+Agents get 10 minutes' notice to write down where they got to.
 Packed. Close the lid and go.
 ```
+
+The hours are the battery's, not the lease's. A session is capped at 24 hours, but almost no Mac
+has 24 hours of charge in a bag, so `pack` reports whichever runs out first — and on a commute
+that is the battery. Ten minutes before the end, `rucksack status` starts telling any agent that
+asks to stop starting new work and write down where it got to.
 
 If macOS cannot join the hotspot itself — the normal case for Apple Instant Hotspot —
 rucksack opens Wi-Fi settings, says what to pick, and waits:

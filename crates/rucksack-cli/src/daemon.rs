@@ -11,7 +11,10 @@ use rucksack_core::network::{
 use rucksack_core::power::{
     minutes_until_floor, read_power_status, read_thermal_status, PowerSource,
 };
-use rucksack_core::state::{silence_tolerance, SessionPhase, SessionState};
+use rucksack_core::state::{
+    silence_tolerance, SessionPhase, SessionState, CHECKPOINT_CLEAR_MINUTES,
+    CHECKPOINT_LEAD_MINUTES,
+};
 use rucksack_core::{AppPaths, Config};
 use std::thread;
 use std::time::Duration;
@@ -72,6 +75,14 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
 
         let observed = observe(config, &health, session.hotspot.is_none());
         traffic = traffic.advance(observed.route_interface.as_deref(), observed.traffic_total);
+        let remaining = minutes_remaining(
+            session.remaining_minutes(Utc::now()),
+            battery_minutes_remaining,
+        );
+        let ending_soon = remaining <= CHECKPOINT_LEAD_MINUTES;
+        let reprieved = remaining > CHECKPOINT_CLEAR_MINUTES;
+        let announcing = ending_soon && session.checkpoint_requested_at.is_none();
+        let calling_off = reprieved && session.checkpoint_requested_at.is_some();
         SessionState::update(paths, session_id, |session| {
             session.last_heartbeat_at = Some(Utc::now());
             session.battery_percent = observed.battery_percent;
@@ -90,7 +101,25 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
                 );
             }
             session.online = observed.online;
+            // Last, so the one event that asks the reader to *do* something is not overwritten by a
+            // tunnel in the same heartbeat.
+            if ending_soon && session.checkpoint_requested_at.is_none() {
+                session.checkpoint_requested_at = Some(Utc::now());
+                session.last_event = Some(
+                    "winding down; write down where you got to before this Mac sleeps".to_owned(),
+                );
+            } else if reprieved && session.checkpoint_requested_at.is_some() {
+                session.checkpoint_requested_at = None;
+                session.last_event =
+                    Some("the end moved back; this Mac is not sleeping soon".to_owned());
+            }
         })?;
+        if announcing {
+            log(paths, "winding down; checkpoint requested")?;
+        }
+        if calling_off {
+            log(paths, "wind-down called off; the end moved back")?;
+        }
 
         thread::sleep(Duration::from_secs(config.session.heartbeat_seconds));
     }
@@ -154,6 +183,18 @@ fn battery_minutes_remaining(drain: &Drain, health: &Health, floor_percent: u8) 
         health.battery_percent?,
         floor_percent,
     )
+}
+
+/// How long this session has left, from the watcher's own readings rather than the session file.
+///
+/// The same "whichever binds first" rule `status` applies, but asked of figures measured moments ago
+/// instead of ones read back off disk. The watcher needs no staleness check because it is the thing
+/// whose freshness `status` was checking.
+///
+/// An unmeasured battery leaves the lease clock in charge, which is the honest answer rather than a
+/// cautious one: nothing has been observed that says the battery ends this sooner.
+fn minutes_remaining(lease_minutes: u64, battery_minutes: Option<u64>) -> u64 {
+    battery_minutes.map_or(lease_minutes, |battery| battery.min(lease_minutes))
 }
 
 /// The only reasons a host lease ends by itself.
@@ -501,6 +542,58 @@ mod tests {
             reason(&live, hot, 0).as_deref(),
             Some("this Mac got too hot")
         );
+    }
+
+    /// The commute case: a day of lease left, an hour of charge, so the hour is what is left.
+    #[test]
+    fn the_shorter_of_the_two_limits_is_what_remains() {
+        assert_eq!(minutes_remaining(1_440, Some(59)), 59);
+    }
+
+    /// A short trip on a full battery is bounded by what the user asked for.
+    #[test]
+    fn a_long_battery_does_not_extend_a_short_lease() {
+        assert_eq!(minutes_remaining(60, Some(400)), 60);
+    }
+
+    /// Nothing measured is not the same as nothing left. Treating an unmeasured battery as zero
+    /// would announce a wind-down on every session that starts on mains power.
+    #[test]
+    fn an_unmeasured_battery_leaves_the_lease_in_charge() {
+        assert_eq!(minutes_remaining(1_440, None), 1_440);
+    }
+
+    /// The threshold `pack` promises and the watcher delivers are the same number, so a session that
+    /// was told it gets ten minutes' notice gets ten minutes' notice.
+    #[test]
+    fn the_warning_fires_at_the_lead_pack_promised() {
+        assert!(minutes_remaining(1_440, Some(CHECKPOINT_LEAD_MINUTES)) <= CHECKPOINT_LEAD_MINUTES);
+        assert!(
+            minutes_remaining(1_440, Some(CHECKPOINT_LEAD_MINUTES + 1)) > CHECKPOINT_LEAD_MINUTES
+        );
+    }
+
+    /// Plugging in on the train is the case the warning has to be able to take back.
+    ///
+    /// Both battery sources go quiet on mains power, so the lease clock takes over and what is left
+    /// jumps to hours. Without this, `status` would go on saying the Mac sleeps soon for the rest of
+    /// a session spent on a charger.
+    #[test]
+    fn mains_power_clears_the_projection_and_reprieves_the_session() {
+        let charged = minutes_remaining(1_440, None);
+
+        assert!(charged > CHECKPOINT_CLEAR_MINUTES);
+        assert!(charged > CHECKPOINT_LEAD_MINUTES);
+    }
+
+    /// A projection wobbling either side of the lead must not retract a deadline every heartbeat,
+    /// so the way back is deliberately further out than the way in.
+    #[test]
+    fn a_wobble_over_the_lead_does_not_call_the_warning_off() {
+        let wobble = minutes_remaining(1_440, Some(CHECKPOINT_LEAD_MINUTES + 1));
+
+        assert!(wobble > CHECKPOINT_LEAD_MINUTES);
+        assert!(wobble <= CHECKPOINT_CLEAR_MINUTES);
     }
 
     fn at(minute: i64) -> chrono::DateTime<Utc> {

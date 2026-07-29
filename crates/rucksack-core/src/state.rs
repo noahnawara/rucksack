@@ -23,6 +23,31 @@ pub const SILENT_HEARTBEATS: u64 = 3;
 /// The longest silence that can still be a running watcher, whatever the heartbeat is set to.
 const MAX_SILENCE_SECONDS: u64 = 3600;
 
+/// How long before the end the watcher starts saying the end is coming.
+///
+/// The lease ending is the moment every running task stops, and until now the only warning was the
+/// silence afterwards. Ten minutes is chosen against what the warning is *for*: an agent has to
+/// notice it, finish or abandon the step it is on, and write down where it got to. A minute does not
+/// cover a compile; an hour spends most of the session telling someone to wrap up work they could
+/// still have been doing.
+///
+/// Shared rather than owned by the watcher, because `pack` promises this notice in advance and the
+/// watcher delivers it. Two copies of the number is one broken promise waiting to happen.
+pub const CHECKPOINT_LEAD_MINUTES: u64 = 10;
+
+/// How far the end must recede before a wind-down is called off.
+///
+/// Twice the lead, because the two ways back over the line are not alike. A projection that wobbles
+/// a minute either side of the threshold is noise, and retracting a deadline for it would have an
+/// agent put its work down and pick it up again every heartbeat.
+///
+/// Plugging in on the train is not noise. Both battery sources go quiet on mains power — macOS
+/// stops reporting time-to-empty, and a rising gauge clears the measured drops — so the lease clock
+/// takes over and what is left jumps to hours. Without a way back, `status` would go on saying this
+/// Mac sleeps soon for the rest of a session spent on a charger, which is exactly the unmeasured
+/// claim the projection exists to avoid.
+pub const CHECKPOINT_CLEAR_MINUTES: u64 = CHECKPOINT_LEAD_MINUTES * 2;
+
 /// How long a session may go quiet before its recorded figures stop being current.
 pub fn silence_tolerance(heartbeat_seconds: u64) -> Duration {
     Duration::seconds(
@@ -92,6 +117,17 @@ pub struct SessionState {
     /// strand a session that was already running when the user upgraded.
     #[serde(default)]
     pub battery_minutes_remaining: Option<u64>,
+    /// When the watcher first saw the end coming close enough to be worth announcing.
+    ///
+    /// Sticky rather than a gauge, and asymmetric on purpose: set at `CHECKPOINT_LEAD_MINUTES` and
+    /// cleared only past `CHECKPOINT_CLEAR_MINUTES`. A projection wobbling either side of the
+    /// threshold must not retract a deadline an agent has already started packing up for, but a Mac
+    /// that has been plugged in genuinely is not ending soon, and saying otherwise would be a state
+    /// nobody measured.
+    ///
+    /// `#[serde(default)]` for the same reason as the fields above it.
+    #[serde(default)]
+    pub checkpoint_requested_at: Option<DateTime<Utc>>,
 }
 
 impl SessionState {
@@ -115,6 +151,7 @@ impl SessionState {
             started_battery_percent: None,
             bytes_moved: None,
             battery_minutes_remaining: None,
+            checkpoint_requested_at: None,
         }
     }
 

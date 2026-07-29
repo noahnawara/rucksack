@@ -34,6 +34,34 @@ Be easy-going. This is a two-second command, not a project.
 
 Only bother the user when the command actually fails, and then give them the one line it printed.
 
+## Winding down
+
+About ten minutes before the Mac sleeps, `rucksack status` starts printing:
+
+```text
+! Winding down. This Mac sleeps soon, and everything running stops with it.
+Write down where you got to. Plugging in calls this off.
+```
+
+That is a deadline, not a status. The Mac is about to sleep, and when it does every running task
+stops mid-step — no shutdown signal, no chance to finish the thought. Whatever is only in this
+conversation is lost.
+
+When you see it:
+
+1. **Stop starting new work.** Do not begin a step you cannot finish in a few minutes.
+2. **Write the state down somewhere on disk.** Commit, or write a short note in the repository
+   saying what you were doing, what you had decided, and what the next step is. A file survives the
+   sleep; your context does not.
+3. **Tell the user in one line** what you saved and where.
+
+Do not run `rucksack unpack` to buy time — that puts the Mac to sleep immediately, which is the
+opposite of what is wanted. Do not run `rucksack pack` again either; the session is already running
+and the battery is the thing that is short, not the lease.
+
+If the user is reachable and the work genuinely needs more time, say so plainly: the fix is mains
+power, and it is theirs to plug in.
+
 ## Switching the network yourself
 
 Do this only if you can screenshot and click this Mac's screen. If you cannot, skip the whole
