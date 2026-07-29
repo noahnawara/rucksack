@@ -28,6 +28,10 @@
   --error: #ff9f80;
   --gutter: clamp(1.1rem, 4vw, 3.5rem);
   --shell: 70rem;
+  --mono:
+    "Doto Variable",
+    "SFMono-Regular",
+    monospace;
 }
 
 *,
@@ -93,7 +97,10 @@ svg {
   margin-inline: auto;
 }
 
-.visually-hidden {
+/* One hiding mechanism, used by both. `.copy-status` carried a byte-for-byte copy of these seven
+   declarations, and then spent six of its eleven error-state lines undoing them again. */
+.visually-hidden,
+.copy-status:not([data-state="error"]) {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -165,10 +172,7 @@ svg {
   justify-content: flex-end;
   gap: 0.35rem;
   color: var(--muted);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -261,10 +265,7 @@ h1 {
 
 .pass-state {
   color: var(--acid);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.045em;
@@ -305,10 +306,7 @@ h1 {
   align-items: center;
   gap: 0.5rem;
   color: var(--ink);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.035em;
@@ -414,24 +412,8 @@ h1 {
   transform: rotate(-5deg) scale(0.92);
 }
 
-.copy-status {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .copy-status[data-state="error"] {
-  position: static;
-  width: auto;
-  height: auto;
   margin-block-start: 0.75rem;
-  overflow: visible;
-  clip: auto;
-  clip-path: none;
   color: var(--error);
   font-size: 0.78rem;
   line-height: 1.45;
@@ -477,10 +459,7 @@ h1 {
   padding: 1rem;
   background: var(--pass);
   color: var(--ink);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.75rem;
   line-height: 1.6;
   overflow-wrap: anywhere;
@@ -494,11 +473,17 @@ h1 {
   padding-block: 9rem 10.5rem;
 }
 
-.setup-copy {
+/* Three chapters, one heading style. A max-width was the only thing that ever differed between
+   them, so it is the only thing said twice. */
+.setup-copy,
+.proof-copy,
+.answers-copy {
   max-width: 31rem;
 }
 
-.setup-copy h2 {
+.setup-copy h2,
+.proof-copy h2,
+.answers-copy h2 {
   max-width: 13ch;
   font-size: clamp(1.65rem, 7vw, 2rem);
   font-weight: 700;
@@ -507,13 +492,23 @@ h1 {
   text-wrap: balance;
 }
 
-.setup-copy p {
+.answers-copy h2 {
+  max-width: 15ch;
+}
+
+.setup-copy p,
+.proof-copy p,
+.answers-copy p {
   max-width: 28rem;
   margin-block-start: 0.9rem;
   color: var(--muted);
   font-size: 0.95rem;
   line-height: 1.45;
   text-wrap: pretty;
+}
+
+.proof-copy p {
+  max-width: 26rem;
 }
 
 .setup-paths {
@@ -529,10 +524,7 @@ h1 {
 
 .setup-path dt {
   color: var(--muted);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.045em;
@@ -582,39 +574,14 @@ h1 {
   padding-block: 10rem;
 }
 
-.proof-copy {
-  max-width: 31rem;
-}
-
 .section-label {
   display: block;
   margin-block-end: 0.9rem;
   color: var(--acid);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.045em;
-}
-
-.proof-copy h2 {
-  max-width: 13ch;
-  font-size: clamp(1.65rem, 7vw, 2rem);
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  line-height: 1.2;
-  text-wrap: balance;
-}
-
-.proof-copy p {
-  max-width: 26rem;
-  margin-block-start: 0.9rem;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.45;
-  text-wrap: pretty;
 }
 
 .proof-details {
@@ -639,10 +606,7 @@ h1 {
 
 .proof-list span {
   color: var(--muted);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.045em;
@@ -682,28 +646,6 @@ h1 {
   padding-block: 10rem;
 }
 
-.answers-copy {
-  max-width: 31rem;
-}
-
-.answers-copy h2 {
-  max-width: 15ch;
-  font-size: clamp(1.65rem, 7vw, 2rem);
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  line-height: 1.2;
-  text-wrap: balance;
-}
-
-.answers-copy p {
-  max-width: 28rem;
-  margin-block-start: 0.9rem;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.45;
-  text-wrap: pretty;
-}
-
 .answer-list {
   display: grid;
   align-content: start;
@@ -732,10 +674,7 @@ h1 {
 
 .answer code {
   color: #d5d8cc;
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.94em;
   font-weight: 700;
 }
@@ -767,10 +706,7 @@ h1 {
   min-height: 2.75rem;
   align-content: center;
   color: var(--muted);
-  font-family:
-    "Doto Variable",
-    "SFMono-Regular",
-    monospace;
+  font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.035em;
@@ -891,7 +827,9 @@ h1 {
     padding-block: 13rem 14.5rem;
   }
 
-  .setup-copy h2 {
+  .setup-copy h2,
+  .proof-copy h2,
+  .answers-copy h2 {
     font-size: 2.25rem;
   }
 
@@ -902,11 +840,6 @@ h1 {
   .handoff-proof-inner {
     align-items: start;
     padding-block: 13.5rem;
-  }
-
-  .proof-copy h2,
-  .answers-copy h2 {
-    font-size: 2.25rem;
   }
 
   .handoff-answers {

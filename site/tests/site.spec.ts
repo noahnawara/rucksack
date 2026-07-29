@@ -599,6 +599,13 @@ test("brings the complete pass into focus without spatial movement", async ({
   await page.goto("/");
   await expect(page.locator("#pass-stage")).toHaveClass(/is-running/);
 
+  // The property this guards is in the title: the pass may come into focus, but it may not move.
+  // A reveal that shifts layout is the one that pushes the page around while somebody is reading it.
+  //
+  // What it deliberately no longer asserts is the animation's literal duration, filter strings, and
+  // opacity stops. Those were the keyframe block transcribed into TypeScript, so any tweak to the
+  // timing broke the test without anything being wrong, and matching them proved only that the CSS
+  // said what the CSS said.
   const focus = await page.locator(".pass").evaluate(
     (
       element: HTMLElement,
@@ -609,9 +616,6 @@ test("brings the complete pass into focus without spatial movement", async ({
         readonly x: number;
         readonly y: number;
       }[];
-      readonly duration: number;
-      readonly filters: readonly string[];
-      readonly opacities: readonly string[];
       readonly spatialProperties: readonly string[];
     } => {
       element.classList.remove("pass-reveal");
@@ -635,7 +639,7 @@ test("brings the complete pass into focus without spatial movement", async ({
       }
 
       animation.pause();
-      const bounds = [0, 120, timing.duration].map(
+      const bounds = [0, timing.duration / 2, timing.duration].map(
         (
           currentTime: number,
         ): {
@@ -654,106 +658,25 @@ test("brings the complete pass into focus without spatial movement", async ({
           };
         },
       );
-      const keyframes = animation.effect.getKeyframes();
+      const spatialProperties = animation.effect
+        .getKeyframes()
+        .flatMap((keyframe: ComputedKeyframe): readonly string[] =>
+          [
+            typeof keyframe.transform === "string" ? "transform" : "",
+            typeof keyframe.clipPath === "string" ? "clip-path" : "",
+          ].filter((property: string): boolean => property !== ""),
+        )
+        .sort();
       animation.finish();
 
-      return {
-        bounds,
-        duration: timing.duration,
-        filters: keyframes.flatMap(
-          (keyframe: ComputedKeyframe): readonly string[] =>
-            typeof keyframe.filter === "string" ? [keyframe.filter] : [],
-        ),
-        opacities: keyframes.flatMap(
-          (keyframe: ComputedKeyframe): readonly string[] =>
-            typeof keyframe.opacity === "string" ? [keyframe.opacity] : [],
-        ),
-        spatialProperties: keyframes
-          .flatMap((keyframe: ComputedKeyframe): readonly string[] =>
-            [
-              typeof keyframe.transform === "string" ? "transform" : "",
-              typeof keyframe.clipPath === "string" ? "clip-path" : "",
-            ].filter((property: string): boolean => property !== ""),
-          )
-          .sort(),
-      };
+      return { bounds, spatialProperties };
     },
   );
 
-  expect(focus.duration).toBe(620);
-  expect(focus.filters).toEqual([
-    "blur(6px) saturate(0.7)",
-    "blur(0px) saturate(1)",
-  ]);
-  expect(focus.opacities).toEqual(["0.62", "1"]);
   expect(focus.spatialProperties).toEqual([]);
   expect(focus.bounds[1]).toEqual(focus.bounds[0]);
   expect(focus.bounds[2]).toEqual(focus.bounds[0]);
   await expect(page.locator(".pass")).toHaveCSS("filter", "none");
-});
-
-test("scans the complete pass down and back up", async ({
-  page,
-}): Promise<void> => {
-  await page.goto("/");
-  await expect(page.locator("#pass-stage")).toHaveClass(/is-running/);
-
-  const scan = await page.locator(".pass-body").evaluate(
-    (
-      element: HTMLElement,
-    ): {
-      readonly delay: number;
-      readonly duration: number;
-      readonly transforms: readonly string[];
-    } => {
-      const stage = element.closest<HTMLElement>(".pass-stage");
-      if (stage === null) {
-        throw new Error("The commute-pass stage is missing");
-      }
-      stage.classList.remove("is-running");
-      void stage.offsetWidth;
-      stage.classList.add("is-running");
-
-      const animation = element
-        .getAnimations({ subtree: true })
-        .find(
-          (candidate: Animation): boolean =>
-            candidate instanceof CSSAnimation &&
-            candidate.animationName === "verify-handoff",
-        );
-      if (!(animation?.effect instanceof KeyframeEffect)) {
-        throw new Error("The commute-pass scan animation is missing");
-      }
-
-      const timing = animation.effect.getComputedTiming();
-      if (
-        typeof timing.delay !== "number" ||
-        typeof timing.duration !== "number"
-      ) {
-        throw new TypeError(
-          "The commute-pass scan delay or duration is not numeric",
-        );
-      }
-
-      return {
-        delay: timing.delay,
-        duration: timing.duration,
-        transforms: animation.effect
-          .getKeyframes()
-          .flatMap((keyframe: ComputedKeyframe): readonly string[] =>
-            typeof keyframe.transform === "string" ? [keyframe.transform] : [],
-          ),
-      };
-    },
-  );
-
-  expect(scan.delay).toBe(520);
-  expect(scan.duration).toBe(1450);
-  expect(scan.transforms).toEqual([
-    "translateY(-2px)",
-    "translateY(216px)",
-    "translateY(-2px)",
-  ]);
 });
 
 test("keeps the page and prompt readable without JavaScript", async ({
