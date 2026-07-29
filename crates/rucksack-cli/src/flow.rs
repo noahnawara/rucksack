@@ -10,8 +10,12 @@ use rucksack_core::network::{
     connect_saved_wifi, reaches_internet, read_default_route, read_iphone_usb_device,
     read_wifi_status, set_wifi_power, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
 };
-use rucksack_core::power::{read_power_status, read_sleep_disabled, read_thermal_status};
-use rucksack_core::state::{silence_tolerance, Limit, SessionState, SILENT_HEARTBEATS};
+use rucksack_core::power::{
+    minutes_until_floor, read_power_status, read_sleep_disabled, read_thermal_status, PowerStatus,
+};
+use rucksack_core::state::{
+    silence_tolerance, Limit, SessionState, CHECKPOINT_LEAD_MINUTES, SILENT_HEARTBEATS,
+};
 use rucksack_core::system::{processes, run, ProcessInfo};
 use rucksack_core::{codex, skill, AdaptersConfig, AppPaths, Config};
 use std::fs::OpenOptions;
@@ -117,8 +121,8 @@ fn pack_inner(
     let mut session = SessionState::new(lease_id, started_at, expires_at);
     session.hotspot = network.ssid;
     session.route_interface = network.route.interface;
-    session.battery_percent = battery;
-    session.started_battery_percent = battery;
+    session.battery_percent = battery.percent;
+    session.started_battery_percent = battery.percent;
     session.save(paths)?;
     cleanup.session = true;
 
@@ -136,11 +140,18 @@ fn pack_inner(
         );
     }
 
-    output.step(format!(
-        "Awake for {}, or until the battery hits {}%. Ends {}.",
-        format_duration(config.session.duration_minutes),
+    output.step(opening_line(
+        &battery,
+        opening_limit(
+            config.session.duration_minutes,
+            &battery,
+            config.safety.sleep_battery_percent,
+        ),
         config.safety.sleep_battery_percent,
-        format_deadline(expires_at)
+        expires_at,
+    ));
+    output.step(format!(
+        "Agents get {CHECKPOINT_LEAD_MINUTES} minutes' notice to write down where they got to."
     ));
     output.done("Packed. Close the lid and go.");
     Ok(())
@@ -177,7 +188,11 @@ fn require_normal_sleep() -> Result<()> {
 /// A Mac that is already at the floor would sleep the moment the lid closed.
 ///
 /// A silent battery gauge is not a reason to refuse: plenty of Macs report nothing on AC power.
-fn require_enough_battery(config: &Config, output: &Output) -> Result<Option<u8>> {
+///
+/// Returns the whole reading rather than just the percentage, because `pack`'s closing line needs
+/// macOS's own time-to-empty as well — and reading the gauge twice a second apart could report two
+/// different batteries.
+fn require_enough_battery(config: &Config, output: &Output) -> Result<PowerStatus> {
     let power = read_power_status().context("Could not read the battery.")?;
     if let Some(percent) = power.percent {
         if percent <= config.safety.sleep_battery_percent {
@@ -193,7 +208,58 @@ fn require_enough_battery(config: &Config, output: &Output) -> Result<Option<u8>
             ));
         }
     }
-    Ok(power.percent)
+    Ok(power)
+}
+
+/// What actually ends this session, asked at the moment it starts.
+///
+/// `pack` used to print the configured ceiling and the floor percentage: a duration chosen months
+/// ago and a threshold, neither of which answers "how long have I got?". On a commute the battery is
+/// nearly always the shorter of the two, so quoting the lease alone told someone they had a day when
+/// they had an afternoon — and they closed the lid on that.
+///
+/// rucksack's own drain model cannot help here; it needs three heartbeats before it can name a rate,
+/// and this is second zero. macOS has an estimate already, which is what makes a real number
+/// possible at the only moment anybody is deciding whether to walk away from the machine.
+fn opening_limit(lease_minutes: u64, power: &PowerStatus, floor_percent: u8) -> Limit {
+    let battery = power
+        .percent
+        .zip(power.minutes_to_empty)
+        .and_then(|(percent, to_empty)| minutes_until_floor(to_empty, percent, floor_percent));
+    match battery {
+        Some(minutes) if minutes < lease_minutes => Limit::Battery(minutes),
+        _ => Limit::Lease(lease_minutes),
+    }
+}
+
+/// The line `pack` closes on: what this Mac has, and what happens when it runs out.
+///
+/// The battery figure leads because it is the fact the reader can check against the icon in their
+/// own menu bar, and a number they can verify is what makes the projection beside it credible.
+///
+/// Only the battery branch says "about". The lease is arithmetic on a deadline and the battery is a
+/// borrowed estimate, and dressing the second up as the first is the whole failure this replaces.
+fn opening_line(
+    power: &PowerStatus,
+    limit: Limit,
+    floor_percent: u8,
+    expires_at: DateTime<Utc>,
+) -> String {
+    let charge = match power.percent {
+        Some(percent) => format!("Battery {percent}%. "),
+        None => String::new(),
+    };
+    match limit {
+        Limit::Battery(minutes) => format!(
+            "{charge}About {} before it reaches {floor_percent}%, when this Mac sleeps and running work stops.",
+            format_duration(minutes)
+        ),
+        Limit::Lease(minutes) => format!(
+            "{charge}Awake for {}, or until the battery hits {floor_percent}%. Ends {}.",
+            format_duration(minutes),
+            format_deadline(expires_at)
+        ),
+    }
 }
 
 /// Refuse to pack a Mac the watcher would release on its first heartbeat.
@@ -691,6 +757,13 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths, config: &Con
                 silence_tolerance(config.session.heartbeat_seconds)
             ))
         ));
+        // Above the network line on purpose. Being offline is something the reader waits out; this
+        // is the one thing in `status` that asks them to act, and it has a deadline.
+        if session.checkpoint_requested_at.is_some() {
+            output.warn(
+                "Winding down. Stop starting new work and write down where you got to — this Mac sleeps soon, and everything running stops with it.",
+            );
+        }
         if !session.online {
             output.step("Offline right now. This Mac is still awake, but nothing can reach it.");
         }
@@ -1658,5 +1731,62 @@ mod tests {
         // A session that never recorded a pid never had a watcher to lose.
         session.daemon_pid = None;
         assert!(!watcher_is_running(&session));
+    }
+
+    /// Real `pmset -g batt` output, so the parsing and the arithmetic are exercised together.
+    fn battery(line: &str) -> rucksack_core::power::PowerStatus {
+        rucksack_core::power::parse_battery(line).unwrap()
+    }
+
+    /// The failure this replaced: a full day of lease quoted at a Mac with an afternoon of charge.
+    ///
+    /// 35% with three hours to empty is about two and a quarter hours to a 10% floor — which is what
+    /// someone deciding whether to close the lid needs to hear, not "24 hours".
+    #[test]
+    fn pack_reports_the_battery_when_it_is_the_shorter_limit() {
+        let power = battery(
+            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t35%; discharging; 3:00 remaining present: true",
+        );
+
+        assert_eq!(opening_limit(1_440, &power, 10), Limit::Battery(128));
+        assert_eq!(
+            opening_line(&power, Limit::Battery(128), 10, Utc::now()),
+            "Battery 35%. About 2h 8m before it reaches 10%, when this Mac sleeps and running work stops."
+        );
+    }
+
+    /// A ninety-minute trip on a healthy battery is bounded by what the user asked for, and that
+    /// line still carries the wall-clock deadline it always did.
+    #[test]
+    fn pack_reports_the_lease_when_the_battery_outlasts_it() {
+        let power = battery(
+            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t95%; discharging; 8:00 remaining present: true",
+        );
+
+        assert_eq!(opening_limit(90, &power, 10), Limit::Lease(90));
+        assert!(opening_line(&power, Limit::Lease(90), 10, Utc::now())
+            .starts_with("Battery 95%. Awake for 1h 30m, or until the battery hits 10%. Ends "));
+    }
+
+    /// On mains power, and for a minute after a wake, macOS offers no estimate. rucksack invents
+    /// none either, and falls back to the one limit it can still state exactly.
+    #[test]
+    fn without_an_estimate_only_the_lease_is_claimed() {
+        let power = battery(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t80%; charging; 1:23 remaining present: true",
+        );
+
+        assert_eq!(opening_limit(1_440, &power, 10), Limit::Lease(1_440));
+    }
+
+    /// A Mac whose gauge says nothing still gets a usable line; it just cannot open with a figure
+    /// the reader could have checked against their own menu bar.
+    #[test]
+    fn a_silent_gauge_still_produces_a_line() {
+        let power = battery("Now drawing from 'AC Power'\n");
+
+        assert_eq!(opening_limit(1_440, &power, 10), Limit::Lease(1_440));
+        assert!(opening_line(&power, Limit::Lease(1_440), 10, Utc::now())
+            .starts_with("Awake for 24 hours, or until the battery hits 10%."));
     }
 }
