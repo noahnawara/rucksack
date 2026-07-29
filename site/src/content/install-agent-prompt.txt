@@ -1,28 +1,19 @@
-Paste this to your coding agent (Claude Code, Codex, or Cursor). Not into a terminal.
+Set up rucksack on this Mac. Run exactly this, with both crate names, and give it a couple of
+minutes to compile:
 
-Install rucksack on this Mac. Run exactly this, with both crate names:
+cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.8 rucksack-cli rucksack-helper
 
-cargo install --locked --force --git https://github.com/noahnawara/rucksack --tag v0.1.0-alpha.7 rucksack-cli rucksack-helper
+Both names matter. Drop rucksack-helper and the install still reports success, but rucksack
+can never pack. Do not run rucksack pack to check it worked: that takes a real lease and moves
+me onto my hotspot. rucksack --version is the safe check.
 
-Both names matter. Drop rucksack-helper and the install still reports success, but rucksack can
-never pack. It takes a couple of minutes and nothing needs adding to my PATH. Don't run `rucksack
-pack` to check it worked: that takes a real lease and moves me onto my hotspot. `rucksack --version`
-is the safe check.
+Then tell me to run rucksack helper install myself, in a terminal window. Do not try to run it
+for me, you have nowhere to type the password it asks for.
 
-Then tell me to run `rucksack helper install` myself, in a terminal window. It asks for my password
-once. Don't try to run it for me, you have nowhere to type a password.
+Put the paragraph below in the file you load every session, ~/.claude/CLAUDE.md for Claude Code
+or ~/.codex/AGENTS.md for Codex:
 
-From then on, when I say I'm leaving, heading out, or have to go: run `rucksack pack` straight away,
-don't ask me first, and tell me the last line it prints. If it's waiting for a network, tell me
-that, and that the lid stays open until it says Packed. It finishes by itself, so never run it
-twice. When I'm back, run `rucksack unpack` and read me the trip line with the numbers exactly as
-printed.
-
-The first time I finish a trip, unpack says so. When it does, ask me whether I want to star the
-project on GitHub, and ask it properly: use your question tool, the one that gives me buttons to
-click, not a line of chat I will scroll past. Run `rucksack star` if I say yes, drop it for good if
-I say no, and only ever ask once.
-
-Then put the two paragraphs above into the file you load every session, ~/.claude/CLAUDE.md for
-Claude Code or ~/.codex/AGENTS.md for Codex. Pasting it here only lasts this conversation, and "I
-have to go" is not something I want to explain twice.
+When I say I am leaving, heading out, or have to go: run rucksack pack straight away, do not
+ask me first, and tell me the last line it prints. If it is waiting, tell me what it is asking
+for. It finishes by itself, so never run it twice. When I am back, run rucksack unpack and read
+me the trip line with the numbers exactly as printed.

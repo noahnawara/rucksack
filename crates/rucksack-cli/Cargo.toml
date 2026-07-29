@@ -18,7 +18,7 @@ anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 libc.workspace = true
-rucksack-core = { path = "../rucksack-core", version = "=0.1.0-alpha.7" }
+rucksack-core = { path = "../rucksack-core", version = "=0.1.0-alpha.8" }
 serde_json.workspace = true
 tempfile.workspace = true
 uuid.workspace = true

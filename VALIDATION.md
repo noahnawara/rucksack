@@ -1,6 +1,6 @@
 # Validation status
 
-Validation date: **2026-07-26**.
+Validation date: **2026-07-29**.
 
 This source tree has been compiled and tested on macOS. The compiler gate below passes,
 including strict Clippy and the release profile. A real privileged helper and a short
@@ -17,7 +17,7 @@ Counts include repository dotfiles and exclude `.git`, `target`, `site/node_modu
 - 8 TOML files;
 - 4 JSON files;
 - 1 launchd plist;
-- 4 YAML configuration files, including 2 GitHub Actions workflows;
+- 5 YAML configuration files, including 2 GitHub Actions workflows;
 - 23 Markdown files.
 
 ## Completed automated checks
