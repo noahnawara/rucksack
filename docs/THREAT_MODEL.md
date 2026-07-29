@@ -143,9 +143,10 @@ or release reason. It does not contain:
 - credentials;
 - pairing codes, which are printed and never written.
 
-One exception is worth naming: Codex Remote Control is started as a child process with
-rucksack’s daemon log as its standard output and error, so whatever that command writes lands
-in `~/Library/Logs/Rucksack/daemon.log`.
+One exception is worth naming: Codex Remote Control is started as a child process with a
+rucksack log as its standard output and error, so whatever that command writes lands in
+`~/Library/Logs/Rucksack/remote-control.log`. It has its own file rather than sharing the
+watcher's, so a Codex failure is never mistaken for a watcher crash.
 
 Session state and logs stay on this Mac and are never uploaded by rucksack.
 

@@ -64,8 +64,7 @@ For a PR target, classify from the `files` array of `gh pr view`, not from a loc
 | Otherwise, Markdown under `docs/**`, `documentation/**`, or the repository root | **Docs route.** One question: does the prose still match the code? Keep the finding standard, the output shape, and the verdict; this route has no command gate. |
 
 Markdown under `assets/adapters/**` is not docs. `rucksack-core` compiles it into the binary with
-`include_str!` (`crates/rucksack-core/src/policy.rs:116`,
-`crates/rucksack-core/src/agent/cursor.rs:20`), so a change there is a behavior change and takes
+`include_str!` (`crates/rucksack-core/src/skill.rs:17`), so a change there is a behavior change and takes
 the project route.
 
 ### Site route

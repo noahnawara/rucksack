@@ -40,7 +40,7 @@ No privilege. Shared types and pure logic:
 - `protocol` — the helper request, response, and status types;
 - `skill` — the marker-guarded agent skill file;
 - `codex` — finding Codex and building its Remote Control arguments;
-- `system` — bounded command execution, `which`, process listing, and the current UID.
+- `system` — bounded command execution, `which`, and process listing.
 
 There is no agent module and no adapter machinery.
 
@@ -135,7 +135,8 @@ record.
 
 One newline-delimited JSON request per connection, at most 32 connections at once, 256 KiB
 per request, and a ten-second read and write timeout. The operations are `acquire`, `renew`,
-`reassert`, `release`, `recover`, and `status`.
+`release`, `recover`, and `status`. There is no `reassert`: reasserting is something the helper
+does to itself, from the watchdog and the power-event thread, and no client ever asked for it.
 
 ```json
 {
@@ -205,7 +206,9 @@ when `SleepDisabled` is not `1`.
 
 - an IOKit power-source notification wakes the helper;
 - it writes the setting immediately, again after a short debounce, and then verifies;
-- any failure restores the baseline and reports that it did.
+- a failure is reported and left to the watchdog, which reasserts on the same condition five
+  seconds later. Ending a trip takes a failure that persists, not one slow `pmset` during the
+  power transition — which is the busiest moment this path ever runs in.
 
 ### Release
 

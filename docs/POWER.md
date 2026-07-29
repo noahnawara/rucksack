@@ -65,21 +65,25 @@ rucksack changes only the sleep decision it needs to change.
 
 In order, from `pack_inner` in `crates/rucksack-cli/src/flow.rs`:
 
-1. Refuse if rucksack already holds a lease.
-2. Refuse if `SleepDisabled` is already 1.
-3. Read the battery: refuse at or below the sleep floor, warn at or below the warning
+1. Install the rucksack skill, best-effort and never fatal. First, because the first `pack` is
+   the one that needs it most: the skill is what tells an agent how to behave while `pack` is
+   waiting, and writing it last gave it to everyone except the person who had not packed before.
+2. Refuse if rucksack already holds a live lease — one whose watcher is still running and still
+   writing. A session whose watcher died does not block a new `pack`; it says so and continues.
+3. Merge the command-line options over the saved configuration and validate the result.
+4. Refuse if `SleepDisabled` is already 1.
+5. Read the battery: refuse at or below the sleep floor, warn at or below the warning
    threshold. A gauge that reports nothing is silence, not a refusal.
-4. Read thermal pressure: refuse on anything that would end a lease, so `pack` cannot accept
+6. Read thermal pressure: refuse on anything that would end a lease, so `pack` cannot accept
    a Mac the watcher would release on its first heartbeat. An unreported level is silence.
-5. Install the power helper if it is absent. This is the one macOS password prompt.
-6. Reach a commute network.
-7. Remember that network as the hotspot if none was saved yet.
-8. Acquire the helper lease.
-9. Start Codex Remote Control as a fire-and-forget child. Failure warns; only
-   `--require-remote` makes it fatal.
-10. Write the session state, spawn the watcher, and wait for its first heartbeat.
-11. Install the rucksack skill, best-effort and never fatal.
-12. Print how long the Mac stays awake, then “Packed. Close the lid and go.”
+7. Install the power helper if it is absent. This is the one macOS password prompt.
+8. Reach a commute network.
+9. Remember that network as the hotspot if none was saved yet.
+10. Acquire the helper lease.
+11. Start Codex Remote Control as a fire-and-forget child. Failure warns; only
+    `--require-remote` makes it fatal.
+12. Write the session state, spawn the watcher, and wait for its first heartbeat.
+13. Print how long the Mac stays awake, then “Packed. Close the lid and go.”
 
 If any step after the lease fails, `pack` rolls back: it stops the watcher, releases the
 lease, and clears the session state.

@@ -121,10 +121,11 @@ Leaving a hot Mac awake indefinitely is unacceptable.
 ### 6. Integrate through the files an agent already reads
 
 Agent integration is one marker-guarded skill file, written to
-`~/.agents/skills/rucksack/` and `~/.claude/skills/rucksack/`, and only where that
-agent's directory already exists. No hooks, no rules files, no keystrokes injected into
-a terminal, no pixels parsed out of an IDE. A file rucksack does not own is never
-overwritten, and installing retires the older `commute-mode` skill it wrote itself.
+`~/.agents/skills/rucksack/`, `~/.claude/skills/rucksack/`, and
+`~/.cursor/skills-cursor/rucksack/`, and only where that agent's directory already exists. No
+hooks, no rules files, no keystrokes injected into a terminal, no pixels parsed out of an IDE.
+A file rucksack does not own is never overwritten, and installing retires the older
+`commute-mode` skill it wrote itself.
 
 ### 7. Local by default
 

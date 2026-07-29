@@ -26,12 +26,9 @@ The current tree passes:
 
 ```sh
 cargo fmt --all -- --check
-cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-cargo clippy --workspace --all-targets --release --locked -- -D warnings
 cargo test --workspace --release --locked
-cargo build --workspace --release --locked
 cd site && npm audit --audit-level=high
 cd site && npm run build
 cd site && npm run test:e2e
@@ -39,11 +36,17 @@ cd site && npm run test:e2e
 
 Test results:
 
-- 105 debug tests: CLI 40, CLI contract 7, core 47, helper 11;
-- 106 release tests: the same set plus one macOS release-only helper test;
-- 43 end-to-end assertions from `scripts/e2e.sh`, against real leases on this hardware;
-- 16 browser tests and 0 vulnerabilities reported by `npm audit`;
+- every test in the workspace passes in debug and in release, the release run adding one
+  macOS-only helper test that needs a compiled-in team ID;
+- `scripts/e2e.sh` passes against real leases on this hardware;
+- every browser test passes, and `npm audit` reports no vulnerability at high or above;
 - 0 failures.
+
+The gate is "all of it passes", deliberately, and not a count. The counts that used to be here
+went about fifty tests stale without anything noticing, which is the failure mode a validation
+record can least afford: a document whose own arithmetic is wrong is not evidence of anything.
+`cargo test --workspace --locked` prints the current numbers in less time than it takes to read
+this paragraph.
 
 ## What the checks certify
 
