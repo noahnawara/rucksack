@@ -8,7 +8,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use rucksack_core::files::{ensure_private_dir, with_advisory_lock};
 use rucksack_core::network::{
     connect_saved_wifi, reaches_internet, read_default_route, read_iphone_usb_device,
-    read_wifi_status, set_wifi_power, RouteStatus, DEFAULT_INTERNET_PROBE_URL,
+    read_wifi_status, set_wifi_power, RouteStatus,
 };
 use rucksack_core::power::{
     minutes_until_floor, read_power_status, read_sleep_disabled, read_thermal_status, PowerStatus,
@@ -271,10 +271,7 @@ fn opening_line(
 /// macOS declining to report thermal pressure still means silence, not heat.
 fn require_no_thermal_pressure() -> Result<()> {
     let thermal = read_thermal_status().context("Could not read thermal pressure.")?;
-    if thermal.throttled
-        || ends_a_lease(thermal.level)
-        || read_thermal_state().is_some_and(ends_a_lease)
-    {
+    if ends_a_lease(thermal.level) || read_thermal_state().is_some_and(ends_a_lease) {
         anyhow::bail!(
             "This Mac is already too hot, so a closed lid would make it worse.\nLet it cool down, then run `rucksack pack` again."
         );
@@ -377,11 +374,7 @@ fn online(config: &Config, want_name: bool) -> Option<CommuteNetwork> {
     let ssid = want_name
         .then(|| read_wifi_status().ok().and_then(|status| status.ssid))
         .flatten();
-    reaches_internet(
-        DEFAULT_INTERNET_PROBE_URL,
-        config.hotspot.probe_timeout_seconds,
-    )
-    .then_some(CommuteNetwork { route, ssid })
+    reaches_internet(config.hotspot.probe_timeout_seconds).then_some(CommuteNetwork { route, ssid })
 }
 
 /// Has the Mac arrived on the commute network?
@@ -397,11 +390,7 @@ fn arrived(target: &CommuteTarget, config: &Config) -> Option<CommuteNetwork> {
     if !has_switched(target, &route, ssid.as_deref()) {
         return None;
     }
-    reaches_internet(
-        DEFAULT_INTERNET_PROBE_URL,
-        config.hotspot.probe_timeout_seconds,
-    )
-    .then_some(CommuteNetwork { route, ssid })
+    reaches_internet(config.hotspot.probe_timeout_seconds).then_some(CommuteNetwork { route, ssid })
 }
 
 fn ensure_commute_network(
@@ -1667,7 +1656,6 @@ mod tests {
         let session_id = Uuid::new_v4();
         let watcher = ProcessInfo {
             pid: 42,
-            command: "/usr/local/bin/rucksack".to_owned(),
             arguments: format!("/usr/local/bin/rucksack daemon --session-id {session_id}"),
         };
         assert!(is_watcher_for(&watcher, session_id));
@@ -1675,7 +1663,6 @@ mod tests {
 
         let impostor = ProcessInfo {
             pid: 42,
-            command: "/bin/rm".to_owned(),
             arguments: format!("/bin/rm daemon --session-id {session_id}"),
         };
         assert!(!is_watcher_for(&impostor, session_id));

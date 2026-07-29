@@ -6,7 +6,7 @@ use rucksack_core::drain::Drain;
 use rucksack_core::files::{append_line, with_advisory_lock};
 use rucksack_core::network::{
     reaches_internet, read_default_route, read_interface_traffic, read_wifi_status,
-    InterfaceTraffic, DEFAULT_INTERNET_PROBE_URL,
+    InterfaceTraffic,
 };
 use rucksack_core::power::{
     minutes_until_floor, read_power_status, read_thermal_status, PowerSource,
@@ -158,8 +158,7 @@ fn read_health(consecutive_blind_reads: &mut u8) -> Health {
     Health {
         battery_percent: power.as_ref().and_then(|power| power.percent),
         minutes_to_empty: power.as_ref().and_then(|power| power.minutes_to_empty),
-        too_hot: read_thermal_status()
-            .is_ok_and(|thermal| thermal.throttled || ends_a_lease(thermal.level))
+        too_hot: read_thermal_status().is_ok_and(|thermal| ends_a_lease(thermal.level))
             || read_thermal_state().is_some_and(ends_a_lease),
     }
 }
@@ -315,11 +314,8 @@ struct Observed {
 /// is what confines the figure to the commute network.
 fn observe(config: &Config, health: &Health, want_name: bool) -> Observed {
     let route_interface = read_default_route().ok().and_then(|route| route.interface);
-    let online = route_interface.is_some()
-        && reaches_internet(
-            DEFAULT_INTERNET_PROBE_URL,
-            config.hotspot.probe_timeout_seconds,
-        );
+    let online =
+        route_interface.is_some() && reaches_internet(config.hotspot.probe_timeout_seconds);
     let traffic_total = route_interface
         .as_deref()
         .and_then(|interface| read_interface_traffic(interface).ok().flatten())

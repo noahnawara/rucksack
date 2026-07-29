@@ -78,11 +78,6 @@ impl LeaseManager {
                 lease_id,
                 ttl_seconds,
             } => self.renew(caller_uid, lease_id, ttl_seconds),
-            HelperOperation::Reassert { lease_id } => {
-                self.require_owner(caller_uid, lease_id)?;
-                self.reassert_now()?;
-                self.status()
-            }
             HelperOperation::Release {
                 lease_id,
                 reason: _,

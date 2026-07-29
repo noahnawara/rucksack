@@ -107,27 +107,18 @@ pub fn with_advisory_lock<T>(path: &Path, operation: impl FnOnce() -> Result<T>)
     let file = options
         .open(path)
         .with_context(|| format!("Could not open state lock {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsRawFd;
-        loop {
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
-                break;
-            }
-            let error = std::io::Error::last_os_error();
-            if error.kind() != std::io::ErrorKind::Interrupted {
-                return Err(error)
-                    .with_context(|| format!("Could not lock state file {}", path.display()));
-            }
+    use std::os::fd::AsRawFd;
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            break;
         }
-        operation()
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error)
+                .with_context(|| format!("Could not lock state file {}", path.display()));
+        }
     }
-    #[cfg(not(unix))]
-    {
-        let _ = file;
-        let _ = operation;
-        anyhow::bail!("Advisory state locking is unsupported on this platform")
-    }
+    operation()
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
@@ -167,17 +158,11 @@ pub fn remove_if_exists(path: &Path) -> Result<()> {
     }
 }
 
-#[cfg(unix)]
 fn sync_parent(parent: &Path) -> Result<()> {
     File::open(parent)
         .with_context(|| format!("Could not open directory {} for syncing", parent.display()))?
         .sync_all()
         .with_context(|| format!("Could not sync directory {}", parent.display()))
-}
-
-#[cfg(not(unix))]
-fn sync_parent(_parent: &Path) -> Result<()> {
-    Ok(())
 }
 
 pub fn append_line(path: &Path, line: &str) -> Result<()> {

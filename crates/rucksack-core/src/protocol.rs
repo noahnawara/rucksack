@@ -26,9 +26,6 @@ pub enum HelperOperation {
         lease_id: Uuid,
         ttl_seconds: u64,
     },
-    Reassert {
-        lease_id: Uuid,
-    },
     Release {
         lease_id: Uuid,
         reason: String,
