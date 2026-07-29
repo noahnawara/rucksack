@@ -21,7 +21,9 @@ pub struct PowerStatus {
     pub source: PowerSource,
     pub source_label: String,
     pub percent: Option<u8>,
-    pub charging: bool,
+    /// Whether the battery is actually draining, which is the only state in which
+    /// `minutes_to_empty` means what its name says.
+    pub discharging: bool,
     /// What macOS thinks is left before the battery is empty, when it is willing to say.
     ///
     /// Only ever read while discharging. The same field carries time-to-full while charging, and a
@@ -81,17 +83,23 @@ pub fn parse_battery(text: &str) -> Result<PowerStatus> {
         .and_then(|captures| captures.name("percent"))
         .and_then(|value| value.as_str().parse::<u8>().ok())
         .filter(|value| *value <= 100);
-    let lower = text.to_ascii_lowercase();
-    let charging = lower.contains("charging")
-        && !lower.contains("not charging")
-        && !lower.contains("discharging");
+    // Ask whether the battery is draining, not whether it is filling.
+    //
+    // The two are not opposites in `pmset`'s vocabulary, and the gap between them had a wrong answer
+    // in it. `charging && !"not charging" && !"discharging"` was three substring tests trying to
+    // spell one word, and it still missed `finishing charge` — the top-off state a plugged-in Mac
+    // sits in around 99% — because that string says "charge", not "charging". A Mac in it was read as
+    // not charging, so the `H:MM remaining` on that line, which means time-to-full, was reported as
+    // time-to-empty. `discharging` is the one state where that field means what rucksack wants, and
+    // `pmset` names it in one word.
+    let discharging = text.to_ascii_lowercase().contains("discharging");
 
     Ok(PowerStatus {
         source,
         source_label,
         percent,
-        charging,
-        minutes_to_empty: parse_minutes_to_empty(text, charging),
+        discharging,
+        minutes_to_empty: parse_minutes_to_empty(text, discharging),
         raw: text.to_owned(),
     })
 }
@@ -101,10 +109,10 @@ pub fn parse_battery(text: &str) -> Result<PowerStatus> {
 /// `pmset` prints `H:MM remaining` on the battery row, and `(no estimate)` while it is still working
 /// one out — which it also does for a minute or so after waking or after the load changes sharply.
 ///
-/// Read only while discharging, because the same field means time-to-full while charging. `0:00` is
+/// Read only while discharging, because the same field means time-to-full otherwise. `0:00` is
 /// how macOS spells "no estimate yet" rather than "empty now", so it is not an answer either.
-fn parse_minutes_to_empty(text: &str, charging: bool) -> Option<u64> {
-    if charging {
+fn parse_minutes_to_empty(text: &str, discharging: bool) -> Option<u64> {
+    if !discharging {
         return None;
     }
     let remaining = Regex::new(r"(?P<hours>\d{1,2}):(?P<minutes>\d{2})\s+remaining").ok()?;
@@ -246,7 +254,7 @@ mod tests {
         .unwrap();
         assert_eq!(status.source, PowerSource::Battery);
         assert_eq!(status.percent, Some(78));
-        assert!(!status.charging);
+        assert!(status.discharging);
     }
 
     /// The line this exists for, exactly as a discharging Mac prints it.
@@ -267,6 +275,20 @@ mod tests {
             "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t57%; charging; 1:23 remaining present: true",
         )
         .unwrap();
+        assert_eq!(status.minutes_to_empty, None);
+    }
+
+    /// The top-off state, which says "charge" and not "charging".
+    ///
+    /// It is the one `pmset` word the old three-substring guard could not spell, so a Mac five
+    /// minutes from a full battery reported five minutes until it fell asleep.
+    #[test]
+    fn finishing_charge_is_not_time_left() {
+        let status = parse_battery(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t99%; finishing charge; 0:05 remaining present: true",
+        )
+        .unwrap();
+        assert!(!status.discharging);
         assert_eq!(status.minutes_to_empty, None);
     }
 

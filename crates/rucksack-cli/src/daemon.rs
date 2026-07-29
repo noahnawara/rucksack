@@ -350,10 +350,27 @@ fn release(
         if session.id != session_id || !session.is_holding_a_lease() {
             return Ok(());
         }
-        let status = helper
-            .release(session.lease_id, reason)
-            .context("Could not restore normal sleep.")?;
-        if status.active {
+        // Ask, and then settle for finding out the lease is already gone.
+        //
+        // On the ordinary path — a session running out its own time limit — the helper gets there
+        // first: its watchdog checks the hard deadline every five seconds and the watcher only wakes
+        // every thirty, so `release` usually answers "no active lease". Treating that refusal as a
+        // failure meant `?` propagated, `phase` was never set to `Released`, and the record kept
+        // claiming a lease that nothing held. The next `pack` then refused with a deadline already in
+        // the past, and `unpack` printed no trip line at all, because `report_outcome` reads a session
+        // still holding a lease as an inconsistency rather than a trip. Every `--for 45m` user got
+        // silence on the way home.
+        //
+        // What matters is the lease being gone, not who ended it. This is the same order
+        // `release_through_helper` uses in `flow`: release, then believe status.
+        let released = match helper.release(session.lease_id, reason) {
+            Ok(status) => !status.active,
+            Err(error) => match helper.status() {
+                Ok(status) => !status.is_some_and(|status| status.active),
+                Err(_) => return Err(error).context("Could not restore normal sleep."),
+            },
+        };
+        if !released {
             anyhow::bail!("The power helper still reports an active lease after releasing it.");
         }
         SessionState::update(paths, session_id, |session| {
