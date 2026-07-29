@@ -39,8 +39,8 @@ Only bother the user when the command actually fails, and then give them the one
 About ten minutes before the Mac sleeps, `rucksack status` starts printing:
 
 ```text
-! Winding down. Stop starting new work and write down where you got to — this Mac sleeps
-  soon, and everything running stops with it.
+! Winding down. This Mac sleeps soon, and everything running stops with it.
+Write down where you got to. Plugging in calls this off.
 ```
 
 That is a deadline, not a status. The Mac is about to sleep, and when it does every running task

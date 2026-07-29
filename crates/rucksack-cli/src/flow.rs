@@ -760,9 +760,9 @@ pub fn status(args: &StatusArgs, output: &Output, paths: &AppPaths, config: &Con
         // Above the network line on purpose. Being offline is something the reader waits out; this
         // is the one thing in `status` that asks them to act, and it has a deadline.
         if session.checkpoint_requested_at.is_some() {
-            output.warn(
-                "Winding down. Stop starting new work and write down where you got to — this Mac sleeps soon, and everything running stops with it.",
-            );
+            output
+                .warn("Winding down. This Mac sleeps soon, and everything running stops with it.");
+            output.step("Write down where you got to. Plugging in calls this off.");
         }
         if !session.online {
             output.step("Offline right now. This Mac is still awake, but nothing can reach it.");

@@ -12,7 +12,8 @@ use rucksack_core::power::{
     minutes_until_floor, read_power_status, read_thermal_status, PowerSource,
 };
 use rucksack_core::state::{
-    silence_tolerance, SessionPhase, SessionState, CHECKPOINT_LEAD_MINUTES,
+    silence_tolerance, SessionPhase, SessionState, CHECKPOINT_CLEAR_MINUTES,
+    CHECKPOINT_LEAD_MINUTES,
 };
 use rucksack_core::{AppPaths, Config};
 use std::thread;
@@ -74,11 +75,14 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
 
         let observed = observe(config, &health, session.hotspot.is_none());
         traffic = traffic.advance(observed.route_interface.as_deref(), observed.traffic_total);
-        let ending_soon = minutes_remaining(
+        let remaining = minutes_remaining(
             session.remaining_minutes(Utc::now()),
             battery_minutes_remaining,
-        ) <= CHECKPOINT_LEAD_MINUTES;
+        );
+        let ending_soon = remaining <= CHECKPOINT_LEAD_MINUTES;
+        let reprieved = remaining > CHECKPOINT_CLEAR_MINUTES;
         let announcing = ending_soon && session.checkpoint_requested_at.is_none();
+        let calling_off = reprieved && session.checkpoint_requested_at.is_some();
         SessionState::update(paths, session_id, |session| {
             session.last_heartbeat_at = Some(Utc::now());
             session.battery_percent = observed.battery_percent;
@@ -104,10 +108,17 @@ pub fn run(session_id: Uuid, paths: &AppPaths, config: &Config) -> Result<()> {
                 session.last_event = Some(
                     "winding down; write down where you got to before this Mac sleeps".to_owned(),
                 );
+            } else if reprieved && session.checkpoint_requested_at.is_some() {
+                session.checkpoint_requested_at = None;
+                session.last_event =
+                    Some("the end moved back; this Mac is not sleeping soon".to_owned());
             }
         })?;
         if announcing {
             log(paths, "winding down; checkpoint requested")?;
+        }
+        if calling_off {
+            log(paths, "wind-down called off; the end moved back")?;
         }
 
         thread::sleep(Duration::from_secs(config.session.heartbeat_seconds));
@@ -560,6 +571,29 @@ mod tests {
         assert!(
             minutes_remaining(1_440, Some(CHECKPOINT_LEAD_MINUTES + 1)) > CHECKPOINT_LEAD_MINUTES
         );
+    }
+
+    /// Plugging in on the train is the case the warning has to be able to take back.
+    ///
+    /// Both battery sources go quiet on mains power, so the lease clock takes over and what is left
+    /// jumps to hours. Without this, `status` would go on saying the Mac sleeps soon for the rest of
+    /// a session spent on a charger.
+    #[test]
+    fn mains_power_clears_the_projection_and_reprieves_the_session() {
+        let charged = minutes_remaining(1_440, None);
+
+        assert!(charged > CHECKPOINT_CLEAR_MINUTES);
+        assert!(charged > CHECKPOINT_LEAD_MINUTES);
+    }
+
+    /// A projection wobbling either side of the lead must not retract a deadline every heartbeat,
+    /// so the way back is deliberately further out than the way in.
+    #[test]
+    fn a_wobble_over_the_lead_does_not_call_the_warning_off() {
+        let wobble = minutes_remaining(1_440, Some(CHECKPOINT_LEAD_MINUTES + 1));
+
+        assert!(wobble > CHECKPOINT_LEAD_MINUTES);
+        assert!(wobble <= CHECKPOINT_CLEAR_MINUTES);
     }
 
     fn at(minute: i64) -> chrono::DateTime<Utc> {

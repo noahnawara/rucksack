@@ -35,6 +35,19 @@ const MAX_SILENCE_SECONDS: u64 = 3600;
 /// watcher delivers it. Two copies of the number is one broken promise waiting to happen.
 pub const CHECKPOINT_LEAD_MINUTES: u64 = 10;
 
+/// How far the end must recede before a wind-down is called off.
+///
+/// Twice the lead, because the two ways back over the line are not alike. A projection that wobbles
+/// a minute either side of the threshold is noise, and retracting a deadline for it would have an
+/// agent put its work down and pick it up again every heartbeat.
+///
+/// Plugging in on the train is not noise. Both battery sources go quiet on mains power — macOS
+/// stops reporting time-to-empty, and a rising gauge clears the measured drops — so the lease clock
+/// takes over and what is left jumps to hours. Without a way back, `status` would go on saying this
+/// Mac sleeps soon for the rest of a session spent on a charger, which is exactly the unmeasured
+/// claim the projection exists to avoid.
+pub const CHECKPOINT_CLEAR_MINUTES: u64 = CHECKPOINT_LEAD_MINUTES * 2;
+
 /// How long a session may go quiet before its recorded figures stop being current.
 pub fn silence_tolerance(heartbeat_seconds: u64) -> Duration {
     Duration::seconds(
@@ -106,10 +119,11 @@ pub struct SessionState {
     pub battery_minutes_remaining: Option<u64>,
     /// When the watcher first saw the end coming close enough to be worth announcing.
     ///
-    /// Set once and never cleared, because this is a warning rather than a gauge: a projection that
-    /// wobbles back above the threshold for one heartbeat must not retract a deadline an agent has
-    /// already started packing up for. The number beside it keeps moving; the fact that the end is
-    /// near does not un-happen.
+    /// Sticky rather than a gauge, and asymmetric on purpose: set at `CHECKPOINT_LEAD_MINUTES` and
+    /// cleared only past `CHECKPOINT_CLEAR_MINUTES`. A projection wobbling either side of the
+    /// threshold must not retract a deadline an agent has already started packing up for, but a Mac
+    /// that has been plugged in genuinely is not ending soon, and saying otherwise would be a state
+    /// nobody measured.
     ///
     /// `#[serde(default)]` for the same reason as the fields above it.
     #[serde(default)]

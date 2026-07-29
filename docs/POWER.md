@@ -159,8 +159,12 @@ restores normal sleep. It does not attempt to finish “one last build.”
 
 The lease clock and the battery are separate limits, and on a commute the battery is nearly
 always the smaller: a 24 hour lease on a Mac with four hours of charge never had 24 hours to
-give. `status` therefore reports whichever runs out first, and marks a projected figure with
-`~` so it does not read like arithmetic on a known deadline.
+give. `pack` and `status` both report whichever runs out first, and mark a projected figure
+as an estimate so it does not read like arithmetic on a known deadline.
+
+`pack` answers before any watcher exists, so it has no drain of its own to project from and
+borrows the same scaled macOS estimate described below. Only the lease branch quotes a wall
+clock deadline; the battery branch says "about", because that is all it is.
 
 The watcher projects from drain it has actually seen. Percent readings are whole numbers, so
 at a realistic rate the gauge only moves every few minutes; differencing every heartbeat
@@ -185,6 +189,25 @@ other; both are estimates, and both are marked `~`.
 
 A session whose heartbeat has gone quiet stops claiming a battery figure nobody is still
 taking.
+
+## Winding down
+
+Ten minutes before whichever limit binds, the watcher records the wind-down on the session and
+`status` leads with it. The end is otherwise silent: every running task stops the moment the Mac
+sleeps, mid-step, and whatever lived only in a conversation goes with it. The warning is what
+gives an agent time to write its state to disk instead.
+
+It is not a release condition. The list above is still the whole of what ends a lease, and a
+wind-down that reaches the floor ends the session there in the ordinary way.
+
+The threshold is asymmetric: set at ten minutes, cleared only past twenty. A projection wobbling
+either side of the line must not retract a deadline an agent has already begun packing up for,
+while a Mac that has been plugged in genuinely is not ending soon — both battery sources go quiet
+on mains power, the lease clock takes over, and the warning is called off.
+
+rucksack cannot interrupt a running agent; no such channel exists for Codex, Claude Code, or
+Cursor. The warning lands where an agent already looks, and the installed skill says what to do
+about it.
 
 ## Thermal pressure
 
