@@ -1,13 +1,14 @@
-# Every tracked file in this repository, as of the last release.
+# Every tracked file in this repository, as of the commit that last regenerated this.
 #
 # Regenerate with scripts/manifest.sh --write, verify with scripts/manifest.sh --check.
-# Between releases this describes the released tree and not your working copy, so a
-# difference here is expected rather than a fault. scripts/set-version.sh rewrites it,
-# and the release workflow refuses to publish a tree it disagrees with.
+# It is rewritten on demand and by scripts/set-version.sh, so between one release and
+# the next it describes some commit on the way there rather than your working copy: a
+# difference here is expected and not a fault. The release workflow is where it has to
+# be true, and refuses to publish a tree it disagrees with.
 36a072415ce3f7226bec4e5be3494e3ad2f9931ef107f8b5c03decb8d966e55d  .agents/skills/rucksack-design/SKILL.md
 044f5619c1b9f5d7b8cd4fa98cf655758832424c63ad3d4e20c84130b6288c5e  .agents/skills/rucksack-design/agents/openai.yaml
 22291f9a08bff4503ee169cd55ed0cfb79bb7106b46a81f8068ad2fc56c8cf1b  .cargo/config.toml
-c522ce7cb1c2dd57d7bfdcb4d7b46431eefc0d370d179262595f1c12459de60f  .claude/skills/rucksack-pre-push-review/SKILL.md
+3866d802cd8e8a301c62399af6d890ef54ff9d48baf21b37c11410da3d8c04de  .claude/skills/rucksack-pre-push-review/SKILL.md
 278df25d8e0a07850523ea69973983b5e5d80c9d0c81ce793f12c9194b3fdc1c  .claude/skills/rucksack-pre-push-review/agents/openai.yaml
 88e4c9d5ed5921beb6fccb08e8bab9492a48d95d4b7d96d7dd634a112e5772b9  .github/dependabot.yml
 79b101dbe55b63f921e50c4c621f50fd8ca83841be4d45afbd2f58c296a45a34  .github/workflows/ci.yml
@@ -22,7 +23,7 @@ b3d9f3c526ce1ebe57a7d0f2d8a64f08d2c2ded208d4f5ff11c58dfd6cb2d7fd  LICENSE
 1dcd484c1fd1d4f85a7237ecb10aaf60fd7130de14052c556144f47cebec1219  README.md
 f3610f1e1b15970174c657fb9331ba2e1d45fc4f5bf58a8513b91ac7d3b98b35  SECURITY.md
 88629e340fdc55dea4ad2da683298b5f03e1c4a6c90268478ebf2ac2aae648ae  SUPPORT.md
-e31abc83c26a0da3b735c423d8fe30ea6fabed137763e2e3e604afbbd0561448  VALIDATION.md
+d332137a0594f3566973333c90a611ddd51d224891df2f8797153d0811591a57  VALIDATION.md
 82e5c86cb5d8a971098a2dfef2cf05852be9d576397025120ec44a6e39979e5f  assets/adapters/shared/rucksack/SKILL.md
 cdb3e50d082fc153d8e41d2a7e150ce71c275ff2d50e52983b998e4fff9ab71a  assets/launchd/io.rucksack.helper.plist
 6c8ae56aa3119b77451f9a2110d2d68628805493ecbdf93c835e2bc16c1b985c  assets/social/github-social-preview.png
@@ -75,7 +76,7 @@ f3e66b269f05307bc114c3c2d7b0210b9babe7ab33c41c2a4c6a5efd4bf5ad4a  docs/adr/0002-
 0a554c203a3d9a9e757d11a5cd8c5e1d6011da4593ee365f274c09a49fd83c59  scripts/build-macos-package.sh
 370453aba367640053a657f33474a04c82708eeff00109c68485d7edd7761352  scripts/e2e.sh
 cf139b79c32a21ec1566b424b05e7a78a14160263ea4bf53085700236a3681ff  scripts/install.sh
-947ed2c510fd56c2838ffe641925d2d98cfb5979313e66e6f57cf662e3bb2c37  scripts/manifest.sh
+e59970ab16b1b254c326d2a732d8d6b8786b628a02a9ff56e1f16d67fa2aaf38  scripts/manifest.sh
 b885a55a98a73a2bf7e8ee5307387945396fdd838a87a40c4f325a5e23d4dc28  scripts/package/macos/postinstall
 71984962110bb2a52b0e04e059f48e0cab1efb337f0c80c1f14e59c6e2ada6f0  scripts/package/macos/preinstall
 d3ade4b06f202773b8d8f912d5d4d38d23373f1c838fcc34ee5daad5a80c56eb  scripts/set-version.sh

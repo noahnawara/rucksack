@@ -65,12 +65,13 @@ listed_files() {
 
 if [ "$mode" = --write ]; then
     {
-        echo "# Every tracked file in this repository, as of the last release."
+        echo "# Every tracked file in this repository, as of the commit that last regenerated this."
         echo "#"
         echo "# Regenerate with scripts/manifest.sh --write, verify with scripts/manifest.sh --check."
-        echo "# Between releases this describes the released tree and not your working copy, so a"
-        echo "# difference here is expected rather than a fault. scripts/set-version.sh rewrites it,"
-        echo "# and the release workflow refuses to publish a tree it disagrees with."
+        echo "# It is rewritten on demand and by scripts/set-version.sh, so between one release and"
+        echo "# the next it describes some commit on the way there rather than your working copy: a"
+        echo "# difference here is expected and not a fault. The release workflow is where it has to"
+        echo "# be true, and refuses to publish a tree it disagrees with."
         tracked_files | tr '\n' '\0' | xargs -0 shasum -a 256
     } >"$MANIFEST"
     echo "wrote $MANIFEST: $(listed_files | wc -l | tr -d ' ') files"
