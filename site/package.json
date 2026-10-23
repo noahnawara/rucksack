@@ -23,7 +23,7 @@
     "test": "npm run build && npm run test:e2e"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.12.1",
+    "@axe-core/playwright": "4.14.0",
     "@fontsource-variable/dm-sans": "5.3.0",
     "@fontsource-variable/doto": "5.3.0",
     "@playwright/test": "1.61.1",
